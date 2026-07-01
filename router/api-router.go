@@ -3,6 +3,7 @@ package router
 import (
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/service/authz"
@@ -329,6 +330,10 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/export", middleware.AdminAuth(), controller.ExportAllLogs)
 		logRoute.GET("/self/export", middleware.UserAuth(), controller.ExportUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
+		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+			logRoute.GET("/hourly", middleware.CslHourlyAuth(), controller.GetAllCslHourly)
+			logRoute.GET("/self/hourly", middleware.CslHourlyAuth(), controller.GetUserCslHourly)
+		}
 
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())
