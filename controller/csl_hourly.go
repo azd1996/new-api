@@ -67,7 +67,13 @@ func handleCslHourly(c *gin.Context, isAdmin bool) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, rows)
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"message":     "",
+		"data":        rows,
+		"query_start": startTimestamp,
+		"query_end":   endTimestamp,
+	})
 }
 
 // GetAllCslHourly returns csl_hourly rows for every user within the caller's

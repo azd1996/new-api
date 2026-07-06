@@ -13,9 +13,11 @@ import (
 )
 
 type cslHourlyResponse struct {
-	Success bool              `json:"success"`
-	Message string            `json:"message"`
-	Data    []model.CslHourly `json:"data"`
+	Success    bool              `json:"success"`
+	Message    string            `json:"message"`
+	Data       []model.CslHourly `json:"data"`
+	QueryStart int64             `json:"query_start"`
+	QueryEnd   int64             `json:"query_end"`
 }
 
 func setupCslHourlyControllerTestDB(t *testing.T) {
@@ -50,6 +52,7 @@ func setupCslHourlyControllerTestDB(t *testing.T) {
 
 func decodeCslHourlyResponse(t *testing.T, recorder *httptest.ResponseRecorder) cslHourlyResponse {
 	t.Helper()
+	t.Logf("csl hourly response: status=%d body=%s", recorder.Code, recorder.Body.String())
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var payload cslHourlyResponse
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
@@ -143,6 +146,8 @@ func TestGetAllCslHourlyRestrictsToAuthenticatedGroup(t *testing.T) {
 
 	payload := decodeCslHourlyResponse(t, recorder)
 	require.True(t, payload.Success, payload.Message)
+	assert.Equal(t, int64(3600), payload.QueryStart)
+	assert.Equal(t, int64(7200), payload.QueryEnd)
 	require.Len(t, payload.Data, 2)
 	for _, row := range payload.Data {
 		assert.Equal(t, "vip", row.GroupName)
@@ -161,6 +166,8 @@ func TestGetUserCslHourlyRestrictsToAuthenticatedUsernameAndToken(t *testing.T) 
 
 	payload := decodeCslHourlyResponse(t, recorder)
 	require.True(t, payload.Success, payload.Message)
+	assert.Equal(t, int64(3600), payload.QueryStart)
+	assert.Equal(t, int64(7200), payload.QueryEnd)
 	require.Len(t, payload.Data, 1)
 	assert.Equal(t, "alice", payload.Data[0].Username)
 	assert.Equal(t, "primary", payload.Data[0].TokenName)
