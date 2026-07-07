@@ -1,9 +1,6 @@
 package router
 
 import (
-	"os"
-	"strings"
-
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
@@ -18,25 +15,6 @@ func SetRelayRouter(router *gin.Engine) {
 	router.Use(middleware.DecompressRequestMiddleware())
 	router.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	router.Use(middleware.StatsMiddleware())
-
-	registerRelayRouter(router.Group(""))
-	if basePath := getBasePath(); basePath != "" {
-		registerRelayRouter(router.Group(basePath))
-	}
-}
-
-func getBasePath() string {
-	basePath := strings.TrimSpace(os.Getenv("RELAY_BASE_PATH"))
-	if basePath == "" || basePath == "/" {
-		return ""
-	}
-	if !strings.HasPrefix(basePath, "/") {
-		basePath = "/" + basePath
-	}
-	return strings.TrimRight(basePath, "/")
-}
-
-func registerRelayRouter(router gin.IRouter) {
 	// https://platform.openai.com/docs/api-reference/introduction
 	modelsRouter := router.Group("/v1/models")
 	modelsRouter.Use(middleware.RouteTag("relay"))

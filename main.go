@@ -209,10 +209,44 @@ func main() {
 	// Log startup success message
 	common.LogStartupSuccess(startTime, port)
 
-	err = server.Run(":" + port)
+	var handler http.Handler = server
+	if basePath := relayBasePath(); basePath != "" {
+		mux := http.NewServeMux()
+		stripPrefixHandler := http.StripPrefix(basePath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.URL.RawPath = ""
+			server.ServeHTTP(w, r)
+		}))
+		mux.Handle(basePath+"/", stripPrefixHandler)
+		mux.HandleFunc(basePath, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		})
+		// Keep root accessible so the built-in healthcheck (/api/status) still works.
+		mux.Handle("/", server)
+		handler = mux
+	}
+
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: handler,
+	}
+	err = srv.ListenAndServe()
 	if err != nil {
 		common.FatalLog("failed to start HTTP server: " + err.Error())
 	}
+}
+
+func relayBasePath() string {
+	basePath := strings.TrimSpace(os.Getenv("RELAY_BASE_PATH"))
+	if basePath == "" {
+		return ""
+	}
+	if basePath == "/" {
+		return ""
+	}
+	if !strings.HasPrefix(basePath, "/") {
+		basePath = "/" + basePath
+	}
+	return strings.TrimRight(basePath, "/")
 }
 
 func InjectUmamiAnalytics() {
