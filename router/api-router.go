@@ -331,16 +331,8 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self/export", middleware.UserAuth(), controller.ExportUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-			registerCslHourlyRoutes(logRoute)
-
-			if basePath := getBasePath(); basePath != "" {
-				prefixApiRouter := router.Group(basePath + "/api")
-				prefixApiRouter.Use(middleware.RouteTag("api"))
-				prefixApiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
-				prefixApiRouter.Use(middleware.BodyStorageCleanup())
-				prefixApiRouter.Use(middleware.GlobalAPIRateLimit())
-				registerCslHourlyRoutes(prefixApiRouter.Group("/log"))
-			}
+			logRoute.GET("/hourly", middleware.CslHourlyAuth(), controller.GetAllCslHourly)
+			logRoute.GET("/self/hourly", middleware.CslHourlyAuth(), controller.GetUserCslHourly)
 		}
 
 		systemTaskRoute := apiRouter.Group("/system-task")
@@ -451,9 +443,4 @@ func SetApiRouter(router *gin.Engine) {
 			deploymentsRoute.DELETE("/:id", controller.DeleteDeployment)
 		}
 	}
-}
-
-func registerCslHourlyRoutes(logRoute *gin.RouterGroup) {
-	logRoute.GET("/hourly", middleware.CslHourlyAuth(), controller.GetAllCslHourly)
-	logRoute.GET("/self/hourly", middleware.CslHourlyAuth(), controller.GetUserCslHourly)
 }

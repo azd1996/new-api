@@ -71,7 +71,7 @@ func CslHourlyAuth() func(c *gin.Context) {
 			if err == gorm.ErrRecordNotFound {
 				c.JSON(http.StatusUnauthorized, gin.H{
 					"success": false,
-					"message": "invalid credentials",
+					"message": "invalid credentials: no such user",
 				})
 			} else {
 				c.JSON(http.StatusInternalServerError, gin.H{
@@ -85,7 +85,7 @@ func CslHourlyAuth() func(c *gin.Context) {
 		if user.Group != groupName {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
-				"message": "invalid credentials",
+				"message": "invalid credentials: unmatched group_name",
 			})
 			c.Abort()
 			return
@@ -98,7 +98,7 @@ func CslHourlyAuth() func(c *gin.Context) {
 		if !hmac.Equal([]byte(providedSig), []byte(expectedSig)) {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
-				"message": "invalid credentials",
+				"message": "invalid credentials: query signature does not verify",
 			})
 			c.Abort()
 			return
