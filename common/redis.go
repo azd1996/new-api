@@ -7,6 +7,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -15,6 +16,10 @@ import (
 
 var RDB *redis.Client
 var RedisEnabled = true
+
+const RedisKeyPrefixEnv = "REDIS_KEY_PREFIX"
+
+var RedisKeyPrefix string
 
 func RedisKeyCacheSeconds() int {
 	return SyncFrequency
@@ -38,6 +43,11 @@ func InitRedisClient() (err error) {
 	}
 	opt.PoolSize = GetEnvOrDefault("REDIS_POOL_SIZE", 10)
 	RDB = redis.NewClient(opt)
+	RedisKeyPrefix = normalizeRedisKeyPrefix(os.Getenv(RedisKeyPrefixEnv))
+	if RedisKeyPrefix != "" {
+		RDB.AddHook(redisKeyPrefixHook{prefix: RedisKeyPrefix})
+		SysLog(fmt.Sprintf("Redis key prefix is enabled: %s", RedisKeyPrefix))
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -51,6 +61,123 @@ func InitRedisClient() (err error) {
 		SysLog(fmt.Sprintf("Redis database: %d", opt.DB))
 	}
 	return err
+}
+
+func normalizeRedisKeyPrefix(prefix string) string {
+	prefix = strings.Trim(strings.TrimSpace(prefix), ":")
+	if prefix == "" {
+		return ""
+	}
+	return prefix + ":"
+}
+
+type redisKeyPrefixHook struct {
+	prefix string
+}
+
+func (h redisKeyPrefixHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
+	h.prefixCommandKeys(cmd)
+	return ctx, nil
+}
+
+func (h redisKeyPrefixHook) AfterProcess(ctx context.Context, cmd redis.Cmder) error {
+	return nil
+}
+
+func (h redisKeyPrefixHook) BeforeProcessPipeline(ctx context.Context, cmds []redis.Cmder) (context.Context, error) {
+	for _, cmd := range cmds {
+		h.prefixCommandKeys(cmd)
+	}
+	return ctx, nil
+}
+
+func (h redisKeyPrefixHook) AfterProcessPipeline(ctx context.Context, cmds []redis.Cmder) error {
+	return nil
+}
+
+func (h redisKeyPrefixHook) prefixCommandKeys(cmd redis.Cmder) {
+	args := cmd.Args()
+	if len(args) < 2 || h.prefix == "" {
+		return
+	}
+
+	switch strings.ToLower(cmd.Name()) {
+	case "append", "decr", "decrby", "expire", "expireat", "get", "getbit", "getdel", "getex", "getrange", "getset", "hdel", "hexists", "hget", "hgetall", "hincrby", "hincrbyfloat", "hkeys", "hlen", "hmget", "hmset", "hset", "hsetnx", "hvals", "incr", "incrby", "incrbyfloat", "llen", "lpop", "lpush", "lrange", "lrem", "lset", "ltrim", "persist", "pexpire", "pexpireat", "pttl", "rpop", "rpush", "set", "setbit", "setex", "setnx", "setrange", "ttl", "type", "unlink", "zadd", "zcard", "zcount", "zincrby", "zrange", "zrem", "zscore":
+		h.prefixArg(args, 1)
+	case "del", "exists", "mget", "touch":
+		for i := 1; i < len(args); i++ {
+			h.prefixArg(args, i)
+		}
+	case "mset", "msetnx":
+		for i := 1; i < len(args); i += 2 {
+			h.prefixArg(args, i)
+		}
+	case "rename", "renamenx", "smove", "zdiffstore", "zinterstore", "zunionstore":
+		h.prefixArg(args, 1)
+		h.prefixArg(args, 2)
+	case "eval", "evalsha":
+		if len(args) < 3 {
+			return
+		}
+		numKeys, ok := redisCommandInt(args[2])
+		if !ok || numKeys <= 0 {
+			return
+		}
+		end := 3 + numKeys
+		if end > len(args) {
+			end = len(args)
+		}
+		for i := 3; i < end; i++ {
+			h.prefixArg(args, i)
+		}
+	case "scan":
+		h.prefixScanMatch(args)
+	case "hscan", "sscan", "zscan":
+		h.prefixArg(args, 1)
+		h.prefixScanMatch(args)
+	}
+}
+
+func (h redisKeyPrefixHook) prefixArg(args []interface{}, pos int) {
+	if pos >= len(args) {
+		return
+	}
+	key, ok := args[pos].(string)
+	if !ok || key == "" || strings.HasPrefix(key, h.prefix) {
+		return
+	}
+	args[pos] = h.prefix + key
+}
+
+func (h redisKeyPrefixHook) prefixScanMatch(args []interface{}) {
+	for i := 0; i < len(args)-1; i++ {
+		name, ok := args[i].(string)
+		if !ok || !strings.EqualFold(name, "match") {
+			continue
+		}
+		match, ok := args[i+1].(string)
+		if !ok || match == "" || match == "*" || strings.HasPrefix(match, h.prefix) {
+			return
+		}
+		args[i+1] = h.prefix + match
+		return
+	}
+}
+
+func redisCommandInt(value interface{}) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case int32:
+		return int(v), true
+	case string:
+		n, err := strconv.Atoi(v)
+		return n, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func ParseRedisOption() *redis.Options {
