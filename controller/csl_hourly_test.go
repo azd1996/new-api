@@ -25,12 +25,14 @@ func setupCslHourlyControllerTestDB(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.CslHourly{}))
 	require.NoError(t, model.LOG_DB.Create(&model.CslHourly{
-		StartTime: 3600,
-		EndTime:   7200,
-		Username:  "alice",
-		GroupName: "vip",
-		ModelName: "gpt-a",
-		TokenName: "primary",
+		StartTime:       3600,
+		EndTime:         7200,
+		Username:        "alice",
+		GroupName:       "vip",
+		ModelName:       "gpt-a",
+		TokenName:       "primary",
+		ChannelId:       17,
+		ChannelDiscount: 0.85,
 	}).Error)
 	require.NoError(t, model.LOG_DB.Create(&model.CslHourly{
 		StartTime: 3600,
@@ -172,4 +174,6 @@ func TestGetUserCslHourlyRestrictsToAuthenticatedUsernameAndToken(t *testing.T) 
 	assert.Equal(t, "alice", payload.Data[0].Username)
 	assert.Equal(t, "primary", payload.Data[0].TokenName)
 	assert.Equal(t, int64(3600), payload.Data[0].StartTime)
+	assert.Equal(t, 17, payload.Data[0].ChannelId)
+	assert.InDelta(t, 0.85, payload.Data[0].ChannelDiscount, 0.000001)
 }
