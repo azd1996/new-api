@@ -6,6 +6,7 @@ type CslHourly struct {
 	EndTime                int64   `json:"end_time" gorm:"column:end_time"`
 	UserId                 int     `json:"user_id" gorm:"column:user_id"`
 	TokenId                int     `json:"token_id" gorm:"column:token_id"`
+	ChannelId              int     `json:"channel_id" gorm:"column:channel_id"`
 	TokenName              string  `json:"token_name" gorm:"column:token_name"`
 	Username               string  `json:"username" gorm:"column:username"`
 	GroupName              string  `json:"group_name" gorm:"column:group_name"`
@@ -17,12 +18,13 @@ type CslHourly struct {
 	CallCount              int     `json:"call_count" gorm:"column:call_count"`
 	Tokens                 int64   `json:"tokens" gorm:"column:tokens"`
 	UnitPriceUsdPerMillion float64 `json:"unit_price_usd_per_million" gorm:"column:unit_price_usd_per_million"`
-	UnitPriceCnyPerMillion float64 `json:"unit_price_cny_per_million" gorm:"column:unit_price_cny_per_million"`
-	UsdExchangeRate        float64 `json:"usd_exchange_rate" gorm:"column:usd_exchange_rate"`
 	OriginalPriceUsd       float64 `json:"original_price_usd" gorm:"column:original_price_usd"`
 	SettlementPriceUsd     float64 `json:"settlement_price_usd" gorm:"column:settlement_price_usd"`
+	UsdExchangeRate        float64 `json:"usd_exchange_rate" gorm:"column:usd_exchange_rate"`
+	UnitPriceCnyPerMillion float64 `json:"unit_price_cny_per_million" gorm:"column:unit_price_cny_per_million"`
 	OriginalPriceCny       float64 `json:"original_price_cny" gorm:"column:original_price_cny"`
 	SettlementPriceCny     float64 `json:"settlement_price_cny" gorm:"column:settlement_price_cny"`
+	ChannelDiscount        float64 `json:"channel_discount" gorm:"column:channel_discount"`
 }
 
 func (CslHourly) TableName() string {
