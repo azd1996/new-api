@@ -115,6 +115,18 @@ func InitEnv() {
 	GeminiSafetySetting = GetEnvOrDefaultString("GEMINI_SAFETY_SETTING", "BLOCK_NONE")
 	CohereSafetySetting = GetEnvOrDefaultString("COHERE_SAFETY_SETTING", "NONE")
 
+	// Log shipper (dual-write to a local file for LoongCollector).
+	// MaxBackups/MaxAgeDays default to 0 (keep everything): rotated files may
+	// not have been collected yet, and deleting them loses billing data.
+	LogShipperEnabled = GetEnvOrDefaultBool("LOG_SHIPPER_ENABLED", false)
+	LogShipperPath = GetEnvOrDefaultString("LOG_SHIPPER_PATH", "")
+	LogShipperInstanceName = GetEnvOrDefaultString("LOG_SHIPPER_INSTANCE_NAME", "")
+	LogShipperMaxSizeMB = GetEnvOrDefault("LOG_SHIPPER_MAX_SIZE_MB", 0)
+	LogShipperMaxBackups = GetEnvOrDefault("LOG_SHIPPER_MAX_BACKUPS", 0)
+	LogShipperMaxAgeDays = GetEnvOrDefault("LOG_SHIPPER_MAX_AGE_DAYS", 0)
+	LogShipperLocalTime = GetEnvOrDefaultBool("LOG_SHIPPER_LOCAL_TIME", false)
+	LogShipperCompress = GetEnvOrDefaultBool("LOG_SHIPPER_COMPRESS", false)
+
 	// Initialize rate limit variables
 	GlobalApiRateLimitEnable = GetEnvOrDefaultBool("GLOBAL_API_RATE_LIMIT_ENABLE", true)
 	GlobalApiRateLimitNum = GetEnvOrDefault("GLOBAL_API_RATE_LIMIT", 360)

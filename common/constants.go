@@ -183,6 +183,17 @@ var SyncFrequency int // unit is second
 var BatchUpdateEnabled = false
 var BatchUpdateInterval int
 
+// Log shipper: dual-write log rows to a local rotated file for LoongCollector
+// to ship into the ClickHouse cluster. LOG_DB writes are unaffected.
+var LogShipperEnabled = false
+var LogShipperPath string
+var LogShipperInstanceName string
+var LogShipperMaxSizeMB int
+var LogShipperMaxBackups int
+var LogShipperMaxAgeDays int
+var LogShipperLocalTime = false
+var LogShipperCompress = false
+
 var RelayTimeout int // unit is second
 
 var RelayIdleConnTimeout int // unit is second

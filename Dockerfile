@@ -31,6 +31,10 @@ ENV GOEXPERIMENT=greenteagc
 WORKDIR /build
 
 ADD go.mod go.sum ./
+# go.mod has `replace baidu/xcdn/ai-gateway/csl-logshipper => ./third_party/csl-logshipper`,
+# so the replacement target must exist before `go mod download` reads it.
+# third_party/ is populated by ai-gateway/newapi/docker/sync-csl-logshipper.sh.
+COPY third_party/ ./third_party/
 RUN go mod download
 
 COPY . .

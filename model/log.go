@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/logshipper"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -100,7 +101,47 @@ func ensureLogRequestId(log *Log) {
 
 func createLog(log *Log) error {
 	ensureLogRequestId(log)
-	return LOG_DB.Create(log).Error
+	if err := LOG_DB.Create(log).Error; err != nil {
+		return err
+	}
+	shipLog(log)
+	return nil
+}
+
+// shipLog dual-writes the row to the local log-shipper file so LoongCollector
+// can forward it to the ClickHouse cluster. It runs after the LOG_DB insert
+// succeeded and never propagates failures: log recording sits on the relay hot
+// path, and losing a shipped copy must not fail the request or mask the row
+// that already landed in LOG_DB.
+func shipLog(log *Log) {
+	if !logshipper.Enabled() {
+		return
+	}
+	err := logshipper.Ship(logshipper.Row{
+		Id:                int64(log.Id),
+		UserId:            log.UserId,
+		CreatedAt:         log.CreatedAt,
+		Type:              log.Type,
+		Content:           log.Content,
+		Username:          log.Username,
+		TokenName:         log.TokenName,
+		ModelName:         log.ModelName,
+		Quota:             log.Quota,
+		PromptTokens:      log.PromptTokens,
+		CompletionTokens:  log.CompletionTokens,
+		UseTime:           log.UseTime,
+		IsStream:          log.IsStream,
+		ChannelId:         log.ChannelId,
+		TokenId:           log.TokenId,
+		GroupName:         log.Group,
+		Ip:                log.Ip,
+		RequestId:         log.RequestId,
+		UpstreamRequestId: log.UpstreamRequestId,
+		Other:             log.Other,
+	})
+	if err != nil {
+		common.SysError("failed to ship log: " + err.Error())
+	}
 }
 
 func clickHouseLogOrder(prefix string) string {
