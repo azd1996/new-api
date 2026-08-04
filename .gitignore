@@ -44,3 +44,8 @@ relaykit/relayconvert/chat_responses_live_local_test.go
 service/openaicompat/chat_responses_live_local_test.go
 go.work
 go.work.sum
+
+# Synced at build time from ai-gateway/csl-logshipper by
+# ai-gateway/newapi/docker/sync-csl-logshipper.sh. Not committed: the single
+# source of truth stays in the ai-gateway repository.
+/third_party/

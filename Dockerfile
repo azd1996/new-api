@@ -22,6 +22,9 @@ ADD go.mod go.sum ./
 # go.mod files must be present for go mod download to resolve the main module graph.
 ADD relaykit/go.mod ./relaykit/go.mod
 ADD tokenkit/go.mod ./tokenkit/go.mod
+# third_party/csl-logshipper is an in-module package populated at build time by
+# ai-gateway/newapi/docker/sync-csl-logshipper.sh; it must exist before build.
+COPY third_party/ ./third_party/
 RUN go mod download
 
 COPY . .

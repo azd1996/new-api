@@ -24,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/pkg/logshipper"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/pkg/wsmanager"
 	"github.com/QuantumNous/new-api/relay"
@@ -74,6 +75,9 @@ func main() {
 	kitutil.Debug.Store(common.DebugEnabled)
 
 	defer func() {
+		if err := logshipper.Close(); err != nil {
+			common.SysError("failed to close log shipper: " + err.Error())
+		}
 		err := model.CloseDB()
 		if err != nil {
 			common.FatalLog(common.LogText("failed to close database: %s", err.Error()))
@@ -357,6 +361,26 @@ func InitResources() error {
 	err = model.InitLogDB()
 	if err != nil {
 		return err
+	}
+
+	// Initialize the log shipper (dual-write of log rows to a local file for
+	// LoongCollector). Must come after InitLogDB: it is a second destination
+	// for the same rows, not a replacement.
+	if common.LogShipperEnabled {
+		err = logshipper.Init(logshipper.Config{
+			Filename:     common.LogShipperPath,
+			InstanceName: common.LogShipperInstanceName,
+			MaxSize:      common.LogShipperMaxSizeMB,
+			MaxBackups:   common.LogShipperMaxBackups,
+			MaxAge:       common.LogShipperMaxAgeDays,
+			LocalTime:    common.LogShipperLocalTime,
+			Compress:     common.LogShipperCompress,
+		})
+		if err != nil {
+			return err
+		}
+		common.SysLog("log shipper enabled: " + common.LogShipperPath +
+			" (instance " + common.LogShipperInstanceName + ")")
 	}
 
 	// Initialize Redis
