@@ -18,6 +18,9 @@ import (
 // it, a transposed assignment (prompt/completion tokens are the obvious pair)
 // or a Log field added later but never mapped would ship wrong or default
 // values into the billing table with nothing failing.
+//
+// Log.Id and Log.ChannelName are set below but intentionally not shipped: the
+// cluster table has no column for either. Log.CreatedAt maps to Row.Ts.
 func TestShipLogMapsEveryLogField(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "newapi_logs.log")
 	require.NoError(t, logshipper.Init(logshipper.Config{
@@ -66,9 +69,8 @@ func TestShipLogMapsEveryLogField(t *testing.T) {
 	require.NoError(t, json.Unmarshal(line, &envelope))
 
 	assert.Equal(t, logshipper.Row{
-		Id:                101,
 		UserId:            102,
-		CreatedAt:         1785477600,
+		Ts:                1785477600,
 		Type:              LogTypeConsume,
 		Content:           "content-value",
 		Username:          "username-value",
