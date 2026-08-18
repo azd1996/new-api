@@ -48,17 +48,30 @@ type Config struct {
 // of the *cluster* logs table, which are interchangeable with neither the json
 // tags on model.Log nor the single-node ClickHouse columns:
 //
+//   - model.Log tags CreatedAt as `created_at`; the cluster table calls it
+//     `ts` and derives its `dt` partition from it via
+//     MATERIALIZED toYYYYMMDD(toDateTime(ts)). A mismatched key here would
+//     leave ts at its DEFAULT 0 and pile every row into the 19700101
+//     partition without any error.
 //   - model.Log tags ChannelId as `channel`; both tables use `channel_id`.
 //   - model.Log tags Group as `group` and the single-node column is the
 //     reserved word `group`; the cluster table renamed it to `group_name`.
-//   - model.Log.ChannelName is gorm:"->" and exists in neither table.
+//   - model.Log.Id and model.Log.ChannelName have no cluster column at all.
+//     Id is deliberately absent: it is a LOG_DB primary key with no meaning
+//     in the cluster table, where a row is identified by
+//     (x_instance_name, ts, request_id, type).
 //
-// LoongCollector -> Kafka -> ClickHouse matches by column name, so a
+// LoongCollector -> Kafka -> Flink -> ClickHouse matches by column name, so a
 // mismatched key silently lands as the column DEFAULT instead of failing.
+//
+// IsStream stays a JSON bool: the contract handed to the data team
+// (ai-gateway/newapi/csl-sidecar/ck-ingest-fields.md) specifies a bool here
+// and puts the UInt8 0/1 conversion on the ingest side. Emitting 0/1 from
+// here would make their bool parse miss and turn every streamed request into
+// a non-streamed one.
 type Row struct {
-	Id                int64  `json:"id"`
 	UserId            int    `json:"user_id"`
-	CreatedAt         int64  `json:"created_at"`
+	Ts                int64  `json:"ts"`
 	Type              int    `json:"type"`
 	Content           string `json:"content"`
 	Username          string `json:"username"`

@@ -118,9 +118,8 @@ func shipLog(log *Log) {
 		return
 	}
 	err := logshipper.Ship(logshipper.Row{
-		Id:                int64(log.Id),
 		UserId:            log.UserId,
-		CreatedAt:         log.CreatedAt,
+		Ts:                log.CreatedAt,
 		Type:              log.Type,
 		Content:           log.Content,
 		Username:          log.Username,

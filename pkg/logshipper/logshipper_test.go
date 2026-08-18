@@ -13,12 +13,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// clickHouseLogColumns mirrors model.clickHouseLogCreateTableSQL plus the
-// cluster-only x_instance_name column. LoongCollector -> Kafka -> ClickHouse
-// matches by column name, so a renamed or missing key silently lands as the
-// column DEFAULT rather than failing. This list is the contract.
+// clickHouseLogColumns is the column list of the *cluster* table
+// cdn_data.xcdn_newapi_raw_logs_local (see ai-gateway/solution.md 5.1 and
+// ai-gateway/newapi/csl-sidecar/ck-ingest-fields.md 3.1), excluding the
+// MATERIALIZED dt partition column which is derived from ts.
+//
+// It is deliberately NOT model.clickHouseLogCreateTableSQL: the single-node
+// table has an id column and calls the timestamp created_at, while the cluster
+// table has no id and calls it ts. LoongCollector -> Kafka -> Flink ->
+// ClickHouse matches by column name, so a renamed or missing key silently
+// lands as the column DEFAULT rather than failing — and a missing ts would
+// additionally push every row into the 19700101 partition, since dt is
+// MATERIALIZED toYYYYMMDD(toDateTime(ts)). This list is the contract.
 var clickHouseLogColumns = []string{
-	"id", "user_id", "created_at", "type", "content", "username",
+	"user_id", "ts", "type", "content", "username",
 	"token_name", "model_name", "quota", "prompt_tokens", "completion_tokens",
 	"use_time", "is_stream", "channel_id", "token_id", "group_name", "ip",
 	"request_id", "upstream_request_id", "other", "x_instance_name",
@@ -50,7 +58,7 @@ func TestShipEmitsExactlyClickHouseLogColumns(t *testing.T) {
 	path := newTestShipper(t)
 
 	require.NoError(t, Ship(Row{
-		Id: 7, UserId: 1, CreatedAt: 1785477600, Type: 2,
+		UserId: 1, Ts: 1785477600, Type: 2,
 		Content: "test", Username: "eng-user", TokenName: "eng-key",
 		ModelName: "gpt-5.5", Quota: 42, PromptTokens: 10, CompletionTokens: 20,
 		UseTime: 3, IsStream: true, ChannelId: 9001, TokenId: 1001,
@@ -70,6 +78,15 @@ func TestShipEmitsExactlyClickHouseLogColumns(t *testing.T) {
 	}
 	assert.Len(t, envelope.Data, len(clickHouseLogColumns),
 		"emitted keys must match the ClickHouse columns exactly")
+
+	// is_stream must stay a JSON bool: ck-ingest-fields.md 3.1 puts the
+	// UInt8 0/1 conversion on the ingest side, so emitting a number here
+	// would make their bool parse miss and mark every stream non-stream.
+	assert.IsType(t, true, envelope.Data["is_stream"])
+	// other must stay a JSON string (double-encoded price snapshot), not an
+	// object: the cluster column is String and the data team parses it
+	// themselves.
+	assert.IsType(t, "", envelope.Data["other"])
 }
 
 // TestShipStampsInstanceName covers the one field Ship fills in itself: rows
