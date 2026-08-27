@@ -84,13 +84,14 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.opentelemetry.io/otel v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )
 
-require github.com/Azure/go-ntlmssp v0.1.1
+require (
+	github.com/Azure/go-ntlmssp v0.1.1
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
+)
 
 require (
-	baidu/xcdn/ai-gateway/csl-logshipper v0.0.0
 	github.com/DmitriyVTitov/size v1.5.0 // indirect
 	github.com/anknown/darts v0.0.0-20151216065714-83ff685239e6 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
@@ -168,5 +169,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.40.1 // indirect
 )
-
-replace baidu/xcdn/ai-gateway/csl-logshipper => ./third_party/csl-logshipper

@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"sync"
 
-	"baidu/xcdn/ai-gateway/csl-logshipper/writer"
+	"github.com/QuantumNous/new-api/third_party/csl-logshipper/writer"
 )
 
 // SchemaNewAPILogsV1 tags every line written by Ship. LoongCollector's
