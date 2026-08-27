@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -119,6 +120,130 @@ func TestGetUserCslHourlyRejectsTooWideTimeRange(t *testing.T) {
 	payload := decodeCslHourlyResponse(t, recorder)
 	assert.False(t, payload.Success)
 	assert.Equal(t, "time range must not exceed 7 days", payload.Message)
+}
+
+func TestParseCslHourlyHourRange(t *testing.T) {
+	hourStart := func(t *testing.T, value string) int64 {
+		t.Helper()
+		parsed, err := time.ParseInLocation("2006-01-02-15", value, time.Local)
+		require.NoError(t, err)
+		return parsed.Unix()
+	}
+
+	cases := []struct {
+		name         string
+		query        string
+		expectStart  int64
+		expectEnd    int64
+		expectErrMsg string
+	}{
+		{
+			name:        "end defaults to start and covers the whole hour",
+			query:       "start=2026-08-27-17",
+			expectStart: hourStart(t, "2026-08-27-17"),
+			expectEnd:   hourStart(t, "2026-08-27-17") + 3599,
+		},
+		{
+			name:        "explicit end covers the whole end hour",
+			query:       "start=2026-08-27-17&end=2026-08-28-09",
+			expectStart: hourStart(t, "2026-08-27-17"),
+			expectEnd:   hourStart(t, "2026-08-28-09") + 3599,
+		},
+		{
+			name:        "compact layout is accepted",
+			query:       "start=2026-0827-17&end=2026-0827-18",
+			expectStart: hourStart(t, "2026-08-27-17"),
+			expectEnd:   hourStart(t, "2026-08-27-18") + 3599,
+		},
+		{
+			name:        "start and end win over start_timestamp and end_timestamp",
+			query:       "start=2026-08-27-17&start_timestamp=3600&end_timestamp=7200",
+			expectStart: hourStart(t, "2026-08-27-17"),
+			expectEnd:   hourStart(t, "2026-08-27-17") + 3599,
+		},
+		{
+			name:         "malformed start reports the expected format",
+			query:        "start=2026%2F08%2F27+17%3A30",
+			expectErrMsg: `invalid start, it must be an hour like "2026-08-27-17" (YYYY-MM-DD-HH in server local time)`,
+		},
+		{
+			name:         "end without start reports the expected format for start",
+			query:        "end=2026-08-27-17",
+			expectErrMsg: `invalid start, it must be an hour like "2026-08-27-17" (YYYY-MM-DD-HH in server local time)`,
+		},
+		{
+			name:         "malformed end reports the expected format",
+			query:        "start=2026-08-27-17&end=2026-08-27",
+			expectErrMsg: `invalid end, it must be an hour like "2026-08-27-17" (YYYY-MM-DD-HH in server local time)`,
+		},
+		{
+			name:         "reversed hour range is rejected",
+			query:        "start=2026-08-27-17&end=2026-08-27-16",
+			expectErrMsg: "invalid time range",
+		},
+		{
+			name:         "hour range wider than 7 days is rejected",
+			query:        "start=2026-08-20-17&end=2026-08-27-18",
+			expectErrMsg: "time range must not exceed 7 days",
+		},
+		{
+			name:        "hour range of exactly 7 days is accepted",
+			query:       "start=2026-08-20-17&end=2026-08-27-17",
+			expectStart: hourStart(t, "2026-08-20-17"),
+			expectEnd:   hourStart(t, "2026-08-27-17") + 3599,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/self/hourly?"+testCase.query, nil)
+
+			startTimestamp, endTimestamp, ok := parseCslHourlyTimeRange(ctx)
+
+			if testCase.expectErrMsg != "" {
+				require.False(t, ok)
+				var payload cslHourlyResponse
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+				assert.False(t, payload.Success)
+				assert.Equal(t, testCase.expectErrMsg, payload.Message)
+				return
+			}
+			require.True(t, ok, recorder.Body.String())
+			assert.Equal(t, testCase.expectStart, startTimestamp)
+			assert.Equal(t, testCase.expectEnd, endTimestamp)
+		})
+	}
+}
+
+func TestGetUserCslHourlyAcceptsHourGranularityRange(t *testing.T) {
+	setupCslHourlyControllerTestDB(t)
+
+	hour := time.Date(2026, 8, 27, 17, 0, 0, 0, time.Local)
+	require.NoError(t, model.LOG_DB.Create(&model.CslHourly{
+		StartTime: hour.Unix(),
+		EndTime:   hour.Unix() + 3600,
+		Username:  "alice",
+		GroupName: "vip",
+		ModelName: "gpt-a",
+		TokenName: "primary",
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("username", "alice")
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/self/hourly?start=2026-08-27-17", nil)
+
+	GetUserCslHourly(ctx)
+
+	payload := decodeCslHourlyResponse(t, recorder)
+	require.True(t, payload.Success, payload.Message)
+	assert.Equal(t, hour.Unix(), payload.QueryStart)
+	assert.Equal(t, hour.Unix()+3599, payload.QueryEnd)
+	require.Len(t, payload.Data, 1)
+	assert.Equal(t, hour.Unix(), payload.Data[0].StartTime)
+	assert.Equal(t, "alice", payload.Data[0].Username)
 }
 
 func TestGetAllCslHourlyRejectsNonAdminRole(t *testing.T) {

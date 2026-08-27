@@ -218,21 +218,7 @@ func main() {
 		port = strconv.Itoa(*common.Port)
 	}
 
-	var handler http.Handler = server
-	if basePath := relayBasePath(); basePath != "" {
-		mux := http.NewServeMux()
-		stripPrefixHandler := http.StripPrefix(basePath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r.URL.RawPath = ""
-			server.ServeHTTP(w, r)
-		}))
-		mux.Handle(basePath+"/", stripPrefixHandler)
-		mux.HandleFunc(basePath, func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/", http.StatusMovedPermanently)
-		})
-		// Keep root accessible so the built-in healthcheck (/api/status) still works.
-		mux.Handle("/", server)
-		handler = mux
-	}
+	handler := router.WrapRelayBasePath(relayBasePath(), server)
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: handler,
