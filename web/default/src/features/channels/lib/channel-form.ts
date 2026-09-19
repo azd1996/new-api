@@ -191,6 +191,10 @@ export const channelFormSchema = z
     pass_through_body_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
+    // Retry rules (stored in setting JSON)
+    thinking_fallback_enabled: z.boolean().optional(),
+    // JSON array string of RetryRule; managed by the retry-rules section component.
+    retry_rules: z.string().optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -331,6 +335,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   pass_through_body_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
+  thinking_fallback_enabled: false,
+  retry_rules: '',
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -369,6 +375,8 @@ export function transformChannelToFormDefaults(
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    thinking_fallback_enabled: false,
+    retry_rules: '',
   }
 
   if (channel.setting) {
@@ -381,6 +389,10 @@ export function transformChannelToFormDefaults(
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
+        thinking_fallback_enabled: parsed.thinking_fallback_enabled || false,
+        retry_rules: Array.isArray(parsed.retry_rules)
+          ? JSON.stringify(parsed.retry_rules)
+          : '',
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -491,13 +503,28 @@ export function transformChannelToFormDefaults(
  * Build the setting JSON string from form extra settings
  */
 function buildSettingJSON(formData: ChannelFormValues): string {
-  const settingObj = {
+  let retryRules: unknown[] = []
+  if (formData.retry_rules && formData.retry_rules.trim() !== '') {
+    try {
+      const parsed = JSON.parse(formData.retry_rules)
+      if (Array.isArray(parsed)) {
+        retryRules = parsed
+      }
+    } catch {
+      retryRules = []
+    }
+  }
+  const settingObj: Record<string, unknown> = {
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
     proxy: formData.proxy || '',
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
+    thinking_fallback_enabled: formData.thinking_fallback_enabled || false,
+  }
+  if (retryRules.length > 0) {
+    settingObj.retry_rules = retryRules
   }
   return JSON.stringify(settingObj)
 }

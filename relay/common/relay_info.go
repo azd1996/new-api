@@ -154,6 +154,15 @@ type RelayInfo struct {
 	UseRuntimeHeadersOverride             bool
 	ParamOverrideAudit                    []string
 
+	// PendingRetryRewrite holds param-override operations to apply once to the
+	// outgoing request body on an error-triggered fallback retry (see
+	// relay/retryrule). The relay handler consumes and clears it after applying,
+	// so it only affects the single fallback attempt.
+	PendingRetryRewrite []map[string]any
+	// RetryFallbackDone guards the error-triggered fallback so it fires at most
+	// once per request, preventing retry loops.
+	RetryFallbackDone bool
+
 	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
 	// body. It is set when the body is wrapped in a BodyStorage (see
 	// relay/common/outbound_body.go), so that DoApiRequest can populate

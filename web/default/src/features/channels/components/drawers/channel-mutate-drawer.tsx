@@ -179,6 +179,7 @@ import {
   type MissingModelsAction,
 } from '../dialogs/missing-models-confirmation-dialog'
 import { ParamOverrideEditorDialog } from '../dialogs/param-override-editor-dialog'
+import { RetryRulesSection } from '../retry-rules-section'
 import { StatusCodeRiskDialog } from '../dialogs/status-code-risk-dialog'
 import { ModelMappingEditor } from '../model-mapping-editor'
 import {
@@ -4105,6 +4106,11 @@ export function ChannelMutateDrawer({
                                     </FormControl>
                                   </FormItem>
                                 )}
+                              />
+
+                              <RetryRulesSection
+                                form={form}
+                                disabled={sensitiveLocked}
                               />
 
                               <FormField

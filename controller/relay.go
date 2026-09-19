@@ -198,6 +198,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
+		// A soft pin (e.g. from the previous iteration's error-triggered fallback)
+		// is single-use: it was just consumed by getChannel above, so clear it so
+		// any subsequent normal retry is free to pick a different channel.
+		service.ClearPinnedChannel(c)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
 			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
@@ -230,6 +234,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		relayInfo.LastError = newAPIError
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+
+		// Error-triggered fallback (e.g. thinking-family 400): rewrite the request
+		// once and retry it on the same channel, bypassing the normal retry gate.
+		if maybeApplyRetryRuleFallback(c, relayInfo, channel, newAPIError, relayFormat, retryParam) {
+			continue
+		}
 
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break

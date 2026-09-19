@@ -79,6 +79,24 @@ export type Channel = z.infer<typeof channelSchema>
 // Channel Settings Types
 // ============================================================================
 
+export interface RetryRuleMatch {
+  status_codes?: number[]
+  error_regex?: string
+  relay_format?: string
+}
+
+export interface RetryRuleRetry {
+  target?: string
+  max_attempts?: number
+}
+
+export interface RetryRule {
+  name?: string
+  match: RetryRuleMatch
+  transform?: Array<Record<string, unknown>>
+  retry?: RetryRuleRetry
+}
+
 export interface ChannelSettings {
   force_format?: boolean
   thinking_to_content?: boolean
@@ -86,6 +104,8 @@ export interface ChannelSettings {
   pass_through_body_enabled?: boolean
   system_prompt?: string
   system_prompt_override?: boolean
+  thinking_fallback_enabled?: boolean
+  retry_rules?: RetryRule[]
 }
 
 export interface ChannelOtherSettings {

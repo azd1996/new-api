@@ -186,6 +186,17 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
+		// one-shot error-triggered retry rewrite (e.g. thinking-family fallback):
+		// applied only on the fallback attempt, then cleared so a later attempt
+		// does not re-apply it.
+		if len(info.PendingRetryRewrite) > 0 {
+			jsonData, err = relaycommon.ApplyParamOverride(jsonData, map[string]interface{}{"operations": info.PendingRetryRewrite}, nil)
+			if err != nil {
+				return newAPIErrorFromParamOverride(err)
+			}
+			info.PendingRetryRewrite = nil
+		}
+
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {

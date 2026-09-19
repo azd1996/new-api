@@ -17,6 +17,13 @@ type ChannelSettings struct {
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`
 	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	// ThinkingFallbackEnabled turns on the built-in "thinking family" 400
+	// fallback rule set (see relay/retryrule.DefaultThinkingFallbackRules) for
+	// this channel. RetryRules, when non-empty, overrides the built-in set.
+	ThinkingFallbackEnabled bool `json:"thinking_fallback_enabled,omitempty"`
+	// RetryRules are per-channel error-triggered request-rewrite-and-retry rules.
+	// See dto/retry_rule.go. Stored inline in the channel `setting` JSON column.
+	RetryRules []RetryRule `json:"retry_rules,omitempty"`
 }
 
 type VertexKeyType string
