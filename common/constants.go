@@ -194,6 +194,21 @@ var LogShipperMaxAgeDays int
 var LogShipperLocalTime = false
 var LogShipperCompress = false
 
+// CSL hourly reader: read the hourly billing summary through OmniDataSearch
+// (问渠) instead of LOG_DB's local csl_hourly table. The two read paths are
+// mutually exclusive — when enabled, the query never touches LOG_DB, and an
+// upstream failure surfaces as an error instead of silently falling back to a
+// table that may be empty after the log backend migration.
+var CslHourlyReaderEnabled = false
+var CslHourlyReaderBaseURL string
+var CslHourlyReaderUsername string
+var CslHourlyReaderSecretKey string
+var CslHourlyReaderMetric string
+var CslHourlyReaderInstanceName string
+var CslHourlyReaderPageSize int
+var CslHourlyReaderMaxRows int
+var CslHourlyReaderTimeoutSecs int
+
 var RelayTimeout int // unit is second
 
 var RelayIdleConnTimeout int // unit is second
