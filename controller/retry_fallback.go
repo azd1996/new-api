@@ -36,6 +36,14 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 		return false
 	}
 	ops := channel.GetSetting().RetryOverride
+	if len(ops) == 0 {
+		// The channel handed in by the relay loop can be a stub carrying only
+		// Id/Type/Name/AutoBan (getChannel's ChannelMeta==nil branch), so its
+		// Setting is empty. Re-read the full channel to get retry_override.
+		if full, err := model.CacheGetChannel(channel.Id); err == nil && full != nil {
+			ops = full.GetSetting().RetryOverride
+		}
+	}
 	logger.LogInfo(c, fmt.Sprintf("retry-override: hook reached on channel #%d, configured operations=%d", channel.Id, len(ops)))
 	if len(ops) == 0 {
 		return false
