@@ -16,29 +16,33 @@ type RetryRulesSectionProps = {
 
 // Sample rule: strip thinking / redacted_thinking blocks, gated on a 400 whose
 // error message mentions "thinking". Conditions match the response context
-// ({status_code, error_message}); operations rewrite the request body.
+// ({status_code, error_message}); operations rewrite the request body. Each
+// operation may set "action": "retry_same_channel" (default) or
+// "fallback_next_channel" to hand off to the next channel instead.
 const THINKING_TEMPLATE = JSON.stringify(
   {
     operations: [
       {
         mode: 'prune_objects',
-        path: 'messages.#.content',
+        path: 'messages',
         value: { where: { type: 'thinking' } },
         conditions: [
           { path: 'status_code', mode: 'full', value: 400 },
           { path: 'error_message', mode: 'contains', value: 'thinking' },
         ],
         logic: 'AND',
+        action: 'retry_same_channel',
       },
       {
         mode: 'prune_objects',
-        path: 'messages.#.content',
+        path: 'messages',
         value: { where: { type: 'redacted_thinking' } },
         conditions: [
           { path: 'status_code', mode: 'full', value: 400 },
           { path: 'error_message', mode: 'contains', value: 'thinking' },
         ],
         logic: 'AND',
+        action: 'retry_same_channel',
       },
     ],
   },
@@ -65,7 +69,7 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
           </span>
           <p className='text-sm text-muted-foreground'>
             {t(
-              'On an upstream error, match the response (status code / error message) with each operation conditions; matching operations rewrite the request body and the request is retried once on the same channel. Leave empty to disable.'
+              'On an upstream error, match the response (status code / error message) with each operation conditions; matching operations rewrite the request body. Set each operation action to "retry_same_channel" (default) to retry the rewritten request once on the same channel, or "fallback_next_channel" to hand it off to the next channel (requires RetryTimes > 0 and another available channel). Leave empty to disable.'
             )}
           </p>
         </div>
@@ -107,7 +111,7 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
         disabled={props.disabled}
         rows={8}
         placeholder={t(
-          'On an upstream error, match the response (status code / error message) with each operation conditions; matching operations rewrite the request body and the request is retried once on the same channel. Leave empty to disable.'
+          'Retry override operations as JSON, e.g. {"operations": [...]}. Leave empty to disable.'
         )}
         className='max-h-72 min-h-40 resize-y overflow-auto font-mono text-xs'
       />

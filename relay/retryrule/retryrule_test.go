@@ -24,7 +24,7 @@ func thinkingStripOps() []map[string]any {
 	return []map[string]any{
 		{
 			"mode":       "prune_objects",
-			"path":       "messages.#.content",
+			"path":       "messages",
 			"value":      map[string]any{"where": map[string]any{"type": "thinking"}},
 			"conditions": cond,
 			"logic":      "AND",
@@ -50,8 +50,9 @@ func TestCollectRewritesMatching(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := ResponseContext(apiError(tc.statusCode, tc.message), "claude")
-			rewrites, matched := CollectRewrites(ops, ctx)
+			rewrites, matched, action := CollectRewrites(ops, ctx)
 			assert.Equal(t, tc.wantMatch, matched)
+			assert.Equal(t, ActionRetrySameChannel, action, "default action is same channel")
 			if tc.wantMatch {
 				require.Len(t, rewrites, 1)
 				assert.Equal(t, "prune_objects", rewrites[0]["mode"])
@@ -66,13 +67,14 @@ func TestCollectRewritesMatching(t *testing.T) {
 
 func TestCollectRewritesEmptyAndUnconditional(t *testing.T) {
 	// No configured ops -> never matches.
-	_, matched := CollectRewrites(nil, ResponseContext(apiError(400, "x"), "claude"))
+	_, matched, _ := CollectRewrites(nil, ResponseContext(apiError(400, "x"), "claude"))
 	assert.False(t, matched)
 
 	// An operation without conditions always matches.
 	ops := []map[string]any{{"mode": "delete", "path": "x"}}
-	rewrites, matched := CollectRewrites(ops, ResponseContext(apiError(500, "y"), "openai"))
+	rewrites, matched, action := CollectRewrites(ops, ResponseContext(apiError(500, "y"), "openai"))
 	assert.True(t, matched)
+	assert.Equal(t, ActionRetrySameChannel, action)
 	require.Len(t, rewrites, 1)
 }
 
@@ -87,9 +89,47 @@ func TestCollectRewritesOrLogic(t *testing.T) {
 		"logic": "OR",
 	}}
 
-	_, matched := CollectRewrites(ops, ResponseContext(apiError(400, "bad signature"), "claude"))
+	_, matched, _ := CollectRewrites(ops, ResponseContext(apiError(400, "bad signature"), "claude"))
 	assert.True(t, matched, "OR should match when one condition matches")
 
-	_, matched = CollectRewrites(ops, ResponseContext(apiError(400, "content policy"), "claude"))
+	_, matched, _ = CollectRewrites(ops, ResponseContext(apiError(400, "content policy"), "claude"))
 	assert.False(t, matched, "OR should not match when no condition matches")
+}
+
+func TestCollectRewritesAction(t *testing.T) {
+	ctx := ResponseContext(apiError(400, "boom"), "claude")
+
+	t.Run("default is same channel", func(t *testing.T) {
+		ops := []map[string]any{{"mode": "delete", "path": "x"}}
+		_, matched, action := CollectRewrites(ops, ctx)
+		assert.True(t, matched)
+		assert.Equal(t, ActionRetrySameChannel, action)
+	})
+
+	t.Run("explicit fallback next channel", func(t *testing.T) {
+		ops := []map[string]any{{"mode": "delete", "path": "x", "action": ActionFallbackNextChannel}}
+		rewrites, matched, action := CollectRewrites(ops, ctx)
+		assert.True(t, matched)
+		assert.Equal(t, ActionFallbackNextChannel, action)
+		require.Len(t, rewrites, 1)
+		_, hasAction := rewrites[0]["action"]
+		assert.False(t, hasAction, "action must be stripped from applied rewrites")
+	})
+
+	t.Run("fallback wins when mixed", func(t *testing.T) {
+		ops := []map[string]any{
+			{"mode": "delete", "path": "a", "action": ActionRetrySameChannel},
+			{"mode": "delete", "path": "b", "action": ActionFallbackNextChannel},
+		}
+		_, matched, action := CollectRewrites(ops, ctx)
+		assert.True(t, matched)
+		assert.Equal(t, ActionFallbackNextChannel, action)
+	})
+
+	t.Run("unknown action falls back to same channel", func(t *testing.T) {
+		ops := []map[string]any{{"mode": "delete", "path": "x", "action": "bogus"}}
+		_, matched, action := CollectRewrites(ops, ctx)
+		assert.True(t, matched)
+		assert.Equal(t, ActionRetrySameChannel, action)
+	})
 }

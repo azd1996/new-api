@@ -19,6 +19,18 @@ import (
 	"github.com/QuantumNous/new-api/types"
 )
 
+// Retry actions decide, on a matched retry-override, where the rewritten request
+// is retried:
+//
+//   - ActionRetrySameChannel (default): pin the current channel and retry it once
+//     without consuming retry budget.
+//   - ActionFallbackNextChannel: do not retry the current channel; hand off to the
+//     normal retry/fallback loop so the request advances to the next channel.
+const (
+	ActionRetrySameChannel    = "retry_same_channel"
+	ActionFallbackNextChannel = "fallback_next_channel"
+)
+
 // ResponseContext builds the document that retry-override conditions match
 // against: the upstream response status code and error message.
 func ResponseContext(apiErr *types.NewAPIError, relayFormat string) map[string]any {
@@ -31,25 +43,43 @@ func ResponseContext(apiErr *types.NewAPIError, relayFormat string) map[string]a
 }
 
 // CollectRewrites evaluates each operation's conditions against the response
-// context and returns the matching operations with their "conditions"/"logic"
-// keys removed, so they can be applied unconditionally to the request body on
-// retry. The bool reports whether any operation matched (i.e. whether to retry).
-func CollectRewrites(ops []map[string]any, ctx map[string]any) ([]map[string]any, bool) {
+// context and returns the matching operations with their "conditions"/"logic"/
+// "action" keys removed, so they can be applied unconditionally to the request
+// body on retry. The bool reports whether any operation matched (i.e. whether to
+// retry). The action reports where to retry: ActionFallbackNextChannel if any
+// matched operation requests it, otherwise ActionRetrySameChannel.
+func CollectRewrites(ops []map[string]any, ctx map[string]any) ([]map[string]any, bool, string) {
 	matched := make([]map[string]any, 0, len(ops))
+	action := ActionRetrySameChannel
 	for _, op := range ops {
 		if !operationMatches(op, ctx) {
 			continue
 		}
+		if resolveAction(op) == ActionFallbackNextChannel {
+			action = ActionFallbackNextChannel
+		}
 		clone := make(map[string]any, len(op))
 		for k, v := range op {
-			if k == "conditions" || k == "logic" {
+			if k == "conditions" || k == "logic" || k == "action" {
 				continue
 			}
 			clone[k] = v
 		}
 		matched = append(matched, clone)
 	}
-	return matched, len(matched) > 0
+	return matched, len(matched) > 0, action
+}
+
+// resolveAction reads an operation's action, defaulting to (and falling back to
+// on unknown values) ActionRetrySameChannel.
+func resolveAction(op map[string]any) string {
+	raw, _ := op["action"].(string)
+	switch strings.TrimSpace(raw) {
+	case ActionFallbackNextChannel:
+		return ActionFallbackNextChannel
+	default:
+		return ActionRetrySameChannel
+	}
 }
 
 // operationMatches reports whether an operation's conditions match the context.
