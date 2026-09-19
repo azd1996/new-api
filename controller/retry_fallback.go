@@ -1,6 +1,10 @@
 package controller
 
 import (
+	"fmt"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/retryrule"
@@ -30,9 +34,19 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 		return false
 	}
 	ctx := retryrule.ResponseContext(apiErr, string(relayFormat))
+	logger.LogInfo(c, fmt.Sprintf("retry-override: evaluating %d operation(s) on channel #%d, status_code=%d, error_message=%q",
+		len(ops), channel.Id, apiErr.StatusCode, apiErr.Error()))
 	rewrites, matched := retryrule.CollectRewrites(ops, ctx)
 	if !matched {
+		logger.LogInfo(c, fmt.Sprintf("retry-override: no operation matched on channel #%d, not retrying", channel.Id))
 		return false
+	}
+	if data, err := common.Marshal(rewrites); err == nil {
+		logger.LogInfo(c, fmt.Sprintf("retry-override: matched, staging %d rewrite(s) on channel #%d and retrying the same channel: %s",
+			len(rewrites), channel.Id, string(data)))
+	} else {
+		logger.LogInfo(c, fmt.Sprintf("retry-override: matched, staging %d rewrite(s) on channel #%d and retrying the same channel",
+			len(rewrites), channel.Id))
 	}
 	info.PendingRetryRewrite = rewrites
 	info.RetryFallbackDone = true

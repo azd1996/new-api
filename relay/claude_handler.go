@@ -190,10 +190,13 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		// applied only on the fallback attempt, then cleared so a later attempt
 		// does not re-apply it.
 		if len(info.PendingRetryRewrite) > 0 {
+			logger.LogInfo(c, fmt.Sprintf("retry-override: applying %d staged rewrite(s) to request body on retry", len(info.PendingRetryRewrite)))
 			jsonData, err = relaycommon.ApplyParamOverride(jsonData, map[string]interface{}{"operations": info.PendingRetryRewrite}, nil)
 			if err != nil {
+				logger.LogError(c, fmt.Sprintf("retry-override: failed to apply staged rewrite(s): %v", err))
 				return newAPIErrorFromParamOverride(err)
 			}
+			logger.LogInfo(c, fmt.Sprintf("retry-override: request body after rewrite: %s", jsonData))
 			info.PendingRetryRewrite = nil
 		}
 
