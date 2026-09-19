@@ -191,10 +191,9 @@ export const channelFormSchema = z
     pass_through_body_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
-    // Retry / thinking fallback (stored in setting JSON)
-    thinking_fallback_enabled: z.boolean().optional(),
-    // {operations:[...]} JSON string, edited with the param-override editor.
-    thinking_fallback_transform: z.string().optional(),
+    // Retry override (stored in setting JSON): {operations:[...]} JSON string,
+    // edited with the param-override editor; conditions match the response.
+    retry_override: z.string().optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -335,8 +334,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   pass_through_body_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
-  thinking_fallback_enabled: false,
-  thinking_fallback_transform: '',
+  retry_override: '',
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -375,8 +373,7 @@ export function transformChannelToFormDefaults(
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
-    thinking_fallback_enabled: false,
-    thinking_fallback_transform: '',
+    retry_override: '',
   }
 
   if (channel.setting) {
@@ -389,15 +386,8 @@ export function transformChannelToFormDefaults(
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
-        thinking_fallback_enabled: parsed.thinking_fallback_enabled || false,
-        thinking_fallback_transform: Array.isArray(
-          parsed.thinking_fallback_transform
-        )
-          ? JSON.stringify(
-              { operations: parsed.thinking_fallback_transform },
-              null,
-              2
-            )
+        retry_override: Array.isArray(parsed.retry_override)
+          ? JSON.stringify({ operations: parsed.retry_override }, null, 2)
           : '',
       }
     } catch (error) {
@@ -509,18 +499,15 @@ export function transformChannelToFormDefaults(
  * Build the setting JSON string from form extra settings
  */
 function buildSettingJSON(formData: ChannelFormValues): string {
-  let fallbackTransform: unknown[] = []
-  if (
-    formData.thinking_fallback_transform &&
-    formData.thinking_fallback_transform.trim() !== ''
-  ) {
+  let retryOverride: unknown[] = []
+  if (formData.retry_override && formData.retry_override.trim() !== '') {
     try {
-      const parsed = JSON.parse(formData.thinking_fallback_transform)
+      const parsed = JSON.parse(formData.retry_override)
       if (Array.isArray(parsed?.operations)) {
-        fallbackTransform = parsed.operations
+        retryOverride = parsed.operations
       }
     } catch {
-      fallbackTransform = []
+      retryOverride = []
     }
   }
   const settingObj: Record<string, unknown> = {
@@ -530,10 +517,9 @@ function buildSettingJSON(formData: ChannelFormValues): string {
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
-    thinking_fallback_enabled: formData.thinking_fallback_enabled || false,
   }
-  if (fallbackTransform.length > 0) {
-    settingObj.thinking_fallback_transform = fallbackTransform
+  if (retryOverride.length > 0) {
+    settingObj.retry_override = retryOverride
   }
   return JSON.stringify(settingObj)
 }

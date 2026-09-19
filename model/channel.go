@@ -962,9 +962,6 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
-	if err := dto.ValidateRetryRules(channelParams.RetryRules); err != nil {
-		return err
-	}
 	return nil
 }
 

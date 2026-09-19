@@ -17,18 +17,13 @@ type ChannelSettings struct {
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`
 	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
-	// ThinkingFallbackEnabled turns on the built-in "thinking family" 400
-	// fallback for this channel: on thinking-related 400s, apply the rewrite
-	// operations and retry on the same channel (both the trigger and the
-	// original-channel retry are fixed, not user-configurable).
-	ThinkingFallbackEnabled bool `json:"thinking_fallback_enabled,omitempty"`
-	// ThinkingFallbackTransform is the user-configurable rewrite applied when the
-	// fallback fires, authored with the same param-override operations UI. Empty
-	// means use the built-in default (strip thinking / redacted_thinking blocks).
-	ThinkingFallbackTransform []map[string]any `json:"thinking_fallback_transform,omitempty"`
-	// RetryRules is an advanced, non-UI escape hatch for fully custom
-	// error-triggered rules. See dto/retry_rule.go.
-	RetryRules []RetryRule `json:"retry_rules,omitempty"`
+	// RetryOverride configures error-triggered request rewrites, authored with
+	// the same operations UI as ParamOverride. Unlike ParamOverride (which
+	// rewrites every outgoing request), each operation's conditions here are
+	// evaluated against the upstream RESPONSE ({status_code, error_message}); on
+	// an error, matching operations rewrite the request body and the request is
+	// retried once on the same channel. Empty = disabled.
+	RetryOverride []map[string]any `json:"retry_override,omitempty"`
 }
 
 type VertexKeyType string

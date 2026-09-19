@@ -86,8 +86,7 @@ export interface ChannelSettings {
   pass_through_body_enabled?: boolean
   system_prompt?: string
   system_prompt_override?: boolean
-  thinking_fallback_enabled?: boolean
-  thinking_fallback_transform?: Array<Record<string, unknown>>
+  retry_override?: Array<Record<string, unknown>>
 }
 
 export interface ChannelOtherSettings {

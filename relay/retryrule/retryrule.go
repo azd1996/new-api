@@ -1,134 +1,137 @@
-// Package retryrule matches upstream errors against per-channel retry rules and
-// resolves which rules apply for a channel. It is intentionally self-contained
-// (depends only on dto and types) so it can live in its own file and keep edits
-// to upstream files minimal.
+// Package retryrule powers error-triggered request rewrites ("retry override").
 //
-// Matching design: rules match on the primitive fields captured in
-// dto.RetryRuleMatch (status codes + error message regex + optional relay
-// format), evaluated against an ErrorContext built from the upstream error.
-// This deliberately does not reuse relay/common's condition evaluator, because
-// that evaluator (checkConditions) is unexported and reusing it would require
-// editing the upstream override.go; status code + message regex fully covers
-// the current requirements. The transform operations are still applied later
-// via the existing override executor (ApplyParamOverride).
+// A channel's RetryOverride is a list of param-override operations. Unlike
+// ParamOverride, each operation's conditions are evaluated against the upstream
+// RESPONSE context ({status_code, error_message, relay_format}). On an upstream
+// error, matching operations are collected (with their conditions stripped) and
+// applied to the request body, then the request is retried once on the same
+// channel.
+//
+// Condition evaluation is self-contained here (supporting full/contains/prefix/
+// suffix, matching the param-override modes the feature needs) so this package
+// depends only on types and does not require exporting override internals.
 package retryrule
 
 import (
-	"regexp"
-	"slices"
+	"strconv"
 	"strings"
-	"sync"
 
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/types"
 )
 
-// ErrorContext is the evaluable view of an upstream failure that retry rules
-// match against. Building it decouples matching from the concrete error type.
-type ErrorContext struct {
-	StatusCode  int
-	Message     string
-	RelayFormat string
-}
-
-// BuildErrorContext extracts the matchable fields from an upstream error.
-func BuildErrorContext(apiErr *types.NewAPIError, relayFormat string) ErrorContext {
-	ec := ErrorContext{RelayFormat: relayFormat}
+// ResponseContext builds the document that retry-override conditions match
+// against: the upstream response status code and error message.
+func ResponseContext(apiErr *types.NewAPIError, relayFormat string) map[string]any {
+	ctx := map[string]any{"relay_format": relayFormat}
 	if apiErr != nil {
-		ec.StatusCode = apiErr.StatusCode
-		ec.Message = apiErr.Error()
+		ctx["status_code"] = apiErr.StatusCode
+		ctx["error_message"] = apiErr.Error()
 	}
-	return ec
+	return ctx
 }
 
-// Match returns the first rule that matches the upstream error, if any.
-func Match(rules []dto.RetryRule, apiErr *types.NewAPIError, relayFormat string) (dto.RetryRule, bool) {
-	if apiErr == nil || len(rules) == 0 {
-		return dto.RetryRule{}, false
-	}
-	ec := BuildErrorContext(apiErr, relayFormat)
-	for _, rule := range rules {
-		if matchRule(rule, ec) {
-			return rule, true
+// CollectRewrites evaluates each operation's conditions against the response
+// context and returns the matching operations with their "conditions"/"logic"
+// keys removed, so they can be applied unconditionally to the request body on
+// retry. The bool reports whether any operation matched (i.e. whether to retry).
+func CollectRewrites(ops []map[string]any, ctx map[string]any) ([]map[string]any, bool) {
+	matched := make([]map[string]any, 0, len(ops))
+	for _, op := range ops {
+		if !operationMatches(op, ctx) {
+			continue
 		}
+		clone := make(map[string]any, len(op))
+		for k, v := range op {
+			if k == "conditions" || k == "logic" {
+				continue
+			}
+			clone[k] = v
+		}
+		matched = append(matched, clone)
 	}
-	return dto.RetryRule{}, false
+	return matched, len(matched) > 0
 }
 
-func matchRule(rule dto.RetryRule, ec ErrorContext) bool {
-	m := rule.Match
-	if m.RelayFormat != "" && !strings.EqualFold(m.RelayFormat, ec.RelayFormat) {
-		return false
+// operationMatches reports whether an operation's conditions match the context.
+// An operation without conditions always matches (same as param-override).
+func operationMatches(op map[string]any, ctx map[string]any) bool {
+	raw, ok := op["conditions"]
+	if !ok {
+		return true
 	}
-	if len(m.StatusCodes) > 0 && !slices.Contains(m.StatusCodes, ec.StatusCode) {
-		return false
+	conds, ok := raw.([]any)
+	if !ok || len(conds) == 0 {
+		return true
 	}
-	if strings.TrimSpace(m.ErrorRegex) != "" {
-		re := compileRegex(m.ErrorRegex)
-		if re == nil || !re.MatchString(ec.Message) {
+	useOr := false
+	if l, ok := op["logic"].(string); ok && strings.EqualFold(l, "OR") {
+		useOr = true
+	}
+	for _, c := range conds {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		res := conditionMatches(cm, ctx)
+		if useOr && res {
+			return true
+		}
+		if !useOr && !res {
 			return false
 		}
 	}
-	return true
+	// AND with no failures -> true; OR with no successes -> false.
+	return !useOr
 }
 
-// regexCache avoids recompiling rule patterns on every upstream error. Invalid
-// patterns are cached as nil so they are not recompiled either. Rules are
-// validated at save time (dto.RetryRule.Validate), so nil is not expected here.
-var regexCache sync.Map // pattern string -> *regexp.Regexp (nil when invalid)
-
-func compileRegex(pattern string) *regexp.Regexp {
-	if cached, ok := regexCache.Load(pattern); ok {
-		re, _ := cached.(*regexp.Regexp)
-		return re
+func conditionMatches(cond map[string]any, ctx map[string]any) bool {
+	path, _ := cond["path"].(string)
+	if path == "" {
+		return false
 	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		re = nil
-	}
-	regexCache.Store(pattern, re)
-	return re
-}
-
-const ruleNameThinkingFallback = "thinking-fallback"
-
-// DefaultThinkingFallbackRules returns the built-in rule set that handles the
-// "thinking family" of upstream 400s — signature verification failure and the
-// Bedrock "final block in an assistant message cannot be `thinking`" variant —
-// by stripping thinking / redacted_thinking blocks and retrying on the original
-// channel. Removing the thinking blocks also removes their signatures.
-func DefaultThinkingFallbackRules() []dto.RetryRule {
-	return []dto.RetryRule{
-		{
-			Name: ruleNameThinkingFallback,
-			Match: dto.RetryRuleMatch{
-				StatusCodes: []int{400},
-				ErrorRegex:  `(?i)(signature|final block in an assistant message cannot be .?thinking.?)`,
-			},
-			Transform: []map[string]any{
-				{"mode": "prune_objects", "path": "messages.#.content", "value": map[string]any{"where": map[string]any{"type": "thinking"}}},
-				{"mode": "prune_objects", "path": "messages.#.content", "value": map[string]any{"where": map[string]any{"type": "redacted_thinking"}}},
-			},
-			Retry: dto.RetryRuleRetry{Target: dto.RetryRuleTargetOriginalChannel, MaxAttempts: 1},
-		},
-	}
-}
-
-// EffectiveRules resolves which rules apply for a channel. An advanced custom
-// RetryRules list takes precedence; otherwise, when the built-in thinking
-// fallback is enabled, the default rule is used with its rewrite operations
-// overridden by ThinkingFallbackTransform when the admin configured one.
-// Returns nil when the feature is off for this channel.
-func EffectiveRules(settings dto.ChannelSettings) []dto.RetryRule {
-	if len(settings.RetryRules) > 0 {
-		return settings.RetryRules
-	}
-	if settings.ThinkingFallbackEnabled {
-		rules := DefaultThinkingFallbackRules()
-		if len(settings.ThinkingFallbackTransform) > 0 && len(rules) > 0 {
-			rules[0].Transform = settings.ThinkingFallbackTransform
+	actual, exists := ctx[path]
+	if !exists {
+		if pass, ok := cond["pass_missing_key"].(bool); ok && pass {
+			return true
 		}
-		return rules
+		return false
 	}
-	return nil
+	mode, _ := cond["mode"].(string)
+	res := compareValues(toString(actual), toString(cond["value"]), strings.ToLower(mode))
+	if invert, ok := cond["invert"].(bool); ok && invert {
+		return !res
+	}
+	return res
+}
+
+func compareValues(actual, want, mode string) bool {
+	switch mode {
+	case "", "full":
+		return actual == want
+	case "contains":
+		return strings.Contains(actual, want)
+	case "prefix":
+		return strings.HasPrefix(actual, want)
+	case "suffix":
+		return strings.HasSuffix(actual, want)
+	default:
+		return false
+	}
+}
+
+func toString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case bool:
+		return strconv.FormatBool(x)
+	default:
+		return ""
+	}
 }
