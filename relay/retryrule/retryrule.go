@@ -114,16 +114,21 @@ func DefaultThinkingFallbackRules() []dto.RetryRule {
 	}
 }
 
-// EffectiveRules resolves which rules apply for a channel: explicit custom
-// RetryRules take precedence (advanced override); otherwise, when the built-in
-// thinking fallback is enabled, the default rule set is used. Returns nil when
-// the feature is off for this channel.
+// EffectiveRules resolves which rules apply for a channel. An advanced custom
+// RetryRules list takes precedence; otherwise, when the built-in thinking
+// fallback is enabled, the default rule is used with its rewrite operations
+// overridden by ThinkingFallbackTransform when the admin configured one.
+// Returns nil when the feature is off for this channel.
 func EffectiveRules(settings dto.ChannelSettings) []dto.RetryRule {
 	if len(settings.RetryRules) > 0 {
 		return settings.RetryRules
 	}
 	if settings.ThinkingFallbackEnabled {
-		return DefaultThinkingFallbackRules()
+		rules := DefaultThinkingFallbackRules()
+		if len(settings.ThinkingFallbackTransform) > 0 && len(rules) > 0 {
+			rules[0].Transform = settings.ThinkingFallbackTransform
+		}
+		return rules
 	}
 	return nil
 }

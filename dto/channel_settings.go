@@ -18,11 +18,16 @@ type ChannelSettings struct {
 	SystemPrompt           string `json:"system_prompt,omitempty"`
 	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
 	// ThinkingFallbackEnabled turns on the built-in "thinking family" 400
-	// fallback rule set (see relay/retryrule.DefaultThinkingFallbackRules) for
-	// this channel. RetryRules, when non-empty, overrides the built-in set.
+	// fallback for this channel: on thinking-related 400s, apply the rewrite
+	// operations and retry on the same channel (both the trigger and the
+	// original-channel retry are fixed, not user-configurable).
 	ThinkingFallbackEnabled bool `json:"thinking_fallback_enabled,omitempty"`
-	// RetryRules are per-channel error-triggered request-rewrite-and-retry rules.
-	// See dto/retry_rule.go. Stored inline in the channel `setting` JSON column.
+	// ThinkingFallbackTransform is the user-configurable rewrite applied when the
+	// fallback fires, authored with the same param-override operations UI. Empty
+	// means use the built-in default (strip thinking / redacted_thinking blocks).
+	ThinkingFallbackTransform []map[string]any `json:"thinking_fallback_transform,omitempty"`
+	// RetryRules is an advanced, non-UI escape hatch for fully custom
+	// error-triggered rules. See dto/retry_rule.go.
 	RetryRules []RetryRule `json:"retry_rules,omitempty"`
 }
 

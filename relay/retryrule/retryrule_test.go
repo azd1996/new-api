@@ -113,6 +113,19 @@ func TestEffectiveRules(t *testing.T) {
 	t.Run("off returns nil", func(t *testing.T) {
 		assert.Nil(t, EffectiveRules(dto.ChannelSettings{}))
 	})
+
+	t.Run("custom transform overrides default ops", func(t *testing.T) {
+		ops := []map[string]any{
+			{"mode": "delete", "path": "messages.#.content.#.signature"},
+		}
+		got := EffectiveRules(dto.ChannelSettings{
+			ThinkingFallbackEnabled:   true,
+			ThinkingFallbackTransform: ops,
+		})
+		require.Len(t, got, 1)
+		assert.Equal(t, ops, got[0].Transform)
+		assert.Equal(t, ruleNameThinkingFallback, got[0].Name)
+	})
 }
 
 func TestDefaultRulesAreValid(t *testing.T) {

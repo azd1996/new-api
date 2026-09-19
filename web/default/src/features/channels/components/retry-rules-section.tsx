@@ -1,14 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UseFormReturn } from 'react-hook-form'
-import { Plus, Trash2, Wand2 } from 'lucide-react'
+import { Code, Wand2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 
 import type { ChannelFormValues } from '../lib/channel-form'
-import type { RetryRule } from '../types'
 import { ParamOverrideEditorDialog } from './dialogs/param-override-editor-dialog'
 
 type RetryRulesSectionProps = {
@@ -16,66 +15,40 @@ type RetryRulesSectionProps = {
   disabled?: boolean
 }
 
-function parseRules(value: string | undefined): RetryRule[] {
-  if (!value || value.trim() === '') return []
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? (parsed as RetryRule[]) : []
-  } catch {
-    return []
-  }
-}
+// Default rewrite: strip thinking / redacted_thinking blocks. Same
+// {operations:[...]} shape as param_override, so it reuses that editor verbatim.
+const DEFAULT_THINKING_TRANSFORM = JSON.stringify(
+  {
+    operations: [
+      {
+        mode: 'prune_objects',
+        path: 'messages.#.content',
+        value: { where: { type: 'thinking' } },
+      },
+      {
+        mode: 'prune_objects',
+        path: 'messages.#.content',
+        value: { where: { type: 'redacted_thinking' } },
+      },
+    ],
+  },
+  null,
+  2
+)
 
 export function RetryRulesSection(props: RetryRulesSectionProps) {
   const { t } = useTranslation()
-  const [transformEditorIndex, setTransformEditorIndex] = useState<number | null>(
-    null
-  )
+  const [editorOpen, setEditorOpen] = useState(false)
 
-  const fallbackEnabled = props.form.watch('thinking_fallback_enabled') || false
-  const rulesJson = props.form.watch('retry_rules')
-  const rules = useMemo(() => parseRules(rulesJson), [rulesJson])
+  const enabled = props.form.watch('thinking_fallback_enabled') || false
+  const transform = props.form.watch('thinking_fallback_transform') || ''
 
-  const commitRules = (next: RetryRule[]) => {
-    props.form.setValue(
-      'retry_rules',
-      next.length > 0 ? JSON.stringify(next) : '',
-      { shouldDirty: true }
-    )
+  const setTransform = (value: string) => {
+    props.form.setValue('thinking_fallback_transform', value, {
+      shouldDirty: true,
+    })
   }
 
-  const updateRule = (index: number, patch: Partial<RetryRule>) => {
-    commitRules(rules.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)))
-  }
-
-  const updateMatch = (index: number, patch: Partial<RetryRule['match']>) => {
-    updateRule(index, { match: { ...(rules[index]?.match ?? {}), ...patch } })
-  }
-
-  const updateRetry = (
-    index: number,
-    patch: Partial<NonNullable<RetryRule['retry']>>
-  ) => {
-    updateRule(index, { retry: { ...(rules[index]?.retry ?? {}), ...patch } })
-  }
-
-  const addRule = () => {
-    commitRules([
-      ...rules,
-      {
-        name: '',
-        match: { status_codes: [400] },
-        transform: [],
-        retry: { target: 'original_channel', max_attempts: 1 },
-      },
-    ])
-  }
-
-  const removeRule = (index: number) => {
-    commitRules(rules.filter((_, i) => i !== index))
-  }
-
-  // RETRY_RULES_SECTION_RENDER_PLACEHOLDER
   return (
     <div className='space-y-3 border-t pt-4'>
       <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
@@ -90,140 +63,92 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
           </p>
         </div>
         <Switch
-          checked={fallbackEnabled}
+          checked={enabled}
           disabled={props.disabled}
-          onCheckedChange={(checked) =>
+          onCheckedChange={(checked) => {
             props.form.setValue('thinking_fallback_enabled', checked, {
               shouldDirty: true,
             })
-          }
+            // On enable, seed the editor with the default thinking rule so it is
+            // visible and editable right away (and doubles as a usable sample).
+            if (
+              checked &&
+              (props.form.getValues('thinking_fallback_transform') || '').trim() ===
+                ''
+            ) {
+              setTransform(DEFAULT_THINKING_TRANSFORM)
+            }
+          }}
         />
       </div>
 
-      <div className='space-y-3'>
-        <div className='flex items-center justify-between'>
-          <span className='text-sm font-medium'>{t('Custom Retry Rules')}</span>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            disabled={props.disabled}
-            onClick={addRule}
-          >
-            <Plus className='mr-2 h-4 w-4' />
-            {t('Add Rule')}
-          </Button>
-        </div>
-        {rules.length === 0 && (
-          <p className='text-sm text-muted-foreground'>
-            {t(
-              'No custom rules. When enabled above, built-in thinking rules apply.'
-            )}
-          </p>
-        )}
-        {/* RETRY_RULES_SECTION_ROWS_PLACEHOLDER */}
-        {rules.map((rule, index) => (
-          <div key={index} className='space-y-2 rounded-md border p-3'>
-            <div className='flex items-center gap-2'>
-              <Input
-                placeholder={t('Rule name')}
-                value={rule.name ?? ''}
-                disabled={props.disabled}
-                onChange={(e) => updateRule(index, { name: e.target.value })}
-              />
-              <Button
-                type='button'
-                variant='ghost'
-                size='icon'
-                disabled={props.disabled}
-                onClick={() => removeRule(index)}
-                aria-label={t('Remove')}
-              >
-                <Trash2 className='h-4 w-4' />
-              </Button>
+      {enabled && (
+        <div className='space-y-3'>
+          <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+            <div className='space-y-1'>
+              <span className='text-sm font-medium'>
+                {t('Fallback Rewrite')}
+              </span>
+              <p className='text-sm text-muted-foreground'>
+                {t(
+                  'Rewrite applied before retrying. Leave empty to strip thinking blocks by default.'
+                )}
+              </p>
             </div>
-            <Input
-              placeholder={t('Status codes (comma separated), e.g. 400')}
-              value={(rule.match?.status_codes ?? []).join(', ')}
-              disabled={props.disabled}
-              onChange={(e) =>
-                updateMatch(index, {
-                  status_codes: e.target.value
-                    .split(',')
-                    .map((s) => parseInt(s.trim(), 10))
-                    .filter((n) => !Number.isNaN(n)),
-                })
-              }
-            />
-            <Input
-              placeholder={t('Error message regex')}
-              value={rule.match?.error_regex ?? ''}
-              disabled={props.disabled}
-              onChange={(e) => updateMatch(index, { error_regex: e.target.value })}
-            />
-            <Input
-              placeholder={t('Relay format (optional), e.g. claude')}
-              value={rule.match?.relay_format ?? ''}
-              disabled={props.disabled}
-              onChange={(e) =>
-                updateMatch(index, { relay_format: e.target.value })
-              }
-            />
-            <div className='flex items-center gap-2'>
-              <Input
-                type='number'
-                placeholder={t('Max attempts')}
-                value={rule.retry?.max_attempts ?? 1}
-                disabled={props.disabled}
-                onChange={(e) =>
-                  updateRetry(index, {
-                    max_attempts: parseInt(e.target.value, 10) || 0,
-                  })
-                }
-              />
+            <div className='flex flex-wrap gap-2'>
               <Button
                 type='button'
                 variant='outline'
                 size='sm'
                 disabled={props.disabled}
-                onClick={() => setTransformEditorIndex(index)}
+                onClick={() => setEditorOpen(true)}
               >
                 <Wand2 className='mr-2 h-4 w-4' />
-                {t('Edit transform')}
+                {t('Visual edit')}
+              </Button>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={props.disabled}
+                onClick={() => setTransform(DEFAULT_THINKING_TRANSFORM)}
+              >
+                <Code className='mr-2 h-4 w-4' />
+                {t('Fill Template')}
+              </Button>
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                disabled={props.disabled}
+                onClick={() => setTransform('')}
+              >
+                {t('Clear')}
               </Button>
             </div>
           </div>
-        ))}
-      </div>
-      {/* RETRY_RULES_SECTION_DIALOG_PLACEHOLDER */}
-      {transformEditorIndex !== null && !props.disabled && (
+          <Textarea
+            value={transform}
+            onChange={(e) => setTransform(e.target.value)}
+            disabled={props.disabled}
+            rows={8}
+            placeholder={t(
+              'Rewrite applied before retrying. Leave empty to strip thinking blocks by default.'
+            )}
+            className='max-h-72 min-h-40 resize-y overflow-auto font-mono text-xs'
+          />
+        </div>
+      )}
+
+      {editorOpen && !props.disabled && (
         <ParamOverrideEditorDialog
-          open={transformEditorIndex !== null}
-          value={JSON.stringify(
-            { operations: rules[transformEditorIndex]?.transform ?? [] },
-            null,
-            2
-          )}
-          onOpenChange={(open) => {
-            if (!open) setTransformEditorIndex(null)
-          }}
-          onSave={(nextValue) => {
-            if (transformEditorIndex === null) return
-            let ops: Array<Record<string, unknown>> = []
-            try {
-              const parsed = JSON.parse(nextValue)
-              if (Array.isArray(parsed?.operations)) {
-                ops = parsed.operations
-              }
-            } catch {
-              ops = []
-            }
-            updateRule(transformEditorIndex, { transform: ops })
-          }}
+          open={editorOpen}
+          value={transform || ''}
+          onOpenChange={setEditorOpen}
+          onSave={setTransform}
         />
       )}
     </div>
   )
 }
-
 
