@@ -1,5 +1,7 @@
 package model
 
+import "github.com/QuantumNous/new-api/common"
+
 // CslHourly is the ClickHouse hourly aggregated call log written by offline jobs.
 type CslHourly struct {
 	StartTime              int64   `json:"start_time" gorm:"column:start_time"`
@@ -40,7 +42,16 @@ type CslHourlyQuery struct {
 	TokenName      string
 }
 
+// GetCslHourly returns the hourly billing summary rows matching params.
+//
+// The data source is chosen by common.CslHourlyReaderEnabled: either LOG_DB's
+// local csl_hourly table (default) or OmniDataSearch (see csl_hourly_omni.go).
+// The two are mutually exclusive; there is no fallback between them, because a
+// bill that silently depends on which backend answered is worse than an error.
 func GetCslHourly(params CslHourlyQuery) ([]*CslHourly, error) {
+	if common.CslHourlyReaderEnabled {
+		return getCslHourlyFromOmni(params)
+	}
 	rows := make([]*CslHourly, 0)
 	query := LOG_DB.Table("csl_hourly").
 		Where("start_time >= ? AND start_time <= ?", params.StartTimestamp, params.EndTimestamp)

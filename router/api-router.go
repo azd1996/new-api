@@ -330,7 +330,11 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/export", middleware.AdminAuth(), controller.ExportAllLogs)
 		logRoute.GET("/self/export", middleware.UserAuth(), controller.ExportUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
-		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		// The hourly billing summary comes either from LOG_DB's csl_hourly table
+		// or from OmniDataSearch, so the routes must be registered when either
+		// source is available. Keying them on the log database alone would
+		// leave them unrouted once the reader is the only source.
+		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) || common.CslHourlyReaderEnabled {
 			logRoute.GET("/hourly", middleware.CslHourlyAuth(), controller.GetAllCslHourly)
 			logRoute.GET("/self/hourly", middleware.CslHourlyAuth(), controller.GetUserCslHourly)
 		}
