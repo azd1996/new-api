@@ -3913,6 +3913,11 @@ export function ChannelMutateDrawer({
                                 )}
                               />
 
+                              <RetryRulesSection
+                                form={form}
+                                disabled={sensitiveLocked}
+                              />
+
                               <FormField
                                 control={form.control}
                                 name='header_override'
@@ -4106,11 +4111,6 @@ export function ChannelMutateDrawer({
                                     </FormControl>
                                   </FormItem>
                                 )}
-                              />
-
-                              <RetryRulesSection
-                                form={form}
-                                disabled={sensitiveLocked}
                               />
 
                               <FormField

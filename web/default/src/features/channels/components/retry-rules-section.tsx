@@ -77,9 +77,9 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
 
   // RETRY_RULES_SECTION_RENDER_PLACEHOLDER
   return (
-    <div className='space-y-3'>
-      <div className='flex items-center justify-between px-4 py-3'>
-        <div className='space-y-0.5'>
+    <div className='space-y-3 border-t pt-4'>
+      <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+        <div className='space-y-1'>
           <span className='text-sm font-medium'>
             {t('Thinking Fallback Retry')}
           </span>
@@ -100,7 +100,7 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
         />
       </div>
 
-      <div className='space-y-3 px-4 pb-3'>
+      <div className='space-y-3'>
         <div className='flex items-center justify-between'>
           <span className='text-sm font-medium'>{t('Custom Retry Rules')}</span>
           <Button
