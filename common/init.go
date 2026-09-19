@@ -131,6 +131,21 @@ func InitEnv() {
 	LogShipperLocalTime = GetEnvOrDefaultBool("LOG_SHIPPER_LOCAL_TIME", false)
 	LogShipperCompress = GetEnvOrDefaultBool("LOG_SHIPPER_COMPRESS", false)
 
+	// CSL hourly reader (read the hourly billing summary from OmniDataSearch
+	// instead of LOG_DB). InstanceName defaults to the shipper's: both name the
+	// same new-api instance, and requiring it twice only creates a way for the
+	// two to disagree. The settings are validated on first use rather than
+	// here, so a missing credential cannot stop the rest of new-api starting.
+	CslHourlyReaderEnabled = GetEnvOrDefaultBool("CSL_HOURLY_READER_ENABLED", false)
+	CslHourlyReaderBaseURL = GetEnvOrDefaultString("CSL_HOURLY_READER_BASE_URL", "")
+	CslHourlyReaderUsername = GetEnvOrDefaultString("CSL_HOURLY_READER_USERNAME", "")
+	CslHourlyReaderSecretKey = GetEnvOrDefaultString("CSL_HOURLY_READER_SECRET_KEY", "")
+	CslHourlyReaderMetric = GetEnvOrDefaultString("CSL_HOURLY_READER_METRIC", "xcdn_csl_sidecar_logs")
+	CslHourlyReaderInstanceName = GetEnvOrDefaultString("CSL_HOURLY_READER_INSTANCE_NAME", LogShipperInstanceName)
+	CslHourlyReaderPageSize = GetEnvOrDefault("CSL_HOURLY_READER_PAGE_SIZE", 5000)
+	CslHourlyReaderMaxRows = GetEnvOrDefault("CSL_HOURLY_READER_MAX_ROWS", 2000000)
+	CslHourlyReaderTimeoutSecs = GetEnvOrDefault("CSL_HOURLY_READER_TIMEOUT_SECS", 30)
+
 	// Initialize rate limit variables
 	GlobalApiRateLimitEnable = GetEnvOrDefaultBool("GLOBAL_API_RATE_LIMIT_ENABLE", true)
 	GlobalApiRateLimitNum = GetEnvOrDefault("GLOBAL_API_RATE_LIMIT", 360)
