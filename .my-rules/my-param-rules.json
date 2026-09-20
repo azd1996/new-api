@@ -1,0 +1,97 @@
+{
+    "operations": [
+        {
+            "mode": "regex_replace",
+            "description": "system为数组且首段text存在时才trim",
+            "path": "system.0.text",
+            "from": "^\\s+|\\s+$",
+            "to": "",
+            "conditions": [
+                {
+                    "path": "system.0.text",
+                    "mode": "prefix",
+                    "value": ""
+                }
+            ],
+            "logic": "OR"
+        },
+        {
+            "description": "system为数组且首段为空时则删除system",
+            "mode": "delete",
+            "path": "system",
+            "conditions": [
+                {
+                    "path": "system.0.text",
+                    "mode": "full",
+                    "value": ""
+                }
+            ],
+            "logic": "OR"
+        },
+        {
+            "description": "thinking的enabled to adaptive参数适配",
+            "mode": "set",
+            "path": "output_config",
+            "value": {
+                "effort": "medium"
+            },
+            "conditions": [
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "enabled"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "thinking的enabled to adaptive参数适配",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "enabled"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "format字段不再被支持",
+            "path": "output_config.format",
+            "mode": "delete",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                }
+            ]
+        },
+        {
+            "description": "删除messages里的system角色",
+            "mode": "prune_objects",
+            "path": "messages",
+            "value": {
+                "where": {
+                    "role": "system"
+                },
+                "recursive": false
+            }
+        }
+    ]
+}

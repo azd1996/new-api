@@ -1,0 +1,85 @@
+[
+  {
+    "description": "解决claude模型发生兜底时thinking块signature验证不过的问题",
+    "phase1_request_condition": {
+        "conditions": [ 
+            { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
+            { "path": "relay_format", "mode": "full", "value": "claude" }
+        ],
+        "logic": "AND"
+    },
+    "phase2_response_conditions": {
+      "conditions": [
+        { "path": "status_code", "mode": "full", "value": 400 },
+        { "path": "error_message", "mode": "contains", "value": "Invalid 'signature' in 'thinking' block" }
+      ],
+      "logic": "AND"
+    },
+    "phase3_request_rewrite": [
+      { "mode": "prune_objects", "path": "messages", "value": { "where": { "type": "thinking" } } },
+      { "mode": "prune_objects", "path": "messages", "value": { "where": { "type": "redacted_thinking" } } }
+    ],
+    "phase4_retry_action": "retry_same_channel"
+  },
+  {
+    "description": "解决gpt模型可能200响应码的同时限流的问题，兜底到下一个渠道",
+    "phase1_request_condition": {
+        "conditions": [ 
+            { "path": "model", "mode": "prefix", "value": "gpt-5.6-sol" },
+            { "path": "relay_format", "mode": "full", "value": "openai_responses" }
+        ],
+        "logic": "AND"
+    },    
+    "phase2_response_conditions": {
+      "conditions": [
+        { "path": "status_code", "mode": "full", "value": 200 },
+        { "path": "response_body", "mode": "contains", "value": "exceeded rate limit" }
+      ],
+      "logic": "AND"
+    },
+    "phase4_retry_action": "fallback_next_channel"
+  },
+  {
+    "description": "解决gpt模型兜底到下一个渠道时无法解密的问题-case1",
+    "phase1_request_condition": {
+        "conditions": [ 
+            { "path": "model", "mode": "prefix", "value": "gpt-5.6-sol" },
+            { "path": "relay_format", "mode": "full", "value": "openai_responses" }
+        ],
+        "logic": "AND"
+    },    
+    "phase2_response_conditions": {
+      "conditions": [
+        { "path": "status_code", "mode": "full", "value": 400 },
+        { "path": "error_message", "mode": "contains", "value": "encrypted content" }
+      ],
+      "logic": "AND"
+    },
+    "phase3_request_rewrite": [
+      { "mode": "prune_objects", "path": "input", "value": { "where": { "type": "reasoning" } } }
+    ],
+    "phase4_retry_action": "retry_same_channel"
+  },
+  {
+    "description": "解决gpt模型兜底到下一个渠道时无法解密的问题-case2",
+    "phase1_request_condition": {
+        "conditions": [
+            { "path": "model", "mode": "prefix", "value": "gpt-5.6-sol" },
+            { "path": "relay_format", "mode": "full", "value": "openai_responses" }
+        ],
+        "logic": "AND"
+    },    
+    "phase2_response_conditions": {
+      "conditions": [
+        { "path": "status_code", "mode": "full", "value": 400 },
+        { "path": "error_message", "mode": "contains", "value": "The requested item was created under a different Azure OpenAI resource" }
+      ],
+      "logic": "AND"
+    },
+    "phase3_request_rewrite": [
+      { "mode": "prune_objects", "path": "input", "value": { "where": { "type": "reasoning" } } }
+    ],
+    "phase4_retry_action": "retry_same_channel"
+  }  
+]
+
