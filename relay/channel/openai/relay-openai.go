@@ -119,6 +119,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	// retry-override: when a streamed chunk matches the channel's response_body
+	// rules (e.g. a rate-limit message), swallow it and abort so the relay loop
+	// retries on the next channel, appending its output to what was already sent.
+	var retryBodyErr *types.NewAPIError
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
@@ -128,6 +132,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
+			}
+		}
+		if retryBodyErr == nil && len(data) > 0 {
+			if e := retryBodyGuardError(info, resp.StatusCode, common.StringToByteSlice(data)); e != nil {
+				// Swallow the offending chunk (do not forward or store it) and stop.
+				retryBodyErr = e
+				lastStreamData = ""
+				sr.Stop(nil)
+				return
 			}
 		}
 		if len(data) > 0 {
@@ -143,6 +156,11 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 		}
 	})
+
+	// retry-override hit: abandon this attempt so the relay loop can fall back.
+	if retryBodyErr != nil {
+		return nil, retryBodyErr
+	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {

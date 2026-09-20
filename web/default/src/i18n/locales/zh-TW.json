@@ -4597,6 +4597,7 @@
     "Tip": "提示",
     "to access this resource.": "存取此資源。",
     "To Anthropic Messages": "轉 Anthropic Messages",
+    "To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a \"response_body\" condition (with status_code 200); the request is then retried on the next channel (200-body matches always fall back). For streaming, the offending chunk is dropped and the next channel continues the response.": "若要捕捉回傳在 200 回應內容中的錯誤（例如限流提示），新增一條 \"response_body\" 條件（並搭配 status_code 200）；命中後請求會轉到下一個通道（200 回應內容命中一律轉移）。串流情境下會丟棄命中的分片，由下一個通道續寫回應。",
     "to confirm": "以確認",
     "To Gemini Generate Content": "轉 Gemini Generate Content",
     "To Lower": "轉小寫",

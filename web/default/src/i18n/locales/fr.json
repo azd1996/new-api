@@ -4597,6 +4597,7 @@
     "Tip": "Astuce",
     "to access this resource.": "pour accéder à cette ressource.",
     "To Anthropic Messages": "Vers Anthropic Messages",
+    "To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a \"response_body\" condition (with status_code 200); the request is then retried on the next channel (200-body matches always fall back). For streaming, the offending chunk is dropped and the next channel continues the response.": "Pour détecter une erreur renvoyée dans un corps de réponse 200 (par ex. un message de limite de débit), ajoutez une condition « response_body » (avec status_code 200) ; la requête est alors relancée sur le canal suivant (les correspondances de corps 200 basculent toujours). En streaming, le fragment fautif est ignoré et le canal suivant poursuit la réponse.",
     "to confirm": "pour confirmer",
     "To Gemini Generate Content": "Vers Gemini Generate Content",
     "To Lower": "En minuscules",

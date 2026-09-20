@@ -278,6 +278,15 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			return
 		}
 
+		// retry-override: swallow a matching chunk and abort so the loop can fall back.
+		if len(data) > 0 {
+			if e := retryBodyGuardError(info, resp.StatusCode, common.StringToByteSlice(data)); e != nil {
+				streamErr = e
+				sr.Stop(streamErr)
+				return
+			}
+		}
+
 		var streamResp dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResp); err != nil {
 			logger.LogError(c, "failed to unmarshal responses stream event: "+err.Error())

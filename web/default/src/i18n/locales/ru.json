@@ -4597,6 +4597,7 @@
     "Tip": "Совет",
     "to access this resource.": "для доступа к этому ресурсу.",
     "To Anthropic Messages": "В Anthropic Messages",
+    "To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a \"response_body\" condition (with status_code 200); the request is then retried on the next channel (200-body matches always fall back). For streaming, the offending chunk is dropped and the next channel continues the response.": "Чтобы поймать ошибку, возвращённую в теле ответа 200 (например, сообщение о лимите), добавьте условие «response_body» (вместе со status_code 200); запрос будет повторён на следующем канале (совпадения по телу 200 всегда переключаются). В потоковом режиме проблемный фрагмент отбрасывается, и ответ продолжает следующий канал.",
     "to confirm": "для подтверждения",
     "To Gemini Generate Content": "В Gemini Generate Content",
     "To Lower": "В нижний регистр",

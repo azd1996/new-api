@@ -4597,6 +4597,7 @@
     "Tip": "ヒント",
     "to access this resource.": "このリソースにアクセスするには。",
     "To Anthropic Messages": "Anthropic Messages へ",
+    "To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a \"response_body\" condition (with status_code 200); the request is then retried on the next channel (200-body matches always fall back). For streaming, the offending chunk is dropped and the next channel continues the response.": "200 レスポンスのボディに含まれるエラー（レート制限メッセージなど）を捕捉するには、「response_body」条件（status_code 200 と併用）を追加します。命中するとリクエストは次のチャネルにフォールバックします（200 ボディ命中は常にフォールバック）。ストリーミングでは該当チャンクを破棄し、次のチャネルが応答を続けます。",
     "to confirm": "確認する",
     "To Gemini Generate Content": "Gemini Generate Content へ",
     "To Lower": "小文字に変換",

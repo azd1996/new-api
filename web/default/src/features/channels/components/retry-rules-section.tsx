@@ -72,6 +72,11 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
               'On an upstream error, match the response (status code / error message) with each operation conditions; matching operations rewrite the request body. Set each operation action to "retry_same_channel" (default) to retry the rewritten request once on the same channel, or "fallback_next_channel" to hand it off to the next channel (requires RetryTimes > 0 and another available channel). Leave empty to disable.'
             )}
           </p>
+          <p className='text-sm text-muted-foreground'>
+            {t(
+              'To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a "response_body" condition (with status_code 200); the request is then retried on the next channel (200-body matches always fall back). For streaming, the offending chunk is dropped and the next channel continues the response.'
+            )}
+          </p>
         </div>
         <div className='flex flex-wrap gap-2'>
           <Button

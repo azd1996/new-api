@@ -4597,6 +4597,7 @@
     "Tip": "Mẹo",
     "to access this resource.": "để truy cập tài nguyên này.",
     "To Anthropic Messages": "Sang Anthropic Messages",
+    "To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a \"response_body\" condition (with status_code 200); the request is then retried on the next channel (200-body matches always fall back). For streaming, the offending chunk is dropped and the next channel continues the response.": "Để bắt lỗi trả về trong nội dung phản hồi 200 (ví dụ thông báo giới hạn tần suất), thêm điều kiện \"response_body\" (kèm status_code 200); yêu cầu sẽ được thử lại trên kênh tiếp theo (khớp nội dung 200 luôn chuyển kênh). Với luồng, phần dữ liệu vi phạm bị loại bỏ và kênh tiếp theo tiếp tục phản hồi.",
     "to confirm": "Chờ xác nhận",
     "To Gemini Generate Content": "Sang Gemini Generate Content",
     "To Lower": "Chữ thường",
