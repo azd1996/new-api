@@ -83,35 +83,19 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
-	// retry-override: swallow a matching chunk and abort so the loop can fall back.
-	var retryBodyErr *types.NewAPIError
-	// dropPreamblePending drops the leading lifecycle event (response.created) on a
-	// fallback continuation when the channel opts into duplicate-preamble dropping.
-	dropPreamblePending := info.ChannelSetting.RetryOverrideDropDuplicatePreamble && info.RetryContinuationContentSent
+	// retry-override: hold leading chunks in a pre-commit buffer so a matching
+	// rule (e.g. a 200-body rate-limit that arrives right after response.created)
+	// can fall back with nothing forwarded to the client. No rules → no buffering.
+	guard := newPrecommitGuard(info, resp.StatusCode)
 
-	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-
-		if retryBodyErr == nil && len(data) > 0 {
-			if e := retryBodyGuardError(info, resp.StatusCode, common.StringToByteSlice(data)); e != nil {
-				retryBodyErr = e
-				sr.Stop(nil)
-				return
-			}
-		}
-
-		// 检查当前数据是否包含 completed 状态和 usage 信息
+	// process is the normal per-chunk work (parse, forward, usage accounting). It
+	// runs directly for pass-through chunks and is replayed for buffered chunks on
+	// commit.
+	process := func(data string) {
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
-			sr.Error(err)
 			return
-		}
-		if dropPreamblePending {
-			dropPreamblePending = false
-			if streamResponse.Type == "response.created" {
-				// Swallow the duplicate lifecycle preamble on this continuation.
-				return
-			}
 		}
 		sendResponsesStreamData(c, streamResponse, data)
 		switch streamResponse.Type {
@@ -154,17 +138,20 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				}
 			}
 		}
+	}
+
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		if guard.feed(data, isResponsesStreamCommit(data), process) {
+			sr.Stop(nil)
+		}
 	})
 
-	if retryBodyErr != nil {
-		if responseTextBuilder.Len() > 0 {
-			// Partial output was already streamed to the client; mark the
-			// continuation so a fallback attempt can drop its duplicate preamble.
-			// The abandoned attempt's tokens are not billed (original behavior).
-			info.RetryContinuationContentSent = true
-		}
-		return nil, retryBodyErr
+	if guard.matched != nil {
+		// A rule matched in the pre-commit window: client received nothing, the
+		// abandoned attempt's tokens are not billed, the relay loop falls back.
+		return nil, guard.matched
 	}
+	guard.finish(process)
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
@@ -183,4 +170,22 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	return usage, nil
+}
+
+// isResponsesStreamCommit reports whether a Responses stream chunk is past the
+// lifecycle preamble (response.created / in_progress / queued). The first such
+// chunk is the pre-commit buffer's commit point: rate-limit / quota errors are
+// emitted as an error/response.failed event before any real output, so holding
+// only the preamble catches them while adding negligible latency.
+func isResponsesStreamCommit(data string) bool {
+	var probe dto.ResponsesStreamResponse
+	if err := common.UnmarshalJsonStr(data, &probe); err != nil {
+		return true // unknown/garbled → commit rather than keep buffering
+	}
+	switch probe.Type {
+	case "", "response.created", "response.in_progress", "response.queued":
+		return false
+	default:
+		return true
+	}
 }

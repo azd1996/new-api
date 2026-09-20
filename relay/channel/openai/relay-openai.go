@@ -119,68 +119,48 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
-	// retry-override: when a streamed chunk matches the channel's response_body
-	// rules (e.g. a rate-limit message), swallow it and abort so the relay loop
-	// retries on the next channel, appending its output to what was already sent.
-	var retryBodyErr *types.NewAPIError
-	// dropPreamblePending is set on a fallback continuation (a prior attempt was
-	// abandoned mid-stream after sending content) when the channel opts in to
-	// dropping the duplicate assistant-role preamble; it drops the first
-	// role-only chunk of this attempt.
-	dropPreamblePending := info.ChannelSetting.RetryOverrideDropDuplicatePreamble && info.RetryContinuationContentSent
+	// retry-override: hold leading chunks in a pre-commit buffer so a matching
+	// rule (e.g. a 200-body rate-limit) can fall back with nothing forwarded to the
+	// client. No retry_override rules → the guard starts committed (no buffering).
+	guard := newPrecommitGuard(info, resp.StatusCode)
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
-	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	// process is the normal per-chunk work: it flushes the previous buffered chunk
+	// (one-behind, as before), then stores the current chunk and does token
+	// accounting. It runs directly for pass-through chunks and is replayed in order
+	// for buffered chunks on commit, preserving the original one-behind semantics.
+	process := func(data string) {
 		if lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
-				sr.Error(err)
 			}
-		}
-		if retryBodyErr == nil && len(data) > 0 {
-			if e := retryBodyGuardError(info, resp.StatusCode, common.StringToByteSlice(data)); e != nil {
-				// Swallow the offending chunk (do not forward or store it) and stop.
-				retryBodyErr = e
-				lastStreamData = ""
-				sr.Stop(nil)
-				return
-			}
-		}
-		if dropPreamblePending && len(data) > 0 && info.RelayFormat == types.RelayFormatOpenAI {
-			var probe dto.ChatCompletionsStreamResponse
-			if err := common.UnmarshalJsonStr(data, &probe); err == nil && isChatRolePreamble(&probe) {
-				// Swallow the duplicate assistant-role preamble on this continuation.
-				dropPreamblePending = false
-				return
-			}
-			dropPreamblePending = false
 		}
 		if len(data) > 0 {
 			// 对音频模型，保存倒数第二个stream data
 			if isAudioModel && lastStreamData != "" {
 				secondLastStreamData = lastStreamData
 			}
-
 			lastStreamData = data
 			if err := processTokenData(info.RelayMode, data, &responseTextBuilder, &toolCount); err != nil {
 				logger.LogError(c, "error processing stream token data: "+err.Error())
-				sr.Error(err)
 			}
+		}
+	}
+
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		if guard.feed(data, isChatStreamCommit(data), process) {
+			sr.Stop(nil)
 		}
 	})
 
-	// retry-override hit: abandon this attempt so the relay loop can fall back.
-	if retryBodyErr != nil {
-		if responseTextBuilder.Len() > 0 || toolCount > 0 {
-			// Partial content was already streamed to the client; record it so a
-			// fallback continuation can drop its duplicate preamble. The abandoned
-			// attempt's tokens are not billed (new-api's original behavior).
-			info.RetryContinuationContentSent = true
-		}
-		return nil, retryBodyErr
+	// retry-override hit in the pre-commit window: nothing forwarded to the client,
+	// abandoned attempt's tokens are not billed, relay loop falls back.
+	if guard.matched != nil {
+		return nil, guard.matched
 	}
+	guard.finish(process)
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {

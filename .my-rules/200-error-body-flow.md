@@ -43,7 +43,7 @@ relay 主循环拿到该"错误"，进入 `controller/retry_fallback.go`：
 
 - **为什么强制换渠道**：同一个被限流的渠道立刻重试没意义，故对 200 一律 fallback。配置写 `fallback_next_channel` 与此一致（写别的也会被强制覆盖）。
 - **16KB 上限**：限流文案一般在 body 顶部，没问题；若标记出现在 16KB 之后则扫不到。
-- **流式边界**：若错误标记在已向客户端吐出正文之后才到，中途切渠道重来可能产生重复内容。针对性缓解为 `RetryOverrideDropDuplicatePreamble`（丢重复的 role preamble）。限流场景通常首个 chunk 即命中并被吞掉，一般不触及。
+- **流式边界（有正确性问题，详见下文专节）**：当前"即发即检"在流式下会把前导块先发给客户端，兜底时产生重复前导/内容拼接；`RetryOverrideDropDuplicatePreamble` 只丢 role preamble 且依赖 `RetryContinuationContentSent`，在"错误紧跟前导块"的真实限流场景下不生效。见《流式响应中途报限流的正确性问题》。
 - **适用范围**：body 拦截位于 openai 适配器（`relay/channel/openai/`），Responses 的流式/非流式处理器均挂了 guard，`openai_responses` 正好覆盖。
 
 ## 计费问题的考虑
@@ -66,6 +66,46 @@ guard 命中后响应处理器 `return nil, retryBodyErr`（`relay_responses.go:
 - **流式已吐出部分内容的情况**：若限流标记在已向客户端流式吐出部分正文之后才到（`responseTextBuilder.Len() > 0` → 置 `RetryContinuationContentSent`），这部分已发 token 同样不计费（丢弃尝试不计费），客户端后续收到兜底续写，重复由 `RetryOverrideDropDuplicatePreamble` 缓解。计费上仍只结算最终成功渠道。
 - **预扣额度占用**：预扣是一次性估算值，在整个多跳兜底期间一直占用；若用户余额紧张，较大的预扣可能直接卡在预扣阶段（返回余额不足）。但它是单笔占用，不会 N 倍膨胀。
 - **无重复计费风险**：预扣一次 + 成功一次结算，跨兜底跳不产生二次扣费。
+
+## 流式响应中途报限流的正确性问题（重点）
+
+普通问答对"中途切渠道重来"不敏感；但代码/文档生成这类"整件交付物"场景，中途拼接会损坏结果。而当前"每个 chunk 即发即检"的做法虽然解决了"把限流错误暴露给客户端"的问题，却带来了更严重的**正确性**问题。
+
+### 真实事件序列（参考 c.json）
+
+一条 `/v1/responses` 流式请求，上游实际 chunk 顺序：
+
+1. `response.created`（`status: in_progress`，**`output: []`**）——生命周期前导事件，**无任何正文内容**
+2. `error`（`too_many_requests` / `rate_limit_exceeded`，含 "exceeded rate limit"）
+3. `response.failed`
+
+关键：限流错误**紧跟在 `response.created` 之后、在任何 `response.output_text.delta` 之前**到达。即"上游一上来就拒绝"，正文一个字都没生成。
+
+### 当前实现的缺陷
+
+`response.created` 会被 guard 放行并**立即 flush 给客户端**（它不含限流文案），随后 `error` 块才命中 guard 被吞掉。此时 `responseTextBuilder.Len()==0`，于是 `RetryContinuationContentSent` **不置位**（gate 只认"已发正文"）。兜底渠道 B 的 `dropPreamblePending` 因此为 false，**B 自己的 `response.created` 不会被丢弃** → 客户端收到**两个 `response.created`**。
+
+`RetryOverrideDropDuplicatePreamble` 即使打开也无效，因为它依赖 `RetryContinuationContentSent`，后者在此链路恒为 false。对严格解析 Responses API SSE 的客户端（Codex 类），重复的生命周期事件会造成协议错乱。
+
+根因：去重 gate 的判定条件是"是否发过正文"，但真实限流场景是"错误在正文之前、前导之后"。
+
+### 备选设计方案
+
+- **方案 A（提交前缓冲）**：缓冲头部若干块，确认无限流错误前不向客户端发任何字节；命中则干净兜底（已发 0 字节，无重复前导、无内容拼接）。可彻底删除 `RetryContinuationContentSent`/`dropPreamblePending`/`RetryOverrideDropDuplicatePreamble` 这套脆弱机制。代价是首包延迟略增（头部块通常一个 TCP 突发即到，影响很小）。
+- **方案 B（前导先发 + 缓冲内容 + 续写）**：前导块立即下发，缓冲中间内容块，命中则吞内容、回源丢弃前导只补内容。TTFB 感知更好，但有硬伤——**跨渠道协议一致性**：客户端手里的前导来自渠道 A（`resp_A` 的 id/item_id/index 体系），回源补的是渠道 B 的内容事件（`resp_B` 的 id 体系），两者对不上，Responses API 客户端会出现"收到从未 `output_item.added` 过的 item 的 delta"这类协议断裂。对代码/文档场景尤其不该选。
+
+### 结论与建议
+
+**采用方案 A。** 它从根上消除"跨渠道拼接"，而 B 只是把拼接做得更隐蔽并额外背上 Responses API 的 id 错配风险，换来的 TTFB 优势很边际，不值得用正确性去换。
+
+两个细化点：
+
+1. **缓冲窗口用语义边界而非固定"3 块"**：缓冲到"**第一个真正的内容 delta**（`response.output_text.delta`）"为止，再加一个小的块数/字节数上限兜底。限流/鉴权/配额这类"开头即拒"错误都在首个内容 token 之前出现，以"首个内容块"为提交点，延迟最低且天然全覆盖；一旦内容开始流，说明上游已决定生成，就 flush 头部并转即发即流。
+2. **明确共同边界**：A/B 都只保护"窗口内"的错误；窗口 flush 之后再冒出的错误无法干净恢复——但这是**合理的边界**。内容已流出一半还静默回源重生成本就会造成拼接和重复计费；对"流到一半的真·中途错误"，正确做法是如实透出/接受部分结果，而非偷偷重来。限流不属于此类。
+
+一致性：非流式请求本就是"整个 body 缓冲完、写客户端前跑 guard"，天然即方案 A；流式改为 A 后两者语义统一。
+
+（现状：代码尚未按方案 A 改造；上面为待定设计结论。）
 
 ## 关键代码位置
 

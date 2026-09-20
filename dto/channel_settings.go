@@ -26,11 +26,12 @@ type ChannelSettings struct {
 	// param-override condition semantics (see relay/common.EvaluateConditions).
 	// Empty = disabled; a rule that fails to parse is skipped, never fatal.
 	RetryOverride []RetryRule `json:"retry_override,omitempty"`
-	// RetryOverrideDropDuplicatePreamble, when true, drops the first role/preamble
-	// chunk of a fallback continuation stream (i.e. after a prior attempt already
-	// streamed content to the client), avoiding a duplicated assistant-role
-	// preamble. Default false = forward every chunk unchanged.
-	RetryOverrideDropDuplicatePreamble bool `json:"retry_override_drop_duplicate_preamble,omitempty"`
+	// RetryOverrideStreamPrecommitChunks bounds how many leading stream chunks are
+	// buffered before "committing" (forwarding to the client) on the streaming
+	// retry-override body-detection path. Until commit, chunks are held and scanned
+	// so a matching rule (e.g. a 200-body rate-limit) can fall back cleanly with
+	// nothing sent to the client. Unset/0 falls back to a small built-in default.
+	RetryOverrideStreamPrecommitChunks int `json:"retry_override_stream_precommit_chunks,omitempty"`
 }
 
 // RetryRulePhaseCondition is a phase's condition block. Conditions are raw JSON

@@ -208,13 +208,10 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	streamErr := (*types.NewAPIError)(nil)
-	// retryBodyErr is set only when the retry-override body guard synthesizes a
-	// retryable error, so the abandoned-attempt billing/continuation handling
-	// below runs only for that case (not for other stream errors).
-	var retryBodyErr *types.NewAPIError
-	// dropPreamblePending drops the first converted role-only chat preamble on a
-	// fallback continuation when the channel opts into duplicate-preamble dropping.
-	dropPreamblePending := info.ChannelSetting.RetryOverrideDropDuplicatePreamble && info.RetryContinuationContentSent
+	// retry-override: hold leading chunks in a pre-commit buffer so a matching rule
+	// (e.g. a 200-body rate-limit that arrives before any content) can fall back
+	// with nothing forwarded to the client. No retry_override rules → no buffering.
+	guard := newPrecommitGuard(info, resp.StatusCode)
 
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo == nil {
 		info.ClaudeConvertInfo = &relaycommon.ClaudeConvertInfo{LastMessagesType: relaycommon.LastMessageTypeNone}
@@ -235,20 +232,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 
 	sendStreamResult := func(result relayconvert.ResponseResult) bool {
-		if dropPreamblePending {
-			switch v := result.Value.(type) {
-			case dto.ChatCompletionsStreamResponse:
-				dropPreamblePending = false
-				if isChatRolePreamble(&v) {
-					return true
-				}
-			case *dto.ChatCompletionsStreamResponse:
-				dropPreamblePending = false
-				if isChatRolePreamble(v) {
-					return true
-				}
-			}
-		}
 		switch value := result.Value.(type) {
 		case dto.ChatCompletionsStreamResponse:
 			if len(value.Choices) == 0 && value.Usage == nil {
@@ -293,65 +276,64 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		}
 	}
 
+	// process is the normal per-chunk work: parse the upstream Responses event,
+	// convert it and forward the results. It runs directly for pass-through chunks
+	// and is replayed in order for buffered chunks on commit. Errors are recorded
+	// on streamErr (checked by the caller) rather than stopping the scan directly,
+	// since process may also run after the scan loop (guard.finish).
+	process := func(data string) {
+		if streamErr != nil {
+			return
+		}
+		var streamResp dto.ResponsesStreamResponse
+		if err := common.UnmarshalJsonStr(data, &streamResp); err != nil {
+			logger.LogError(c, "failed to unmarshal responses stream event: "+err.Error())
+			return
+		}
+		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" {
+			if streamResp.Response != nil {
+				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
+					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+					return
+				}
+			}
+			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return
+		}
+		results, err := relayconvert.ConvertStreamResponseChunk(c, info, state, &streamResp)
+		if err != nil {
+			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return
+		}
+		for _, result := range results {
+			if !sendStreamResult(result) {
+				return
+			}
+		}
+	}
+
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		if streamErr != nil {
 			sr.Stop(streamErr)
 			return
 		}
-
-		// retry-override: swallow a matching chunk and abort so the loop can fall back.
-		if len(data) > 0 {
-			if e := retryBodyGuardError(info, resp.StatusCode, common.StringToByteSlice(data)); e != nil {
-				streamErr = e
-				retryBodyErr = e
-				sr.Stop(streamErr)
-				return
-			}
-		}
-
-		var streamResp dto.ResponsesStreamResponse
-		if err := common.UnmarshalJsonStr(data, &streamResp); err != nil {
-			logger.LogError(c, "failed to unmarshal responses stream event: "+err.Error())
-			sr.Error(err)
+		if guard.feed(data, isResponsesStreamCommit(data), process) {
+			// retry-override matched in the pre-commit window: nothing was forwarded.
+			sr.Stop(nil)
 			return
 		}
-
-		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" {
-			if streamResp.Response != nil {
-				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
-					sr.Stop(streamErr)
-					return
-				}
-			}
-			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		if streamErr != nil {
 			sr.Stop(streamErr)
 			return
-		}
-
-		results, err := relayconvert.ConvertStreamResponseChunk(c, info, state, &streamResp)
-		if err != nil {
-			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
-			sr.Stop(streamErr)
-			return
-		}
-		for _, result := range results {
-			if !sendStreamResult(result) {
-				sr.Stop(streamErr)
-				return
-			}
 		}
 	})
 
-	if retryBodyErr != nil {
-		if state.UsageText() != "" {
-			// Partial output was already streamed to the client; mark the
-			// continuation so a fallback attempt can drop its duplicate preamble.
-			// The abandoned attempt's tokens are not billed (original behavior).
-			info.RetryContinuationContentSent = true
-		}
-		return nil, retryBodyErr
+	if guard.matched != nil {
+		// Client received nothing; abandoned attempt's tokens are not billed; the
+		// relay loop falls back to the next channel.
+		return nil, guard.matched
 	}
+	guard.finish(process)
 
 	if streamErr != nil {
 		return nil, streamErr
