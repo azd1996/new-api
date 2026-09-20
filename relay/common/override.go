@@ -3,6 +3,7 @@ package common
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"regexp"
 	"sort"
@@ -776,7 +777,9 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 		// 检查条件是否满足
 		ok, err := checkConditions(result, contextJSON, op.Conditions, op.Logic)
 		if err != nil {
-			return nil, err
+			// 条件求值出错：跳过本条操作，不影响其余操作与请求本身。
+			common.SysError(fmt.Sprintf("param override: skipping operation %q, condition evaluation failed: %v", op.Mode, err))
+			continue
 		}
 		if !ok {
 			continue // 条件不满足，跳过当前操作
@@ -787,11 +790,22 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 		if isPathBasedOperation(op.Mode) {
 			opPaths, err = resolveOperationPaths(result, opPath)
 			if err != nil {
-				return nil, err
+				common.SysError(fmt.Sprintf("param override: skipping operation %q, path resolution failed: %v", op.Mode, err))
+				continue
 			}
 			if len(opPaths) == 0 {
 				continue
 			}
+		}
+
+		// 快照当前状态，使单条操作出错时可原样回滚并跳过，避免污染后续操作。
+		// resultSnapshot 复制请求体字节，防止底层 sjson 就地改写；headerSnapshot 复制
+		// header 覆盖子表（仅 *_header 操作会改动它，值均为字符串，浅拷贝即可）。
+		resultSnapshot := append([]byte(nil), result...)
+		contextJSONSnapshot := contextJSON
+		var headerSnapshot map[string]interface{}
+		if hv, ok := context[paramOverrideContextHeaderOverride].(map[string]interface{}); ok {
+			headerSnapshot = maps.Clone(hv)
 		}
 
 		switch op.Mode {
@@ -823,7 +837,8 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 			}
 		case "copy":
 			if op.From == "" || op.To == "" {
-				return nil, fmt.Errorf("copy from/to is required")
+				err = fmt.Errorf("copy from/to is required")
+				break
 			}
 			opFrom := processNegativeIndex(result, op.From)
 			opTo := processNegativeIndex(result, op.To)
@@ -923,7 +938,10 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 			auditRecorder.recordOperation("return_error", op.Path, "", "", op.Value)
 			returnErr, parseErr := parseParamOverrideReturnError(op.Value)
 			if parseErr != nil {
-				return nil, parseErr
+				// return_error 配置本身有误：按普通操作错误跳过（下方统一处理），
+				// 不因配置错误而阻断整条请求。
+				err = parseErr
+				break
 			}
 			return nil, returnErr
 		case "prune_objects":
@@ -982,7 +1000,8 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 		case "pass_headers":
 			headerNames, parseErr := parseHeaderPassThroughNames(op.Value)
 			if parseErr != nil {
-				return nil, parseErr
+				err = parseErr
+				break
 			}
 			for _, headerName := range headerNames {
 				if err = copyHeaderInContext(context, headerName, headerName, op.KeepOrigin); err != nil {
@@ -1004,10 +1023,22 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 				contextJSON, err = marshalContextJSON(context)
 			}
 		default:
-			return nil, fmt.Errorf("unknown operation: %s", op.Mode)
+			err = fmt.Errorf("unknown operation: %s", op.Mode)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("operation %s failed: %w", op.Mode, err)
+			// return_error 的主动阻断（*ParamOverrideReturnError）属于预期行为，需向上传播。
+			if _, isReturnErr := AsParamOverrideReturnError(err); isReturnErr {
+				return nil, err
+			}
+			// 其余为校验/执行错误（未知动作、类型不符、解析失败等）：记录日志并原样回滚、
+			// 跳过本条操作，继续处理后续操作与请求，避免单条规则错误导致整个请求 500。
+			common.SysError(fmt.Sprintf("param override: skipping operation %q due to error: %v", op.Mode, err))
+			result = resultSnapshot
+			contextJSON = contextJSONSnapshot
+			if headerSnapshot != nil {
+				context[paramOverrideContextHeaderOverride] = headerSnapshot
+			}
+			continue
 		}
 	}
 	return result, nil

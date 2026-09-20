@@ -120,9 +120,9 @@ func TestApplyParamOverrideMixedLegacyAndOperationsConflictPrefersOperations(t *
 	assertJSONEqual(t, `{"model":"op-model","temperature":0.2}`, string(out))
 }
 
-func TestApplyParamOverrideTrimRequiresValue(t *testing.T) {
-	// trim_prefix requires value example:
-	// {"operations":[{"path":"model","mode":"trim_prefix"}]}
+func TestApplyParamOverrideTrimMissingValueSkipped(t *testing.T) {
+	// A trim_prefix without value is invalid. Instead of failing the whole request,
+	// the operation is skipped (fail-open) and the body passes through unchanged.
 	input := []byte(`{"model":"gpt-4"}`)
 	override := map[string]interface{}{
 		"operations": []interface{}{
@@ -133,10 +133,11 @@ func TestApplyParamOverrideTrimRequiresValue(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	out, err := ApplyParamOverride(input, override, nil)
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
 	}
+	assertJSONEqual(t, `{"model":"gpt-4"}`, string(out))
 }
 
 func TestApplyParamOverrideReplace(t *testing.T) {
@@ -183,9 +184,9 @@ func TestApplyParamOverrideRegexReplace(t *testing.T) {
 	assertJSONEqual(t, `{"model":"openai/gpt-4o-mini","temperature":0.7}`, string(out))
 }
 
-func TestApplyParamOverrideReplaceRequiresFrom(t *testing.T) {
-	// replace requires from example:
-	// {"operations":[{"path":"model","mode":"replace"}]}
+func TestApplyParamOverrideReplaceMissingFromSkipped(t *testing.T) {
+	// replace without "from" is invalid; the operation is skipped and the body
+	// passes through unchanged rather than failing the request.
 	input := []byte(`{"model":"gpt-4"}`)
 	override := map[string]interface{}{
 		"operations": []interface{}{
@@ -196,15 +197,16 @@ func TestApplyParamOverrideReplaceRequiresFrom(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	out, err := ApplyParamOverride(input, override, nil)
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
 	}
+	assertJSONEqual(t, `{"model":"gpt-4"}`, string(out))
 }
 
-func TestApplyParamOverrideRegexReplaceRequiresPattern(t *testing.T) {
-	// regex_replace requires from(pattern) example:
-	// {"operations":[{"path":"model","mode":"regex_replace"}]}
+func TestApplyParamOverrideRegexReplaceMissingPatternSkipped(t *testing.T) {
+	// regex_replace without a pattern is invalid; the operation is skipped and the
+	// body passes through unchanged rather than failing the request.
 	input := []byte(`{"model":"gpt-4"}`)
 	override := map[string]interface{}{
 		"operations": []interface{}{
@@ -215,9 +217,47 @@ func TestApplyParamOverrideRegexReplaceRequiresPattern(t *testing.T) {
 		},
 	}
 
+	out, err := ApplyParamOverride(input, override, nil)
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
+	}
+	assertJSONEqual(t, `{"model":"gpt-4"}`, string(out))
+}
+
+func TestApplyParamOverrideSkipsInvalidOperationButKeepsValidOnes(t *testing.T) {
+	// A rule with a nonexistent mode must not fail the request; it is skipped and
+	// the remaining valid operations still apply.
+	input := []byte(`{"model":"openai/gpt-4o-mini","temperature":0.7}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{"path": "model", "mode": "does_not_exist"},
+			map[string]interface{}{"path": "model", "mode": "replace", "from": "openai/", "to": ""},
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, nil)
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
+	}
+	assertJSONEqual(t, `{"model":"gpt-4o-mini","temperature":0.7}`, string(out))
+}
+
+func TestApplyParamOverrideReturnErrorStillBlocks(t *testing.T) {
+	// return_error is an intentional block, not a validation failure, so the
+	// skip-on-error path must NOT swallow it: the request must still be blocked.
+	input := []byte(`{"model":"gpt-4"}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{"mode": "return_error", "value": "blocked by policy"},
+		},
+	}
+
 	_, err := ApplyParamOverride(input, override, nil)
 	if err == nil {
-		t.Fatalf("expected error, got nil")
+		t.Fatalf("return_error must still block the request")
+	}
+	if _, ok := AsParamOverrideReturnError(err); !ok {
+		t.Fatalf("expected ParamOverrideReturnError, got %T: %v", err, err)
 	}
 }
 
@@ -571,8 +611,8 @@ func TestApplyParamOverrideMoveMissingSource(t *testing.T) {
 	}
 
 	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
 	}
 }
 
@@ -850,8 +890,8 @@ func TestApplyParamOverrideRegexReplaceInvalidPattern(t *testing.T) {
 	}
 
 	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
 	}
 }
 
@@ -891,8 +931,8 @@ func TestApplyParamOverrideCopyMissingSource(t *testing.T) {
 	}
 
 	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
 	}
 }
 
@@ -909,8 +949,8 @@ func TestApplyParamOverrideCopyRequiresFromTo(t *testing.T) {
 	}
 
 	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
 	}
 }
 
@@ -1012,8 +1052,8 @@ func TestApplyParamOverrideEnsureRequiresValue(t *testing.T) {
 	}
 
 	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
 	}
 }
 
@@ -1212,8 +1252,8 @@ func TestApplyParamOverrideNormalizeThinkingSignatureUnsupported(t *testing.T) {
 	}
 
 	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
 	}
 }
 
@@ -1551,8 +1591,8 @@ func TestApplyParamOverrideSyncFieldsInvalidTarget(t *testing.T) {
 	}
 
 	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	if err != nil {
+		t.Fatalf("invalid operation must be skipped, got error: %v", err)
 	}
 }
 
