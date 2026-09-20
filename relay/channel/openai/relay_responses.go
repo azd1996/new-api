@@ -85,6 +85,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 	// retry-override: swallow a matching chunk and abort so the loop can fall back.
 	var retryBodyErr *types.NewAPIError
+	// dropPreamblePending drops the leading lifecycle event (response.created) on a
+	// fallback continuation when the channel opts into duplicate-preamble dropping.
+	dropPreamblePending := info.ChannelSetting.RetryOverrideDropDuplicatePreamble && info.RetryContinuationContentSent
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -102,6 +105,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
 			sr.Error(err)
 			return
+		}
+		if dropPreamblePending {
+			dropPreamblePending = false
+			if streamResponse.Type == "response.created" {
+				// Swallow the duplicate lifecycle preamble on this continuation.
+				return
+			}
 		}
 		sendResponsesStreamData(c, streamResponse, data)
 		switch streamResponse.Type {
@@ -147,6 +157,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	})
 
 	if retryBodyErr != nil {
+		if responseTextBuilder.Len() > 0 {
+			// Partial output was already streamed to the client; mark the
+			// continuation so a fallback attempt can drop its duplicate preamble.
+			// The abandoned attempt's tokens are not billed (original behavior).
+			info.RetryContinuationContentSent = true
+		}
 		return nil, retryBodyErr
 	}
 

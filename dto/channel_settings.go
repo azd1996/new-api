@@ -24,6 +24,11 @@ type ChannelSettings struct {
 	// an error, matching operations rewrite the request body and the request is
 	// retried once on the same channel. Empty = disabled.
 	RetryOverride []map[string]any `json:"retry_override,omitempty"`
+	// RetryOverrideDropDuplicatePreamble, when true, drops the first role/preamble
+	// chunk of a fallback continuation stream (i.e. after a prior attempt already
+	// streamed content to the client), avoiding a duplicated assistant-role
+	// preamble. Default false = forward every chunk unchanged.
+	RetryOverrideDropDuplicatePreamble bool `json:"retry_override_drop_duplicate_preamble,omitempty"`
 }
 
 type VertexKeyType string

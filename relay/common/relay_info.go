@@ -163,6 +163,13 @@ type RelayInfo struct {
 	// once per request, preventing retry loops.
 	RetryFallbackDone bool
 
+	// RetryContinuationContentSent is set when a streaming attempt already
+	// forwarded content to the client and was then abandoned mid-stream by the
+	// retry-override body guard. A subsequent fallback attempt reads it to decide
+	// whether it is a continuation on the same client writer (used by the
+	// duplicate-preamble drop switch).
+	RetryContinuationContentSent bool
+
 	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
 	// body. It is set when the body is wrapped in a BodyStorage (see
 	// relay/common/outbound_body.go), so that DoApiRequest can populate

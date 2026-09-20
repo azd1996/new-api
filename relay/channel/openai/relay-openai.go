@@ -123,6 +123,11 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	// rules (e.g. a rate-limit message), swallow it and abort so the relay loop
 	// retries on the next channel, appending its output to what was already sent.
 	var retryBodyErr *types.NewAPIError
+	// dropPreamblePending is set on a fallback continuation (a prior attempt was
+	// abandoned mid-stream after sending content) when the channel opts in to
+	// dropping the duplicate assistant-role preamble; it drops the first
+	// role-only chunk of this attempt.
+	dropPreamblePending := info.ChannelSetting.RetryOverrideDropDuplicatePreamble && info.RetryContinuationContentSent
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
@@ -143,6 +148,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 				return
 			}
 		}
+		if dropPreamblePending && len(data) > 0 && info.RelayFormat == types.RelayFormatOpenAI {
+			var probe dto.ChatCompletionsStreamResponse
+			if err := common.UnmarshalJsonStr(data, &probe); err == nil && isChatRolePreamble(&probe) {
+				// Swallow the duplicate assistant-role preamble on this continuation.
+				dropPreamblePending = false
+				return
+			}
+			dropPreamblePending = false
+		}
 		if len(data) > 0 {
 			// 对音频模型，保存倒数第二个stream data
 			if isAudioModel && lastStreamData != "" {
@@ -159,6 +173,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	// retry-override hit: abandon this attempt so the relay loop can fall back.
 	if retryBodyErr != nil {
+		if responseTextBuilder.Len() > 0 || toolCount > 0 {
+			// Partial content was already streamed to the client; record it so a
+			// fallback continuation can drop its duplicate preamble. The abandoned
+			// attempt's tokens are not billed (new-api's original behavior).
+			info.RetryContinuationContentSent = true
+		}
 		return nil, retryBodyErr
 	}
 

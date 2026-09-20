@@ -3,6 +3,7 @@ package openai
 import (
 	"errors"
 
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/retryrule"
 	"github.com/QuantumNous/new-api/types"
@@ -35,4 +36,21 @@ func retryBodyGuardError(info *relaycommon.RelayInfo, statusCode int, body []byt
 		return nil
 	}
 	return types.NewErrorWithStatusCode(errors.New(string(snippet)), types.ErrorCodeBadResponseStatusCode, statusCode)
+}
+
+// isChatRolePreamble reports whether a chat-completions stream chunk is a
+// role-only preamble delta (e.g. {"role":"assistant"} with no content). It is the
+// leading chunk that the duplicate-preamble drop switch swallows on a fallback
+// continuation, so the client does not see a second assistant-role preamble.
+func isChatRolePreamble(resp *dto.ChatCompletionsStreamResponse) bool {
+	if resp == nil || len(resp.Choices) == 0 {
+		return false
+	}
+	choice := resp.Choices[0]
+	if choice.FinishReason != nil {
+		return false
+	}
+	delta := choice.Delta
+	return delta.Role != "" && delta.GetContentString() == "" &&
+		delta.GetReasoningContent() == "" && len(delta.ToolCalls) == 0
 }

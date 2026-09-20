@@ -208,6 +208,13 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	streamErr := (*types.NewAPIError)(nil)
+	// retryBodyErr is set only when the retry-override body guard synthesizes a
+	// retryable error, so the abandoned-attempt billing/continuation handling
+	// below runs only for that case (not for other stream errors).
+	var retryBodyErr *types.NewAPIError
+	// dropPreamblePending drops the first converted role-only chat preamble on a
+	// fallback continuation when the channel opts into duplicate-preamble dropping.
+	dropPreamblePending := info.ChannelSetting.RetryOverrideDropDuplicatePreamble && info.RetryContinuationContentSent
 
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo == nil {
 		info.ClaudeConvertInfo = &relaycommon.ClaudeConvertInfo{LastMessagesType: relaycommon.LastMessageTypeNone}
@@ -228,6 +235,20 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 
 	sendStreamResult := func(result relayconvert.ResponseResult) bool {
+		if dropPreamblePending {
+			switch v := result.Value.(type) {
+			case dto.ChatCompletionsStreamResponse:
+				dropPreamblePending = false
+				if isChatRolePreamble(&v) {
+					return true
+				}
+			case *dto.ChatCompletionsStreamResponse:
+				dropPreamblePending = false
+				if isChatRolePreamble(v) {
+					return true
+				}
+			}
+		}
 		switch value := result.Value.(type) {
 		case dto.ChatCompletionsStreamResponse:
 			if len(value.Choices) == 0 && value.Usage == nil {
@@ -282,6 +303,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		if len(data) > 0 {
 			if e := retryBodyGuardError(info, resp.StatusCode, common.StringToByteSlice(data)); e != nil {
 				streamErr = e
+				retryBodyErr = e
 				sr.Stop(streamErr)
 				return
 			}
@@ -320,6 +342,16 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			}
 		}
 	})
+
+	if retryBodyErr != nil {
+		if state.UsageText() != "" {
+			// Partial output was already streamed to the client; mark the
+			// continuation so a fallback attempt can drop its duplicate preamble.
+			// The abandoned attempt's tokens are not billed (original behavior).
+			info.RetryContinuationContentSent = true
+		}
+		return nil, retryBodyErr
+	}
 
 	if streamErr != nil {
 		return nil, streamErr
