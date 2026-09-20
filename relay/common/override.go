@@ -548,6 +548,27 @@ func checkConditions(data []byte, contextJSON string, conditions []ConditionOper
 	return lo.SomeBy(results, func(item bool) bool { return item }), nil
 }
 
+// EvaluateConditions evaluates raw condition entries (as authored in
+// param-override / retry-override JSON) against doc, falling back to contextJSON
+// when a path is absent in doc. It exposes the exact param-override condition
+// semantics (modes full/prefix/suffix/contains/gt/gte/lt/lte, invert,
+// pass_missing_key, default logic OR) so other packages (e.g. relay/retryrule)
+// share one evaluator instead of reimplementing it. Empty conditions match.
+func EvaluateConditions(doc []byte, contextJSON string, conditions []map[string]any, logic string) (bool, error) {
+	if len(conditions) == 0 {
+		return true, nil
+	}
+	raw := make([]any, len(conditions))
+	for i := range conditions {
+		raw[i] = conditions[i]
+	}
+	parsed, err := parseConditionOperations(raw)
+	if err != nil {
+		return false, err
+	}
+	return checkConditions(doc, contextJSON, parsed, logic)
+}
+
 func checkSingleCondition(data []byte, contextJSON string, condition ConditionOperation) (bool, error) {
 	// 处理负数索引
 	path := processNegativeIndex(data, condition.Path)

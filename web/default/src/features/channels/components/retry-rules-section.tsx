@@ -1,58 +1,53 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UseFormReturn } from 'react-hook-form'
-import { Code, Wand2 } from 'lucide-react'
+import { Code } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 
 import type { ChannelFormValues } from '../lib/channel-form'
-import { ParamOverrideEditorDialog } from './dialogs/param-override-editor-dialog'
 
 type RetryRulesSectionProps = {
   form: UseFormReturn<ChannelFormValues>
   disabled?: boolean
 }
 
-// Sample rule: strip thinking / redacted_thinking blocks, gated on a 400 whose
-// error message mentions "thinking". Conditions match the response context
-// ({status_code, error_message}); operations rewrite the request body. Each
-// operation may set "action": "retry_same_channel" (default) or
-// "fallback_next_channel" to hand off to the next channel instead.
-const THINKING_TEMPLATE = JSON.stringify(
-  {
-    operations: [
-      {
-        mode: 'prune_objects',
-        path: 'messages',
-        value: { where: { type: 'thinking' } },
+// Sample four-phase rule: on a Claude 400 whose error message mentions
+// "thinking", strip thinking / redacted_thinking blocks from the request and
+// retry the same channel. phase1 filters the request (here: any request),
+// phase2 matches the response, phase3 rewrites the body, phase4 picks the action.
+const RETRY_RULE_TEMPLATE = JSON.stringify(
+  [
+    {
+      description: 'Strip thinking blocks on a thinking-related 400, then retry',
+      phase2_response_conditions: {
         conditions: [
           { path: 'status_code', mode: 'full', value: 400 },
           { path: 'error_message', mode: 'contains', value: 'thinking' },
         ],
         logic: 'AND',
-        action: 'retry_same_channel',
       },
-      {
-        mode: 'prune_objects',
-        path: 'messages',
-        value: { where: { type: 'redacted_thinking' } },
-        conditions: [
-          { path: 'status_code', mode: 'full', value: 400 },
-          { path: 'error_message', mode: 'contains', value: 'thinking' },
-        ],
-        logic: 'AND',
-        action: 'retry_same_channel',
-      },
-    ],
-  },
+      phase3_request_rewrite: [
+        {
+          mode: 'prune_objects',
+          path: 'messages',
+          value: { where: { type: 'thinking' } },
+        },
+        {
+          mode: 'prune_objects',
+          path: 'messages',
+          value: { where: { type: 'redacted_thinking' } },
+        },
+      ],
+      phase4_retry_action: 'retry_same_channel',
+    },
+  ],
   null,
   2
 )
 
 export function RetryRulesSection(props: RetryRulesSectionProps) {
   const { t } = useTranslation()
-  const [editorOpen, setEditorOpen] = useState(false)
 
   const value = props.form.watch('retry_override') || ''
 
@@ -69,12 +64,12 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
           </span>
           <p className='text-sm text-muted-foreground'>
             {t(
-              'On an upstream error, match the response (status code / error message) with each operation conditions; matching operations rewrite the request body. Set each operation action to "retry_same_channel" (default) to retry the rewritten request once on the same channel, or "fallback_next_channel" to hand it off to the next channel (requires RetryTimes > 0 and another available channel). Leave empty to disable.'
+              'A JSON array of four-phase rules. Each rule runs in order: phase1_request_condition filters by request (model / relay_format / group); phase2_response_conditions matches the upstream response (status_code / error_message / response_body); phase3_request_rewrite rewrites the request body; phase4_retry_action is "retry_same_channel" (default) or "fallback_next_channel". All phase conditions use the same syntax as parameter override, and omitting "logic" defaults to OR. Leave empty to disable.'
             )}
           </p>
           <p className='text-sm text-muted-foreground'>
             {t(
-              'To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a "response_body" condition (with status_code 200); the request is then retried on the next channel (200-body matches always fall back). For streaming, the offending chunk is dropped and the next channel continues the response.'
+              'To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a phase2 "response_body" condition with status_code 200; such 200-body matches are always retried on the next channel regardless of phase4_retry_action. "fallback_next_channel" requires RetryTimes > 0 and another available channel.'
             )}
           </p>
         </div>
@@ -84,17 +79,7 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
             variant='outline'
             size='sm'
             disabled={props.disabled}
-            onClick={() => setEditorOpen(true)}
-          >
-            <Wand2 className='mr-2 h-4 w-4' />
-            {t('Visual edit')}
-          </Button>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            disabled={props.disabled}
-            onClick={() => setValue(THINKING_TEMPLATE)}
+            onClick={() => setValue(RETRY_RULE_TEMPLATE)}
           >
             <Code className='mr-2 h-4 w-4' />
             {t('Fill Template')}
@@ -116,20 +101,10 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
         disabled={props.disabled}
         rows={8}
         placeholder={t(
-          'Retry override operations as JSON, e.g. {"operations": [...]}. Leave empty to disable.'
+          'Retry override rules as a JSON array, e.g. [{ "phase2_response_conditions": {...}, "phase3_request_rewrite": [...], "phase4_retry_action": "retry_same_channel" }]. Leave empty to disable.'
         )}
         className='max-h-72 min-h-40 resize-y overflow-auto font-mono text-xs'
       />
-
-      {editorOpen && !props.disabled && (
-        <ParamOverrideEditorDialog
-          open={editorOpen}
-          value={value}
-          onOpenChange={setEditorOpen}
-          onSave={setValue}
-        />
-      )}
     </div>
   )
 }
-

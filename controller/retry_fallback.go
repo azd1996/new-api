@@ -47,10 +47,18 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 	if len(ops) == 0 {
 		return false
 	}
-	ctx := retryrule.ResponseContext(apiErr, string(relayFormat))
-	logger.LogDebug(c, fmt.Sprintf("retry-override: evaluating %d operation(s) on channel #%d, status_code=%d, error_message=%q",
+	reqCtx := relaycommon.BuildParamOverrideContext(info)
+	if reqCtx == nil {
+		reqCtx = map[string]any{}
+	}
+	reqCtx["relay_format"] = string(relayFormat)
+	respCtx := retryrule.ResponseContext(apiErr.StatusCode, apiErr.Error(), string(relayFormat))
+	if m, ok := reqCtx["model"]; ok {
+		respCtx["model"] = m
+	}
+	logger.LogDebug(c, fmt.Sprintf("retry-override: evaluating %d rule(s) on channel #%d, status_code=%d, error_message=%q",
 		len(ops), channel.Id, apiErr.StatusCode, apiErr.Error()))
-	rewrites, matched, action := retryrule.CollectRewrites(ops, ctx)
+	rewrites, matched, action := retryrule.CollectRewrites(ops, reqCtx, respCtx)
 	if !matched {
 		logger.LogDebug(c, fmt.Sprintf("retry-override: no operation matched on channel #%d, not retrying", channel.Id))
 		return false

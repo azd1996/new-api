@@ -31,8 +31,16 @@ func retryBodyGuardError(info *relaycommon.RelayInfo, statusCode int, body []byt
 	if len(snippet) > retryBodyGuardMaxBytes {
 		snippet = snippet[:retryBodyGuardMaxBytes]
 	}
-	ctx := retryrule.SuccessContext(string(info.RelayFormat), statusCode, string(snippet))
-	if !retryrule.ShouldTriggerOnBody(ops, ctx) {
+	reqCtx := relaycommon.BuildParamOverrideContext(info)
+	if reqCtx == nil {
+		reqCtx = map[string]any{}
+	}
+	reqCtx["relay_format"] = string(info.RelayFormat)
+	respCtx := retryrule.SuccessContext(string(info.RelayFormat), statusCode, string(snippet))
+	if m, ok := reqCtx["model"]; ok {
+		respCtx["model"] = m
+	}
+	if !retryrule.ShouldTriggerOnBody(ops, reqCtx, respCtx) {
 		return nil
 	}
 	return types.NewErrorWithStatusCode(errors.New(string(snippet)), types.ErrorCodeBadResponseStatusCode, statusCode)

@@ -387,7 +387,7 @@ export function transformChannelToFormDefaults(
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
         retry_override: Array.isArray(parsed.retry_override)
-          ? JSON.stringify({ operations: parsed.retry_override }, null, 2)
+          ? JSON.stringify(parsed.retry_override, null, 2)
           : '',
       }
     } catch (error) {
@@ -503,8 +503,8 @@ function buildSettingJSON(formData: ChannelFormValues): string {
   if (formData.retry_override && formData.retry_override.trim() !== '') {
     try {
       const parsed = JSON.parse(formData.retry_override)
-      if (Array.isArray(parsed?.operations)) {
-        retryOverride = parsed.operations
+      if (Array.isArray(parsed)) {
+        retryOverride = parsed
       }
     } catch {
       retryOverride = []

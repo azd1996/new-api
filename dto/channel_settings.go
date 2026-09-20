@@ -17,18 +17,38 @@ type ChannelSettings struct {
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`
 	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
-	// RetryOverride configures error-triggered request rewrites, authored with
-	// the same operations UI as ParamOverride. Unlike ParamOverride (which
-	// rewrites every outgoing request), each operation's conditions here are
-	// evaluated against the upstream RESPONSE ({status_code, error_message}); on
-	// an error, matching operations rewrite the request body and the request is
-	// retried once on the same channel. Empty = disabled.
-	RetryOverride []map[string]any `json:"retry_override,omitempty"`
+	// RetryOverride configures error-triggered request rewrites as an ordered list
+	// of four-phase rules. Each rule runs its phases in order and short-circuits:
+	// phase1 filters the request (model/relay_format/group, etc.); phase2 matches
+	// the upstream response ({status_code, error_message, response_body}); phase3
+	// rewrites the request body (a list of param-override operations); phase4
+	// chooses the retry action. phase1/2/3 conditions share the exact
+	// param-override condition semantics (see relay/common.EvaluateConditions).
+	// Empty = disabled; a rule that fails to parse is skipped, never fatal.
+	RetryOverride []RetryRule `json:"retry_override,omitempty"`
 	// RetryOverrideDropDuplicatePreamble, when true, drops the first role/preamble
 	// chunk of a fallback continuation stream (i.e. after a prior attempt already
 	// streamed content to the client), avoiding a duplicated assistant-role
 	// preamble. Default false = forward every chunk unchanged.
 	RetryOverrideDropDuplicatePreamble bool `json:"retry_override_drop_duplicate_preamble,omitempty"`
+}
+
+// RetryRulePhaseCondition is a phase's condition block. Conditions are raw JSON
+// objects (path/mode/value/invert/pass_missing_key) evaluated with
+// relay/common.EvaluateConditions; Logic is AND/OR (empty defaults to OR). Kept
+// as []map[string]any so dto stays free of a relay/common import.
+type RetryRulePhaseCondition struct {
+	Conditions []map[string]any `json:"conditions,omitempty"`
+	Logic      string           `json:"logic,omitempty"`
+}
+
+// RetryRule is one four-phase retry-override rule. See ChannelSettings.RetryOverride.
+type RetryRule struct {
+	Description              string                   `json:"description,omitempty"`
+	Phase1RequestCondition   *RetryRulePhaseCondition `json:"phase1_request_condition,omitempty"`
+	Phase2ResponseConditions *RetryRulePhaseCondition `json:"phase2_response_conditions,omitempty"`
+	Phase3RequestRewrite     []map[string]any         `json:"phase3_request_rewrite,omitempty"`
+	Phase4RetryAction        string                   `json:"phase4_retry_action,omitempty"`
 }
 
 type VertexKeyType string
