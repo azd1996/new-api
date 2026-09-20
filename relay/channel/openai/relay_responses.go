@@ -26,6 +26,10 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
+	// retry-override: treat a matching 200 body as a retryable error before write.
+	if guardErr := retryBodyGuardError(info, resp.StatusCode, responseBody); guardErr != nil {
+		return nil, guardErr
+	}
 	err = common.Unmarshal(responseBody, &responsesResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)

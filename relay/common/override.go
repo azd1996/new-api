@@ -176,29 +176,49 @@ func buildLegacyParamOverride(paramOverride map[string]interface{}) map[string]i
 }
 
 func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, error) {
+	result := jsonData
 	paramOverride := getParamOverrideMap(info)
-	if len(paramOverride) == 0 {
-		return jsonData, nil
+	if len(paramOverride) > 0 {
+		overrideCtx := BuildParamOverrideContext(info)
+		var recorder *paramOverrideAuditRecorder
+		if shouldEnableParamOverrideAudit(paramOverride) {
+			recorder = &paramOverrideAuditRecorder{}
+			overrideCtx[paramOverrideContextAuditRecorder] = recorder
+		}
+		var err error
+		result, err = ApplyParamOverride(result, paramOverride, overrideCtx)
+		if err != nil {
+			return nil, err
+		}
+		syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
+		if info != nil {
+			if recorder != nil {
+				info.ParamOverrideAudit = recorder.lines
+			} else {
+				info.ParamOverrideAudit = nil
+			}
+		}
 	}
-
-	overrideCtx := BuildParamOverrideContext(info)
-	var recorder *paramOverrideAuditRecorder
-	if shouldEnableParamOverrideAudit(paramOverride) {
-		recorder = &paramOverrideAuditRecorder{}
-		overrideCtx[paramOverrideContextAuditRecorder] = recorder
-	}
-	result, err := ApplyParamOverride(jsonData, paramOverride, overrideCtx)
+	// One-shot error-triggered retry rewrite (retry-override). Applied here so it
+	// works for every relay format that funnels through this entry, not just Claude.
+	result, err := applyPendingRetryRewrite(result, info)
 	if err != nil {
 		return nil, err
 	}
-	syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
-	if info != nil {
-		if recorder != nil {
-			info.ParamOverrideAudit = recorder.lines
-		} else {
-			info.ParamOverrideAudit = nil
-		}
+	return result, nil
+}
+
+// applyPendingRetryRewrite applies (and then clears) info.PendingRetryRewrite as
+// unconditional param-override operations. It is a no-op when nothing is staged.
+func applyPendingRetryRewrite(jsonData []byte, info *RelayInfo) ([]byte, error) {
+	if info == nil || len(info.PendingRetryRewrite) == 0 {
+		return jsonData, nil
 	}
+	result, err := ApplyParamOverride(jsonData, map[string]interface{}{"operations": info.PendingRetryRewrite}, nil)
+	if err != nil {
+		return nil, err
+	}
+	info.PendingRetryRewrite = nil
 	return result, nil
 }
 

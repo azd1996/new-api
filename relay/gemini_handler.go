@@ -155,7 +155,7 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 
 		// apply param override
-		if len(info.ParamOverride) > 0 {
+		if len(info.ParamOverride) > 0 || len(info.PendingRetryRewrite) > 0 {
 			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 			if err != nil {
 				return newAPIErrorFromParamOverride(err)
@@ -262,7 +262,7 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 	}
 
 	// apply param override
-	if len(info.ParamOverride) > 0 {
+	if len(info.ParamOverride) > 0 || len(info.PendingRetryRewrite) > 0 {
 		jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 		if err != nil {
 			return newAPIErrorFromParamOverride(err)

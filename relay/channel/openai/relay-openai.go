@@ -212,6 +212,12 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		}
 	}
 
+	// retry-override: treat a matching 200 body (e.g. embedded rate-limit) as a
+	// retryable error before anything is written to the client.
+	if guardErr := retryBodyGuardError(info, resp.StatusCode, responseBody); guardErr != nil {
+		return nil, guardErr
+	}
+
 	err = common.Unmarshal(responseBody, &simpleResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)

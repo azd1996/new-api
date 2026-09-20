@@ -178,26 +178,15 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
-		// apply param override
-		if len(info.ParamOverride) > 0 {
+		// Apply param override and the one-shot retry-override rewrite. Both are
+		// handled inside ApplyParamOverrideWithRelayInfo, so call it whenever
+		// either is present (a staged retry rewrite may exist without any param
+		// override configured).
+		if len(info.ParamOverride) > 0 || len(info.PendingRetryRewrite) > 0 {
 			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 			if err != nil {
 				return newAPIErrorFromParamOverride(err)
 			}
-		}
-
-		// one-shot error-triggered retry rewrite (e.g. thinking-family fallback):
-		// applied only on the fallback attempt, then cleared so a later attempt
-		// does not re-apply it.
-		if len(info.PendingRetryRewrite) > 0 {
-			logger.LogInfo(c, fmt.Sprintf("retry-override: applying %d staged rewrite(s) to request body on retry", len(info.PendingRetryRewrite)))
-			jsonData, err = relaycommon.ApplyParamOverride(jsonData, map[string]interface{}{"operations": info.PendingRetryRewrite}, nil)
-			if err != nil {
-				logger.LogError(c, fmt.Sprintf("retry-override: failed to apply staged rewrite(s): %v", err))
-				return newAPIErrorFromParamOverride(err)
-			}
-			logger.LogInfo(c, fmt.Sprintf("retry-override: request body after rewrite: %s", jsonData))
-			info.PendingRetryRewrite = nil
 		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)

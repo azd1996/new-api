@@ -133,3 +133,37 @@ func TestCollectRewritesAction(t *testing.T) {
 		assert.Equal(t, ActionRetrySameChannel, action)
 	})
 }
+
+func TestShouldTriggerOnBody(t *testing.T) {
+	ops := []map[string]any{{
+		"conditions": []any{
+			map[string]any{"path": "status_code", "mode": "full", "value": float64(200)},
+			map[string]any{"path": "response_body", "mode": "contains", "value": "rate limit"},
+		},
+		"logic":  "AND",
+		"action": "fallback_next_channel",
+	}}
+
+	hit := SuccessContext("openai", 200, `{"error":{"message":"account rate limit exceeded"}}`)
+	assert.True(t, ShouldTriggerOnBody(ops, hit), "200 body containing rate limit should trigger")
+
+	miss := SuccessContext("openai", 200, `{"choices":[{"delta":{"content":"hello"}}]}`)
+	assert.False(t, ShouldTriggerOnBody(ops, miss), "clean 200 body should not trigger")
+}
+
+func TestCollectRewrites200ForcesFallback(t *testing.T) {
+	// A rule authored (wrongly) with retry_same_channel must be coerced to
+	// fallback when the trigger is a 200 response body.
+	ops := []map[string]any{{
+		"conditions": []any{
+			map[string]any{"path": "response_body", "mode": "contains", "value": "rate limit"},
+		},
+		"action": ActionRetrySameChannel,
+	}}
+	ctx := SuccessContext("openai", 200, "account rate limit exceeded")
+
+	rewrites, matched, action := CollectRewrites(ops, ctx)
+	assert.True(t, matched, "pure conditions+action rule (no mode) still matches")
+	assert.Empty(t, rewrites, "no rewrite staged for a conditions+action only rule")
+	assert.Equal(t, ActionFallbackNextChannel, action, "200-body trigger forces fallback")
+}

@@ -33,6 +33,11 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 
+	// retry-override: treat a matching 200 body as a retryable error before write.
+	if guardErr := retryBodyGuardError(info, resp.StatusCode, body); guardErr != nil {
+		return nil, guardErr
+	}
+
 	if err := common.Unmarshal(body, &responsesResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}

@@ -32,29 +32,63 @@ const (
 )
 
 // ResponseContext builds the document that retry-override conditions match
-// against: the upstream response status code and error message.
+// against on an error: the upstream response status code and error message. When
+// the status is 200 (a body-detected pseudo error, see SuccessContext), the error
+// message doubles as response_body so `response_body` conditions keep matching in
+// the retry hook.
 func ResponseContext(apiErr *types.NewAPIError, relayFormat string) map[string]any {
 	ctx := map[string]any{"relay_format": relayFormat}
 	if apiErr != nil {
 		ctx["status_code"] = apiErr.StatusCode
 		ctx["error_message"] = apiErr.Error()
+		if apiErr.StatusCode == 200 {
+			ctx["response_body"] = apiErr.Error()
+		}
 	}
 	return ctx
 }
 
-// CollectRewrites evaluates each operation's conditions against the response
-// context and returns the matching operations with their "conditions"/"logic"/
-// "action" keys removed, so they can be applied unconditionally to the request
-// body on retry. The bool reports whether any operation matched (i.e. whether to
-// retry). The action reports where to retry: ActionFallbackNextChannel if any
-// matched operation requests it, otherwise ActionRetrySameChannel.
+// SuccessContext builds the match document for a successful (2xx) upstream
+// response whose body may still carry an embedded error (e.g. a rate-limit
+// message returned with HTTP 200). Conditions match against `response_body`.
+func SuccessContext(relayFormat string, statusCode int, body string) map[string]any {
+	return map[string]any{
+		"relay_format":  relayFormat,
+		"status_code":   statusCode,
+		"response_body": body,
+	}
+}
+
+// ShouldTriggerOnBody reports whether any operation's conditions match the given
+// context. It is used on the success path to decide whether a 200 response body
+// should be treated as a retryable error.
+func ShouldTriggerOnBody(ops []map[string]any, ctx map[string]any) bool {
+	for _, op := range ops {
+		if operationMatches(op, ctx) {
+			return true
+		}
+	}
+	return false
+}
+
+// CollectRewrites evaluates each operation's conditions against the context and
+// returns the matching operations with their "conditions"/"logic"/"action" keys
+// removed, so they can be applied unconditionally to the request body on retry.
+// The bool reports whether any operation matched (i.e. whether to retry), even
+// when a matched operation carries no rewrite (conditions+action only). The
+// action reports where to retry: ActionFallbackNextChannel if any matched
+// operation requests it, otherwise ActionRetrySameChannel. When the trigger is a
+// 200 response body (ctx.status_code == 200), the action is forced to
+// ActionFallbackNextChannel — retrying the same rate-limited channel is pointless.
 func CollectRewrites(ops []map[string]any, ctx map[string]any) ([]map[string]any, bool, string) {
-	matched := make([]map[string]any, 0, len(ops))
+	rewrites := make([]map[string]any, 0, len(ops))
+	matched := false
 	action := ActionRetrySameChannel
 	for _, op := range ops {
 		if !operationMatches(op, ctx) {
 			continue
 		}
+		matched = true
 		if resolveAction(op) == ActionFallbackNextChannel {
 			action = ActionFallbackNextChannel
 		}
@@ -65,9 +99,16 @@ func CollectRewrites(ops []map[string]any, ctx map[string]any) ([]map[string]any
 			}
 			clone[k] = v
 		}
-		matched = append(matched, clone)
+		// Only stage operations that actually rewrite the body; a conditions+action
+		// only rule (pure fallback) matches but stages no rewrite.
+		if _, ok := clone["mode"]; ok {
+			rewrites = append(rewrites, clone)
+		}
 	}
-	return matched, len(matched) > 0, action
+	if matched && toString(ctx["status_code"]) == "200" {
+		action = ActionFallbackNextChannel
+	}
+	return rewrites, matched, action
 }
 
 // resolveAction reads an operation's action, defaulting to (and falling back to
