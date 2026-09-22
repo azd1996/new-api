@@ -263,6 +263,20 @@ func InitLogDB() (err error) {
 	return err
 }
 
+// autoMigrateSession returns the DB handle used for AutoMigrate. On a MySQL server
+// without native JSON support (pre-5.7.8, i.e. 5.6), it appends ROW_FORMAT=DYNAMIC to
+// CREATE TABLE so utf8mb4 unique indexes on large varchar columns (e.g.
+// passkey_credentials.credential_id varchar(512), user_oauth_bindings.provider_user_id
+// varchar(256)) stay within the InnoDB large-prefix index limit (3072 bytes) instead of
+// hitting the 767-byte limit of the default COMPACT row format. It only affects fresh
+// table creation on MySQL 5.6; MySQL >= 5.7.8, PostgreSQL and SQLite are unaffected.
+func autoMigrateSession() *gorm.DB {
+	if common.UsingMainDatabase(common.DatabaseTypeMySQL) && !mysqlSupportsNativeJSON {
+		return DB.Set("gorm:table_options", "ROW_FORMAT=DYNAMIC")
+	}
+	return DB
+}
+
 func migrateDB() error {
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
@@ -271,7 +285,7 @@ func migrateDB() error {
 		return err
 	}
 
-	err := DB.AutoMigrate(
+	err := autoMigrateSession().AutoMigrate(
 		&Channel{},
 		&Token{},
 		&User{},
@@ -311,7 +325,7 @@ func migrateDB() error {
 			return err
 		}
 	} else {
-		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
+		if err := autoMigrateSession().AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
 	}
@@ -362,7 +376,7 @@ func migrateDBFast() error {
 		wg.Add(1)
 		go func(model interface{}, name string) {
 			defer wg.Done()
-			if err := DB.AutoMigrate(model); err != nil {
+			if err := autoMigrateSession().AutoMigrate(model); err != nil {
 				errChan <- fmt.Errorf("failed to migrate %s: %v", name, err)
 			}
 		}(m.model, m.name)
@@ -383,7 +397,7 @@ func migrateDBFast() error {
 			return err
 		}
 	} else {
-		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
+		if err := autoMigrateSession().AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
 	}
