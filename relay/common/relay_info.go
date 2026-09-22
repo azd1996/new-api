@@ -153,6 +153,21 @@ type RelayInfo struct {
 	RuntimeHeadersOverride                map[string]interface{}
 	UseRuntimeHeadersOverride             bool
 	ParamOverrideAudit                    []string
+	// ParamOverrideMatched holds a human-readable summary of the channel's
+	// static param-override operations that matched and ran on the current
+	// attempt. It is captured unconditionally (independent of the sensitive-path
+	// gating that governs ParamOverrideAudit) so the controller can emit a
+	// dedicated param-override audit log. Retry-override rewrites do NOT feed
+	// this field. The controller consumes and clears it after each attempt.
+	ParamOverrideMatched []string
+	// ParamOverrideMatchedIndices holds the indices (into the channel's
+	// param-override operations array) of the operations whose conditions matched
+	// on the current attempt, so the audit log can reference which rule fired.
+	ParamOverrideMatchedIndices []int
+	// ParamOverrideMatchedDescriptions holds the description of each matched
+	// operation, aligned with ParamOverrideMatchedIndices (configured description
+	// or a summary fallback), for the param-override audit log.
+	ParamOverrideMatchedDescriptions []string
 
 	// PendingRetryRewrite holds param-override operations to apply once to the
 	// outgoing request body on an error-triggered fallback retry (see

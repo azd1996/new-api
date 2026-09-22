@@ -584,6 +584,15 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const useChannel = other?.admin_info?.use_channel
   const channelChain =
     useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+  // Override-audit detail (admin-only): which rule (by index) fired and how.
+  const retryOverride =
+    props.isAdmin && props.log.type === 8
+      ? other?.admin_info?.retry_override
+      : undefined
+  const paramOverride =
+    props.isAdmin && props.log.type === 9
+      ? other?.admin_info?.param_override
+      : undefined
   let reasoningEffortVariant: StatusBadgeProps['variant'] = 'green'
   if (other?.reasoning_effort === 'high') {
     reasoningEffortVariant = 'orange'
@@ -803,6 +812,79 @@ export function DetailsDialog(props: DetailsDialogProps) {
             variant='danger'
           >
             <p className='text-xs wrap-break-word'>{other.reject_reason}</p>
+          </DetailSection>
+        )}
+
+        {/* Retry-override audit (admin only, type=8) */}
+        {retryOverride && (
+          <DetailSection label={t('Retry Override')}>
+            {retryOverride.rule_ids &&
+              retryOverride.rule_ids.length > 0 &&
+              (retryOverride.rule_descriptions?.some((d) => d) ? (
+                retryOverride.rule_ids.map((id, i) => (
+                  <DetailRow
+                    key={id}
+                    label={`${t('Rule')} #${id}`}
+                    value={retryOverride.rule_descriptions?.[i] || '—'}
+                  />
+                ))
+              ) : (
+                <DetailRow
+                  label={t('Rule')}
+                  value={`#${retryOverride.rule_ids.join(', #')}`}
+                  mono
+                />
+              ))}
+            {retryOverride.action && (
+              <DetailRow label={t('Action')} value={retryOverride.action} mono />
+            )}
+            {retryOverride.status_code != null && (
+              <DetailRow
+                label={t('Status Code')}
+                value={String(retryOverride.status_code)}
+                mono
+              />
+            )}
+            {retryOverride.rewrites && retryOverride.rewrites.length > 0 && (
+              <DetailRow
+                label={t('Rewrites')}
+                value={retryOverride.rewrites.join(', ')}
+              />
+            )}
+            {retryOverride.error_message && (
+              <DetailRow
+                label={t('Error')}
+                value={retryOverride.error_message}
+              />
+            )}
+          </DetailSection>
+        )}
+
+        {/* Param-override audit (admin only, type=9) */}
+        {paramOverride && (
+          <DetailSection label={t('Param Override')}>
+            {paramOverride.rule_ids && paramOverride.rule_ids.length > 0 && (
+              <DetailRow
+                label={t('Rule')}
+                value={`#${paramOverride.rule_ids.join(', #')}`}
+                mono
+              />
+            )}
+            {paramOverride.descriptions &&
+              paramOverride.descriptions.length > 0 && (
+                <DetailRow
+                  label={t('Description')}
+                  value={
+                    <div className='flex flex-col gap-0.5'>
+                      {paramOverride.descriptions.map((desc, i) => (
+                        <span key={paramOverride.rule_ids?.[i] ?? i}>
+                          #{paramOverride.rule_ids?.[i] ?? i} {desc}
+                        </span>
+                      ))}
+                    </div>
+                  }
+                />
+              )}
           </DetailSection>
         )}
 

@@ -78,15 +78,17 @@ func ShouldTriggerOnBody(rules []dto.RetryRule, reqCtx, respCtx map[string]any) 
 
 // CollectRewrites evaluates each rule's phase1 (reqCtx) and phase2 (respCtx). For
 // each matching rule it stages the phase3 rewrite operations to apply to the
-// request body on retry, reports whether any rule matched, and resolves the retry
-// action: ActionFallbackNextChannel if any matched rule requests it, otherwise
-// ActionRetrySameChannel. When the trigger is a 200 response body
-// (respCtx.status_code == 200) the action is forced to ActionFallbackNextChannel
-// — retrying the same rate-limited channel is pointless.
-func CollectRewrites(rules []dto.RetryRule, reqCtx, respCtx map[string]any) ([]map[string]any, bool, string) {
+// request body on retry, reports whether any rule matched, resolves the retry
+// action (ActionFallbackNextChannel if any matched rule requests it, otherwise
+// ActionRetrySameChannel), and returns the indices (into rules) of every matched
+// rule so callers can audit which rule triggered. When the trigger is a 200
+// response body (respCtx.status_code == 200) the action is forced to
+// ActionFallbackNextChannel — retrying the same rate-limited channel is pointless.
+func CollectRewrites(rules []dto.RetryRule, reqCtx, respCtx map[string]any) ([]map[string]any, bool, string, []int) {
 	reqDoc := marshalContext(reqCtx)
 	respDoc := marshalContext(respCtx)
 	rewrites := make([]map[string]any, 0)
+	matchedIndices := make([]int, 0)
 	matched := false
 	action := ActionRetrySameChannel
 	for i := range rules {
@@ -95,6 +97,7 @@ func CollectRewrites(rules []dto.RetryRule, reqCtx, respCtx map[string]any) ([]m
 			continue
 		}
 		matched = true
+		matchedIndices = append(matchedIndices, i)
 		if resolveAction(rule.Phase4RetryAction) == ActionFallbackNextChannel {
 			action = ActionFallbackNextChannel
 		}
@@ -112,7 +115,7 @@ func CollectRewrites(rules []dto.RetryRule, reqCtx, respCtx map[string]any) ([]m
 	if matched && toString(respCtx["status_code"]) == "200" {
 		action = ActionFallbackNextChannel
 	}
-	return rewrites, matched, action
+	return rewrites, matched, action, matchedIndices
 }
 
 // rulePhasesPass reports whether a rule's phase1 (against reqDoc) and phase2

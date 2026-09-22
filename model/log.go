@@ -91,7 +91,17 @@ const (
 	LogTypeError   = 5
 	LogTypeRefund  = 6
 	LogTypeLogin   = 7
+	// LogTypeRetryOverride / LogTypeParamOverride record how the channel's
+	// retry-override / param-override rules processed a request. Admin-only:
+	// details live under Other.admin_info and these types are filtered out of
+	// non-admin (user) log queries.
+	LogTypeRetryOverride = 8
+	LogTypeParamOverride = 9
 )
+
+// adminOnlyLogTypes lists log types that must never appear in non-admin (user)
+// log queries; their detail lives under Other.admin_info.
+var adminOnlyLogTypes = []int{LogTypeRetryOverride, LogTypeParamOverride}
 
 func ensureLogRequestId(log *Log) {
 	if log != nil && log.RequestId == "" {
@@ -176,7 +186,7 @@ func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		order = clickHouseLogOrder("")
 	}
-	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
+	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Where("type NOT IN ?", adminOnlyLogTypes).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
 	formatUserLogs(logs, 0)
 	return logs, err
 }
@@ -288,6 +298,63 @@ func RecordOperationAuditLog(logUserId int, content string, ip string, action st
 	}
 	if err := createLog(log); err != nil {
 		common.SysLog("failed to record operation audit log: " + err.Error())
+	}
+}
+
+// OverrideAuditLogParams carries the request identity for an override-audit log
+// (retry-override / param-override). The processing detail is nested under
+// Other.admin_info.<section>, so it is admin-only for free (non-admin log views
+// strip admin_info); these log types are additionally filtered out of user log
+// queries. These logs never carry quota/token counts.
+type OverrideAuditLogParams struct {
+	UserId            int
+	ChannelId         int
+	ModelName         string
+	TokenName         string
+	TokenId           int
+	Group             string
+	RequestId         string
+	UpstreamRequestId string
+	IsStream          bool
+}
+
+// RecordRetryOverrideLog records a retry-override trigger (LogTypeRetryOverride).
+// detail is nested under Other.admin_info.retry_override.
+func RecordRetryOverrideLog(params OverrideAuditLogParams, content string, detail map[string]interface{}) {
+	recordOverrideAuditLog(LogTypeRetryOverride, "retry_override", content, params, detail)
+}
+
+// RecordParamOverrideLog records applied param-override operations
+// (LogTypeParamOverride). detail is nested under Other.admin_info.param_override.
+func RecordParamOverrideLog(params OverrideAuditLogParams, content string, detail map[string]interface{}) {
+	recordOverrideAuditLog(LogTypeParamOverride, "param_override", content, params, detail)
+}
+
+func recordOverrideAuditLog(logType int, section string, content string, params OverrideAuditLogParams, detail map[string]interface{}) {
+	username, _ := GetUsernameById(params.UserId, false)
+	other := map[string]interface{}{}
+	if len(detail) > 0 {
+		other["admin_info"] = map[string]interface{}{section: detail}
+	}
+	log := &Log{
+		UserId:    params.UserId,
+		Username:  username,
+		CreatedAt: common.GetTimestamp(),
+		Type:      logType,
+		Content:   content,
+		ModelName: params.ModelName,
+		TokenName: params.TokenName,
+		TokenId:   params.TokenId,
+		ChannelId: params.ChannelId,
+		Group:     params.Group,
+		IsStream:  params.IsStream,
+		RequestId: params.RequestId,
+
+		UpstreamRequestId: params.UpstreamRequestId,
+		Other:             common.MapToJsonStr(other),
+	}
+	if err := createLog(log); err != nil {
+		common.SysLog("failed to record override audit log: " + err.Error())
 	}
 }
 
@@ -608,6 +675,8 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	} else {
 		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
 	}
+	// Override-audit logs (retry-override / param-override) are admin-only.
+	tx = tx.Where("logs.type NOT IN ?", adminOnlyLogTypes)
 
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
 		return nil, 0, err

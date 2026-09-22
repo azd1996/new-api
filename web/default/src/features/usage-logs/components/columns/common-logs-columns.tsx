@@ -132,6 +132,44 @@ function buildTypeDetailSegments(
     return [{ text: t('Async task refund') }]
   }
 
+  // Retry-override audit (type=8): a rule fully matched and triggered a
+  // retry/fallback. Detail lives under admin_info (admin-only).
+  if (log.type === 8) {
+    const ro = other?.admin_info?.retry_override
+    const segments: DetailSegment[] = [
+      { text: t('Retry override matched'), danger: true },
+    ]
+    if (ro?.rule_ids?.length) {
+      segments.push({ text: `${t('Rule')} #${ro.rule_ids.join(',')}` })
+    }
+    if (ro?.action) segments.push({ text: ro.action, muted: true })
+    if (ro?.status_code != null) {
+      segments.push({ text: `HTTP ${ro.status_code}`, muted: true })
+    }
+    if (ro?.rewrites?.length) {
+      segments.push({ text: ro.rewrites.join(', '), muted: true })
+    } else if (ro?.error_message) {
+      segments.push({ text: ro.error_message, muted: true })
+    }
+    return segments
+  }
+
+  // Param-override audit (type=9): the channel's static param-override
+  // operations that matched and ran. Detail lives under admin_info (admin-only).
+  if (log.type === 9) {
+    const po = other?.admin_info?.param_override
+    const segments: DetailSegment[] = [{ text: t('Param override applied') }]
+    if (po?.rule_ids?.length) {
+      segments.push({ text: `${t('Rule')} #${po.rule_ids.join(',')}` })
+    }
+    if (po?.applied?.length) {
+      segments.push({ text: po.applied.join(', '), muted: true })
+    } else if (po?.count != null) {
+      segments.push({ text: String(po.count), muted: true })
+    }
+    return segments
+  }
+
   if (log.type !== 2) return []
 
   const isViolation = isViolationFeeLog(other)

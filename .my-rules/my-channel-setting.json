@@ -82,6 +82,27 @@
         { "mode": "prune_objects", "path": "input", "value": { "where": { "type": "reasoning" } } }
       ],
       "phase4_retry_action": "retry_same_channel"
+    },
+    {
+      "description": "解决gpt模型reasoning项content分段缺少encrypted_content（stateless加密推理不完整）的问题-case3",
+      "phase1_request_condition": {
+        "conditions": [
+          { "path": "model", "mode": "prefix", "value": "gpt-5.6-sol" },
+          { "path": "relay_format", "mode": "full", "value": "openai_responses" }
+        ],
+        "logic": "AND"
+      },
+      "phase2_response_conditions": {
+        "conditions": [
+          { "path": "status_code", "mode": "full", "value": 400 },
+          { "path": "error_message", "mode": "contains", "value": "encrypted_content" }
+        ],
+        "logic": "AND"
+      },
+      "phase3_request_rewrite": [
+        { "mode": "prune_objects", "path": "input", "value": { "where": { "type": "reasoning" } } }
+      ],
+      "phase4_retry_action": "retry_same_channel"
     }
   ]
 }

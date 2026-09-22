@@ -135,6 +135,28 @@ export interface LogOtherData {
       original: number
       clamped: number
     }
+    // Retry-override audit (type=8, admin only): a rule fully matched and
+    // triggered a retry/fallback.
+    retry_override?: {
+      action?: string
+      rule_ids?: number[]
+      rule_descriptions?: string[]
+      status_code?: number
+      relay_format?: string
+      error_message?: string
+      rewrites_count?: number
+      rewrites?: string[]
+    }
+    // Param-override audit (type=9, admin only): the channel's static
+    // param-override operations that matched and ran on the attempt.
+    param_override?: {
+      relay_format?: string
+      retry_index?: number
+      rule_ids?: number[]
+      descriptions?: string[]
+      count?: number
+      applied?: string[]
+    }
   }
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.

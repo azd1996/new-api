@@ -44,7 +44,18 @@ var paramOverrideSensitivePathPrefixes = []string{
 }
 
 type paramOverrideAuditRecorder struct {
-	lines []string
+	// lines holds sensitivity-gated operation summaries that may be surfaced on
+	// the consume log (other.po). allLines holds every applied operation summary
+	// (ungated), used only for the admin-only param-override audit log.
+	lines    []string
+	allLines []string
+	// matchedIndices holds the indices (into the operations array) of operations
+	// whose conditions matched, for the admin-only param-override audit log.
+	// matchedDescriptions holds the human-readable description of each matched
+	// operation (aligned with matchedIndices): the operation's configured
+	// description, or a summary fallback so every matched rule has one.
+	matchedIndices      []int
+	matchedDescriptions []string
 }
 
 type ConditionOperation struct {
@@ -56,14 +67,15 @@ type ConditionOperation struct {
 }
 
 type ParamOperation struct {
-	Path       string               `json:"path"`
-	Mode       string               `json:"mode"` // delete, set, move, copy, prepend, append, trim_prefix, trim_suffix, ensure_prefix, ensure_suffix, trim_space, to_lower, to_upper, replace, regex_replace, return_error, prune_objects, set_header, delete_header, copy_header, move_header, pass_headers, sync_fields
-	Value      interface{}          `json:"value"`
-	KeepOrigin bool                 `json:"keep_origin"`
-	From       string               `json:"from,omitempty"`
-	To         string               `json:"to,omitempty"`
-	Conditions []ConditionOperation `json:"conditions,omitempty"` // 条件列表
-	Logic      string               `json:"logic,omitempty"`      // AND, OR (默认OR)
+	Path        string               `json:"path"`
+	Mode        string               `json:"mode"`                  // delete, set, move, copy, prepend, append, trim_prefix, trim_suffix, ensure_prefix, ensure_suffix, trim_space, to_lower, to_upper, replace, regex_replace, return_error, prune_objects, set_header, delete_header, copy_header, move_header, pass_headers, sync_fields
+	Description string               `json:"description,omitempty"` // 可选的人类可读描述，供覆盖审计日志展示
+	Value       interface{}          `json:"value"`
+	KeepOrigin  bool                 `json:"keep_origin"`
+	From        string               `json:"from,omitempty"`
+	To          string               `json:"to,omitempty"`
+	Conditions  []ConditionOperation `json:"conditions,omitempty"` // 条件列表
+	Logic       string               `json:"logic,omitempty"`      // AND, OR (默认OR)
 }
 
 type ParamOverrideReturnError struct {
@@ -181,11 +193,13 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 	paramOverride := getParamOverrideMap(info)
 	if len(paramOverride) > 0 {
 		overrideCtx := BuildParamOverrideContext(info)
-		var recorder *paramOverrideAuditRecorder
-		if shouldEnableParamOverrideAudit(paramOverride) {
-			recorder = &paramOverrideAuditRecorder{}
-			overrideCtx[paramOverrideContextAuditRecorder] = recorder
-		}
+		// Always attach a recorder so applied operations can feed the admin-only
+		// param-override audit log (info.ParamOverrideMatched). Whether they are
+		// also surfaced on the consume log (info.ParamOverrideAudit / other.po)
+		// stays governed by the existing sensitive-path gating below.
+		recorder := &paramOverrideAuditRecorder{}
+		overrideCtx[paramOverrideContextAuditRecorder] = recorder
+		auditEnabled := shouldEnableParamOverrideAudit(paramOverride)
 		var err error
 		result, err = ApplyParamOverride(result, paramOverride, overrideCtx)
 		if err != nil {
@@ -193,7 +207,10 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 		}
 		syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
 		if info != nil {
-			if recorder != nil {
+			info.ParamOverrideMatched = recorder.allLines
+			info.ParamOverrideMatchedIndices = recorder.matchedIndices
+			info.ParamOverrideMatchedDescriptions = recorder.matchedDescriptions
+			if auditEnabled {
 				info.ParamOverrideAudit = recorder.lines
 			} else {
 				info.ParamOverrideAudit = nil
@@ -265,14 +282,34 @@ func (r *paramOverrideAuditRecorder) recordOperation(mode, path, from, to string
 	if r == nil {
 		return
 	}
-	line := buildParamOverrideAuditLine(mode, path, from, to, value)
+	line := formatParamOverrideAuditLine(mode, path, from, to, value)
 	if line == "" {
+		return
+	}
+	// Every applied operation is recorded to allLines for the admin-only
+	// param-override audit log; only sensitive-path (or debug) operations are
+	// additionally kept in lines for the consume log's other.po.
+	if !lo.Contains(r.allLines, line) {
+		r.allLines = append(r.allLines, line)
+	}
+	if !shouldAuditOperation(mode, path, from, to) {
 		return
 	}
 	if lo.Contains(r.lines, line) {
 		return
 	}
 	r.lines = append(r.lines, line)
+}
+
+func (r *paramOverrideAuditRecorder) recordMatched(i int, description string) {
+	if r == nil {
+		return
+	}
+	if lo.Contains(r.matchedIndices, i) {
+		return
+	}
+	r.matchedIndices = append(r.matchedIndices, i)
+	r.matchedDescriptions = append(r.matchedDescriptions, description)
 }
 
 func shouldAuditParamPath(path string) bool {
@@ -314,15 +351,11 @@ func formatParamOverrideAuditValue(value interface{}) string {
 	}
 }
 
-func buildParamOverrideAuditLine(mode, path, from, to string, value interface{}) string {
+func formatParamOverrideAuditLine(mode, path, from, to string, value interface{}) string {
 	mode = strings.TrimSpace(mode)
 	path = strings.TrimSpace(path)
 	from = strings.TrimSpace(from)
 	to = strings.TrimSpace(to)
-
-	if !shouldAuditOperation(mode, path, from, to) {
-		return ""
-	}
 
 	switch mode {
 	case "set":
@@ -773,7 +806,7 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 	}
 
 	result := jsonData
-	for _, op := range operations {
+	for i, op := range operations {
 		// 检查条件是否满足
 		ok, err := checkConditions(result, contextJSON, op.Conditions, op.Logic)
 		if err != nil {
@@ -784,6 +817,17 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 		if !ok {
 			continue // 条件不满足，跳过当前操作
 		}
+		// 条件命中：记录该操作在 operations 数组中的索引与描述，供 param-override
+		// 审计日志展示。优先用配置的 description，否则回退成操作摘要，最后回退成
+		// 操作模式，确保每条命中的规则都有可展示的描述。
+		matchedDesc := strings.TrimSpace(op.Description)
+		if matchedDesc == "" {
+			matchedDesc = formatParamOverrideAuditLine(op.Mode, op.Path, op.From, op.To, op.Value)
+		}
+		if matchedDesc == "" {
+			matchedDesc = strings.TrimSpace(op.Mode)
+		}
+		auditRecorder.recordMatched(i, matchedDesc)
 		// 处理路径中的负数索引
 		opPath := processNegativeIndex(result, op.Path)
 		var opPaths []string

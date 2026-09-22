@@ -46,3 +46,5 @@ service/openaicompat/chat_responses_live_local_test.go
 # ai-gateway/newapi/docker/sync-csl-logshipper.sh. Not committed: the single
 # source of truth stays in the ai-gateway repository.
 /third_party/
+
+.comate

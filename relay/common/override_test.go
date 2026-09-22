@@ -2236,6 +2236,73 @@ func TestApplyParamOverrideWithRelayInfoRecordsOnlyKeyOperationsWhenDebugDisable
 	}
 }
 
+// TestApplyParamOverrideWithRelayInfoMatchedCapturesAllAppliedOps guards the
+// data source for the admin-only param-override audit log: ParamOverrideMatched
+// must capture every operation that matched and ran (including non-sensitive
+// paths), independent of the sensitive-path gating that governs
+// ParamOverrideAudit / the consume log's other.po.
+func TestApplyParamOverrideWithRelayInfoMatchedCapturesAllAppliedOps(t *testing.T) {
+	originalDebugEnabled := common2.DebugEnabled
+	common2.DebugEnabled = false
+	t.Cleanup(func() {
+		common2.DebugEnabled = originalDebugEnabled
+	})
+
+	info := &RelayInfo{
+		ChannelMeta: &ChannelMeta{
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode": "copy",
+						"from": "metadata.target_model",
+						"to":   "model",
+					},
+					map[string]interface{}{
+						"mode":  "set",
+						"path":  "temperature",
+						"value": 0.1,
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ApplyParamOverrideWithRelayInfo([]byte(`{
+		"model":"gpt-4.1",
+		"temperature":0.7,
+		"metadata":{"target_model":"gpt-4.1-mini"}
+	}`), info)
+	require.NoError(t, err)
+
+	// The sensitive-path audit only keeps the metadata copy...
+	require.Equal(t, []string{"copy metadata.target_model -> model"}, info.ParamOverrideAudit)
+	// ...but the audit-log source captures every applied operation.
+	require.Equal(t, []string{
+		"copy metadata.target_model -> model",
+		"set temperature = 0.1",
+	}, info.ParamOverrideMatched)
+	// ...and records each matched operation's index into the operations array.
+	require.Equal(t, []int{0, 1}, info.ParamOverrideMatchedIndices)
+}
+
+// TestApplyParamOverrideWithRelayInfoRetryRewriteDoesNotFeedMatched ensures the
+// one-shot retry-override rewrite (PendingRetryRewrite) is NOT recorded as a
+// param-override match, so it is not double-counted against the retry-override
+// audit log.
+func TestApplyParamOverrideWithRelayInfoRetryRewriteDoesNotFeedMatched(t *testing.T) {
+	info := &RelayInfo{
+		PendingRetryRewrite: []map[string]any{
+			{"mode": "set", "path": "temperature", "value": 0.2},
+		},
+	}
+
+	out, err := ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-4.1","temperature":0.7}`), info)
+	require.NoError(t, err)
+	assertJSONEqual(t, `{"model":"gpt-4.1","temperature":0.2}`, string(out))
+	require.Empty(t, info.ParamOverrideMatched)
+	require.Nil(t, info.PendingRetryRewrite)
+}
+
 func TestApplyParamOverrideWithRelayInfoRecordsConversationBodyOperationsWhenDebugDisabled(t *testing.T) {
 	originalDebugEnabled := common2.DebugEnabled
 	common2.DebugEnabled = false
