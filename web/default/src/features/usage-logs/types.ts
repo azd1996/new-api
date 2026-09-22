@@ -153,6 +153,7 @@ export interface LogOtherData {
       relay_format?: string
       retry_index?: number
       rule_ids?: number[]
+      rule_labels?: string[]
       descriptions?: string[]
       count?: number
       applied?: string[]

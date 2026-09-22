@@ -195,6 +195,9 @@ func InitDB() (err error) {
 			if err := checkMySQLChineseSupport(DB); err != nil {
 				panic(err)
 			}
+			// Connection is verified above; detect whether the server has the native
+			// JSON type (MySQL >= 5.7.8) so JSON columns fall back to longtext on 5.6.
+			detectMySQLJSONSupport(DB)
 		}
 		sqlDB, err := DB.DB()
 		if err != nil {

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"math"
 	"net/http"
 	"os"
@@ -123,7 +122,7 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 		Quota:     quota,
 		Status:    model.TaskStatus(model.TaskStatusInProgress),
 		Group:     "default",
-		Data:      json.RawMessage(`{}`),
+		Data:      model.JSONValue(`{}`),
 		CreatedAt: time.Now().Unix(),
 		UpdatedAt: time.Now().Unix(),
 		Properties: model.Properties{

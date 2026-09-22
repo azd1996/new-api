@@ -863,12 +863,21 @@ export function DetailsDialog(props: DetailsDialogProps) {
         {/* Param-override audit (admin only, type=9) */}
         {paramOverride && (
           <DetailSection label={t('Param Override')}>
-            {paramOverride.rule_ids && paramOverride.rule_ids.length > 0 && (
+            {paramOverride.rule_labels && paramOverride.rule_labels.length > 0 ? (
               <DetailRow
                 label={t('Rule')}
-                value={`#${paramOverride.rule_ids.join(', #')}`}
+                value={paramOverride.rule_labels.join(', ')}
                 mono
               />
+            ) : (
+              paramOverride.rule_ids &&
+              paramOverride.rule_ids.length > 0 && (
+                <DetailRow
+                  label={t('Rule')}
+                  value={`#${paramOverride.rule_ids.join(', #')}`}
+                  mono
+                />
+              )
             )}
             {paramOverride.descriptions &&
               paramOverride.descriptions.length > 0 && (
@@ -876,11 +885,16 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   label={t('Description')}
                   value={
                     <div className='flex flex-col gap-0.5'>
-                      {paramOverride.descriptions.map((desc, i) => (
-                        <span key={paramOverride.rule_ids?.[i] ?? i}>
-                          #{paramOverride.rule_ids?.[i] ?? i} {desc}
-                        </span>
-                      ))}
+                      {paramOverride.descriptions.map((desc, i) => {
+                        const label =
+                          paramOverride.rule_labels?.[i] ??
+                          `#${paramOverride.rule_ids?.[i] ?? i}`
+                        return (
+                          <span key={label}>
+                            {label} {desc}
+                          </span>
+                        )
+                      })}
                     </div>
                   }
                 />

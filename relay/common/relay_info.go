@@ -168,6 +168,12 @@ type RelayInfo struct {
 	// operation, aligned with ParamOverrideMatchedIndices (configured description
 	// or a summary fallback), for the param-override audit log.
 	ParamOverrideMatchedDescriptions []string
+	// ParamOverrideTemplateOpCount is how many param-override operations were
+	// prepended by the channel-affinity template (0 if none). Operations at an
+	// index below this count are template-injected (e.g. Codex header
+	// passthrough); at or above it are the channel's own configured operations.
+	// Used to label a matched rule's provenance in the param-override audit log.
+	ParamOverrideTemplateOpCount int
 
 	// PendingRetryRewrite holds param-override operations to apply once to the
 	// outgoing request body on an error-triggered fallback retry (see
@@ -262,6 +268,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	}
 
 	info.ChannelMeta = channelMeta
+	info.ParamOverrideTemplateOpCount = common.GetContextKeyInt(c, constant.ContextKeyChannelParamOverrideTemplateOps)
 
 	// reset some fields based on channel meta
 	// 重置某些字段，例如模型名称等

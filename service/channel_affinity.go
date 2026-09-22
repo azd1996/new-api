@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -543,6 +544,11 @@ func ApplyChannelAffinityOverrideTemplate(c *gin.Context, paramOverride map[stri
 	}
 
 	mergedParam := mergeChannelOverride(paramOverride, meta.ParamTemplate)
+	// Record how many operations the template prepended so the param-override
+	// audit log can label a matched rule's provenance (template# vs channel#).
+	if tplOps, ok := extractParamOperations(meta.ParamTemplate["operations"]); ok {
+		common.SetContextKey(c, constant.ContextKeyChannelParamOverrideTemplateOps, len(tplOps))
+	}
 	appendChannelAffinityTemplateAdminInfo(c, meta)
 	return mergedParam, true
 }

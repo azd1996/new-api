@@ -159,7 +159,9 @@ function buildTypeDetailSegments(
   if (log.type === 9) {
     const po = other?.admin_info?.param_override
     const segments: DetailSegment[] = [{ text: t('Param override applied') }]
-    if (po?.rule_ids?.length) {
+    if (po?.rule_labels?.length) {
+      segments.push({ text: `${t('Rule')} ${po.rule_labels.join(', ')}` })
+    } else if (po?.rule_ids?.length) {
       segments.push({ text: `${t('Rule')} #${po.rule_ids.join(',')}` })
     }
     if (po?.applied?.length) {

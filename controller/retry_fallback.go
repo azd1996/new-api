@@ -177,6 +177,7 @@ func recordParamOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, chann
 		"relay_format": string(info.RelayFormat),
 		"retry_index":  info.RetryIndex,
 		"rule_ids":     ruleIDs,
+		"rule_labels":  paramOverrideRuleLabels(ruleIDs, info.ParamOverrideTemplateOpCount),
 		"count":        len(applied),
 		"applied":      applied,
 	}
@@ -184,6 +185,22 @@ func recordParamOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, chann
 		detail["descriptions"] = descriptions
 	}
 	model.RecordParamOverrideLog(overrideAuditParams(c, info, channelId), "param override applied", detail)
+}
+
+// paramOverrideRuleLabels labels each matched param-override operation index with
+// its provenance: template-injected operations (prepended by the channel-affinity
+// template) become "template#i"; the channel's own configured operations become
+// "channel#j", where j is the index within the channel's own param-override list.
+func paramOverrideRuleLabels(ruleIDs []int, templateOpCount int) []string {
+	labels := make([]string, 0, len(ruleIDs))
+	for _, idx := range ruleIDs {
+		if templateOpCount > 0 && idx < templateOpCount {
+			labels = append(labels, fmt.Sprintf("template#%d", idx))
+		} else {
+			labels = append(labels, fmt.Sprintf("channel#%d", idx-templateOpCount))
+		}
+	}
+	return labels
 }
 
 // summarizeRewriteOps renders staged retry-override rewrite operations as compact
