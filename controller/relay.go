@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	prommetrics "github.com/QuantumNous/new-api/pkg/prom_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -257,6 +259,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
+		prommetrics.RecordRelay(relayInfo.OriginModelName, relayInfo.UsingGroup,
+			strconv.Itoa(relayInfo.ChannelId), "failure", 0, 0, 0, 0)
 	}
 }
 

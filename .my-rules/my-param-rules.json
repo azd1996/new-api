@@ -92,6 +92,39 @@
                 },
                 "recursive": false
             }
+        },
+        {
+            "description": "gpt-6只支持默认temperature(1)，删除非1的temperature避免400",
+            "mode": "delete",
+            "path": "temperature",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "gpt-6" },
+                { "path": "temperature", "mode": "full", "value": 1, "invert": true }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "gpt-6的max_output_tokens低于最小值16时抬到16避免400",
+            "mode": "set",
+            "path": "max_output_tokens",
+            "value": 16,
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "gpt-6" },
+                { "path": "max_output_tokens", "mode": "lt", "value": 16 }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "gpt-6在chat/completions下function tools与reasoning_effort冲突，置为none避免400",
+            "mode": "set",
+            "path": "reasoning_effort",
+            "value": "none",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "gpt-6" },
+                { "path": "tools.#(type==\"function\").type", "mode": "full", "value": "function" },
+                { "path": "reasoning_effort", "mode": "full", "value": "none", "invert": true }
+            ],
+            "logic": "AND"
         }
     ]
 }

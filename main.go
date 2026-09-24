@@ -25,6 +25,7 @@ import (
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/pkg/logshipper"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	prommetrics "github.com/QuantumNous/new-api/pkg/prom_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
@@ -170,6 +171,22 @@ func main() {
 		common.SysLog("pprof enabled")
 	}
 
+	metricsEnabled := os.Getenv("ENABLE_METRICS") == "true"
+	if metricsEnabled {
+		prommetrics.Init()
+		prommetrics.SetQuotaPerUnit(common.QuotaPerUnit)
+		metricsPort := os.Getenv("METRICS_PORT")
+		if metricsPort == "" {
+			metricsPort = "9090"
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", prommetrics.Handler())
+		gopool.Go(func() {
+			log.Println(http.ListenAndServe("0.0.0.0:"+metricsPort, mux))
+		})
+		common.SysLog("prometheus metrics enabled on :" + metricsPort)
+	}
+
 	err = common.StartPyroScope()
 	if err != nil {
 		common.SysError(fmt.Sprintf("start pyroscope error : %v", err))
@@ -188,6 +205,9 @@ func main() {
 	}))
 	// This will cause SSE not to work!!!
 	//server.Use(gzip.Gzip(gzip.DefaultCompression))
+	if metricsEnabled {
+		server.Use(middleware.PrometheusMiddleware())
+	}
 	server.Use(middleware.RequestId())
 	server.Use(middleware.Version())
 	server.Use(middleware.I18n())
