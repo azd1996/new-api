@@ -13,6 +13,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestFormatRequestPreservesThinkingBlockBinding(t *testing.T) {
+	requestBody := bytes.NewBufferString(`{
+		"messages": [{"role": "user", "content": "hello"}],
+		"max_tokens": 1024,
+		"thinking": {
+			"type": "adaptive",
+			"block_binding": {
+				"future_field": {"enabled": true}
+			}
+		}
+	}`)
+
+	request, err := formatRequest(requestBody, http.Header{})
+	require.NoError(t, err)
+	require.NotNil(t, request.Thinking)
+	require.JSONEq(t, `{"future_field":{"enabled":true}}`, string(request.Thinking.BlockBinding))
+
+	marshaled, err := common.Marshal(request)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, common.Unmarshal(marshaled, &got))
+	require.Equal(t, map[string]any{"enabled": true}, got["thinking"].(map[string]any)["block_binding"].(map[string]any)["future_field"])
+}
+
 func TestDoAwsClientRequest_AppliesRuntimeHeaderOverrideToAnthropicBeta(t *testing.T) {
 	t.Parallel()
 

@@ -52,13 +52,19 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		request.MaxTokens = &defaultMaxTokens
 	}
 
+	var blockBinding json.RawMessage
+	if request.Thinking != nil {
+		blockBinding = request.Thinking.BlockBinding
+	}
+
 	if baseModel, effortLevel, ok := reasoning.TrimEffortSuffix(request.Model); ok && effortLevel != "" &&
 		(strings.HasPrefix(request.Model, "claude-opus-4-6") ||
 			strings.HasPrefix(request.Model, "claude-opus-4-7") ||
 			strings.HasPrefix(request.Model, "claude-opus-4-8")) {
 		request.Model = baseModel
 		request.Thinking = &dto.Thinking{
-			Type: "adaptive",
+			Type:         "adaptive",
+			BlockBinding: blockBinding,
 		}
 		request.OutputConfig = json.RawMessage(fmt.Sprintf(`{"effort":"%s"}`, effortLevel))
 		if strings.HasPrefix(request.Model, "claude-opus-4-7") ||
@@ -80,7 +86,11 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			if strings.HasPrefix(baseModel, "claude-opus-4-7") ||
 				strings.HasPrefix(baseModel, "claude-opus-4-8") {
 				// Opus 4.7/4.8 reject thinking.type="enabled"; use adaptive at high effort.
-				request.Thinking = &dto.Thinking{Type: "adaptive", Display: "summarized"}
+				request.Thinking = &dto.Thinking{
+					Type:         "adaptive",
+					Display:      "summarized",
+					BlockBinding: blockBinding,
+				}
 				request.OutputConfig = json.RawMessage(`{"effort":"high"}`)
 				request.Temperature = nil
 				request.TopP = nil
@@ -95,6 +105,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 				request.Thinking = &dto.Thinking{
 					Type:         "enabled",
 					BudgetTokens: common.GetPointer[int](int(float64(*request.MaxTokens) * model_setting.GetClaudeSettings().ThinkingAdapterBudgetTokensPercentage)),
+					BlockBinding: blockBinding,
 				}
 				// TODO: 临时处理
 				// https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#important-considerations-when-using-extended-thinking
