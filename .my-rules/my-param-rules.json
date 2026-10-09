@@ -71,6 +71,33 @@
             "logic": "AND"
         },
         {
+            "description": "claude-opus-5-5: thinking存在且type不存在或!=adaptive时补output_config.effort",
+            "mode": "set",
+            "path": "output_config.effort",
+            "value": "medium",
+            "keep_origin": true,
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-5-5" },
+                { "path": "thinking", "mode": "contains", "value": "" },
+                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5-5: thinking存在且type不存在或!=adaptive时统一转adaptive",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-5-5" },
+                { "path": "thinking", "mode": "contains", "value": "" },
+                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+            ],
+            "logic": "AND"
+        },
+        {
             "description": "format字段不再被支持",
             "path": "output_config.format",
             "mode": "delete",

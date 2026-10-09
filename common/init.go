@@ -61,6 +61,9 @@ func InitEnv() {
 	} else {
 		CryptoSecret = SessionSecret
 	}
+	if name := strings.TrimSpace(os.Getenv("SESSION_COOKIE_NAME")); name != "" {
+		SessionCookieName = name
+	}
 	if err := InitSessionCookieSettings(); err != nil {
 		log.Fatal(err)
 	}
