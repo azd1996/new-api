@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -34,6 +35,34 @@ type ClaudeMediaMessage struct {
 	Input     any    `json:"input,omitempty"`
 	Content   any    `json:"content,omitempty"`
 	ToolUseId string `json:"tool_use_id,omitempty"`
+}
+
+// UnmarshalJSON tolerates upstream Claude responses that put a bare string where
+// an object is expected (e.g. a top-level "message": "..." instead of a message
+// object). Some non-compliant upstreams do this; strict unmarshaling previously
+// failed with `cannot unmarshal string into ... ClaudeMediaMessage` and surfaced
+// as a 500. A string value is preserved as the message text, and object values
+// parse exactly as before.
+func (c *ClaudeMediaMessage) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := common.Unmarshal(trimmed, &s); err != nil {
+			return err
+		}
+		*c = ClaudeMediaMessage{Text: &s}
+		return nil
+	}
+	type claudeMediaMessageAlias ClaudeMediaMessage
+	var tmp claudeMediaMessageAlias
+	if err := common.Unmarshal(trimmed, &tmp); err != nil {
+		return err
+	}
+	*c = ClaudeMediaMessage(tmp)
+	return nil
 }
 
 func (c *ClaudeMediaMessage) SetText(s string) {
