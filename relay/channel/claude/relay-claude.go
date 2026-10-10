@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func stopReasonClaude2OpenAI(reason string) string {
@@ -30,6 +32,24 @@ func maybeMarkClaudeRefusal(c *gin.Context, stopReason string) {
 	if strings.EqualFold(stopReason, "refusal") {
 		common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "claude_stop_reason=refusal")
 	}
+}
+
+// warnClaudeStringMessage records when an upstream returns the top-level "message"
+// field as a bare string instead of a Claude message object. new-api tolerates it
+// during unmarshal (see dto.ClaudeMediaMessage.UnmarshalJSON), but the anomaly is
+// worth surfacing so a non-compliant upstream can be identified. The full decoded
+// string is logged along with whether it is itself a parseable JSON payload (and
+// of what type), to help decide how to normalize it on egress.
+func warnClaudeStringMessage(c *gin.Context, message gjson.Result) {
+	if message.Type != gjson.String {
+		return
+	}
+	raw := message.String()
+	parseableJSON := "no"
+	if gjson.Valid(raw) {
+		parseableJSON = "yes(" + common.GetJsonType([]byte(raw)) + ")"
+	}
+	logger.LogWarn(c, fmt.Sprintf("claude upstream returned a string \"message\" field instead of an object; tolerated during parsing, parseable_json=%s, value=%s", parseableJSON, raw))
 }
 
 func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCompletionsStreamResponse {
@@ -92,6 +112,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
+	}
+	if claudeResponse.Message != nil {
+		warnClaudeStringMessage(c, gjson.Get(data, "message"))
 	}
 	if claudeResponse.StopReason != "" {
 		maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
@@ -202,6 +225,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
+	}
+	if claudeResponse.Message != nil {
+		warnClaudeStringMessage(c, gjson.GetBytes(data, "message"))
 	}
 	maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
 	if claudeInfo.Usage == nil {

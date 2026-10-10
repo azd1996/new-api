@@ -110,6 +110,29 @@
             ]
         },
         {
+            "description": "claude-opus-5: thinking.display仅非法值(非summarized/omitted)兜底改为summarized，合法值保留，避免Bedrock 400",
+            "mode": "set",
+            "path": "thinking.display",
+            "value": "summarized",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" },
+                { "path": "thinking.display", "mode": "full", "value": "summarized", "invert": true },
+                { "path": "thinking.display", "mode": "full", "value": "omitted", "invert": true }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-: 存在context_management时给anthropic-beta追加context-management-2025-06-27，启用Bedrock服务端上下文管理",
+            "mode": "set_header",
+            "path": "anthropic-beta",
+            "value": { "$append": ["context-management-2025-06-27"] },
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" },
+                { "path": "context_management", "mode": "contains", "value": "" }
+            ],
+            "logic": "AND"
+        },
+        {
             "description": "删除messages里的system角色",
             "mode": "prune_objects",
             "path": "messages",
@@ -119,6 +142,33 @@
                 },
                 "recursive": false
             }
+        },
+        {
+            "description": "claude-: 删除空的text内容块(type==text且text为空)，避免Bedrock 400 text content blocks must be non-empty；只扫content数组且不递归，避免误入tool_use.input触发类型比较崩溃",
+            "mode": "prune_objects",
+            "path": "messages.*.content",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" }
+            ],
+            "value": {
+                "logic": "AND",
+                "recursive": false,
+                "conditions": [
+                    { "path": "type", "mode": "full", "value": "text" },
+                    { "path": "text", "mode": "full", "value": "" }
+                ]
+            }
+        },
+        {
+            "description": "claude-: messages.0 content为空数组([])时补占位，避免Bedrock 400 non-empty content。用content.#==0做类型安全判空，content为非空数组或字符串时都不会触发类型比较崩溃",
+            "mode": "set",
+            "path": "messages.0.content",
+            "value": ".",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" },
+                { "path": "messages.0.content.#", "mode": "full", "value": 0 }
+            ],
+            "logic": "AND"
         },
         {
             "description": "gpt-6只支持默认temperature(1)，删除非1的temperature避免400",

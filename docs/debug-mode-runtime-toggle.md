@@ -71,6 +71,20 @@ curl 'https://<your-host>/api/option/' \
 
 说明:请求体 `value` 直接传 JSON 布尔 `true`/`false` 即可,`controller.UpdateOption` 会自动转成 `"true"`/`"false"` 字符串存库;写库成功后 `updateOptionMap` 立即把 `common.DebugEnabled` 改为新值,**无需重启**。
 
+## 集群同步
+
+**无需逐台调用,在任意一台机器上调一次即可**,其它节点会自动同步。
+
+- 每个节点启动时都会无条件起后台协程 `go model.SyncOptions(common.SyncFrequency)`(`main.go`),每隔 `SYNC_FREQUENCY` 秒(环境变量,默认 **60s**,`common/init.go`)调用 `loadOptionsFromDatabase()`,把 DB 中**所有 option 全量重载**并应用到本进程全局变量(`model/option.go` `SyncOptions` / `loadOptionsFromDatabase`)。
+- 调接口的那台:`UpdateOption` 先写 DB,再立即更新本进程的 `common.DebugEnabled`——**本机瞬时生效**。
+- 其它节点:在下一次 sync tick 从 DB 读到新值,**最长约 `SYNC_FREQUENCY` 秒内**(默认 60s)自动跟上;关闭同理。
+
+注意:
+
+- DB 是权威源,因此即使某节点启动时 env 为 `DEBUG=false`,下次 sync 也会被 DB 值覆盖,最终全集群一致。
+- 这是 **DB 轮询同步**(非 Redis 实时推送),存在最长一个同步周期的传播延迟。想更快全量生效,可调小 `SYNC_FREQUENCY`,或对每台各调一次(非必须)。
+- 由于是全量重载,`DebugEnabled` 作为全局开关在集群内要么全开要么全关,**无法只对单台开启**(单台调用也会在下个周期被 DB 值拉平)。
+
 ## 注意事项
 
 - Debug 日志是**客户对话明文全文**,属敏感数据。排查完请及时关闭,并控制 `oneapi-*.log` 的访问权限、留存周期,避免接入会外发日志的第三方采集。
