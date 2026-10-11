@@ -40,13 +40,14 @@ Debug 模式(`common.DebugEnabled`)会让转发链路把**完整请求体(含 `m
 两种任选其一(见 `middleware/auth.go` `authHelper`):
 
 - **管理员会话 Cookie**:在浏览器里以 root 登录后,带上会话 Cookie 调用(例如用浏览器开发者工具 / 已登录的同源页面)。
-- **系统访问令牌(Access Token)**:在「个人设置」生成系统访问令牌,放到 `Authorization` 请求头里。注意这是**系统访问令牌**,不是用于转发的 API Key(`sk-...`)。
+- **系统访问令牌(Access Token)**:在「个人设置」生成系统访问令牌,放到 `Authorization` 请求头里。注意这是**系统访问令牌**,不是用于转发的 API Key(`sk-...`)。走访问令牌时**必须同时带 `New-Api-User` 头**,值为该令牌所属用户的 id(默认超管通常是 `1`),且该用户须为 **root**、id 要与令牌所属用户一致,否则分别报 `New-Api-User header not provided` / `user id mismatch`。
 
 ### 开启
 
 ```bash
 curl -X PUT 'https://<your-host>/api/option/' \
   -H 'Authorization: <root-access-token>' \
+  -H 'New-Api-User: 1' \
   -H 'Content-Type: application/json' \
   -d '{"key": "DebugEnabled", "value": true}'
 ```
@@ -56,6 +57,7 @@ curl -X PUT 'https://<your-host>/api/option/' \
 ```bash
 curl -X PUT 'https://<your-host>/api/option/' \
   -H 'Authorization: <root-access-token>' \
+  -H 'New-Api-User: 1' \
   -H 'Content-Type: application/json' \
   -d '{"key": "DebugEnabled", "value": false}'
 ```
@@ -64,7 +66,8 @@ curl -X PUT 'https://<your-host>/api/option/' \
 
 ```bash
 curl 'https://<your-host>/api/option/' \
-  -H 'Authorization: <root-access-token>'
+  -H 'Authorization: <root-access-token>' \
+  -H 'New-Api-User: 1'
 ```
 
 返回的 option 列表里找 `DebugEnabled`,值为字符串 `"true"` / `"false"`。

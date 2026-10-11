@@ -11,7 +11,9 @@
 
 > 说明:Anthropic/Bedrock 的 prompt 缓存是"内容寻址"的(前缀内容 + `cache_control` 断点 + model),`user_id` / `session_id` **不参与官方缓存键**。它们只服务于供应商网关的**节点黏滞**;黏滞做对 → 节点本地缓存更容易命中。
 
-本功能在 newapi 这一层,为**缺字段的请求**补齐 `metadata.user_id` 与 `metadata.session_id`。
+本功能在 newapi 这一层,为**缺 `metadata.user_id` 的请求**合成一个仿 Claude Code 的 `metadata.user_id`(其中内嵌派生的 `session_id`)。
+
+> 重要(实测):**不写顶层 `metadata.session_id`** —— Anthropic 的 metadata schema 只允许 `user_id`,顶层加 `session_id` 会被上游拒绝。因此 session 一律**内嵌在 `user_id` blob 内**(与真实 Claude Code 完全一致),由供应商从 blob 解析。
 
 ## 调用链路
 
@@ -35,16 +37,16 @@ flowchart LR
 
 ## 行为
 
-闸门统一以**客户端是否已带 `metadata.user_id`** 为准:
+闸门以**客户端是否已带 `metadata.user_id`** 为准:
 
-- **已带 `user_id`(典型:Claude Code)→ 完全不动 metadata**:既不改 user_id,也不注入 session_id,交由供应商自行从 user_id blob 解析会话。
-- **未带 `user_id` → 同时补齐**:
-  1. `metadata.session_id` = 派生的会话 hash(若客户端已自带非空 session_id,则保留不覆盖);
-  2. `metadata.user_id` = 仿 Claude Code 的 JSON 字符串 blob —— `device_id` 取 API key 末 6 位,`session_id` 复用上一步写入的值(两处一致),`account_uuid` 为空。
+- **已带 `user_id`(典型:Claude Code)→ 完全不动 metadata**:它自己的 blob 内已含 session,交由供应商解析。
+- **未带 `user_id` → 合成一个仿 Claude Code 的 `metadata.user_id` blob**:
+  - `device_id` = API key 末 6 位;
+  - `session_id` = 派生的会话 hash(见「session_id 派生」);
+  - `account_uuid` = 空;
+  - **session 只放在 blob 内,不写顶层 `metadata.session_id`**(实测顶层该键会被上游拒绝)。
 
-执行顺序:先 `fillClaudeMetadataSessionID`,后 `fillClaudeMetadataUserID`(便于 blob 复用已写入的 session_id)。
-
-<!-- APPEND-ANCHOR -->
+由单个函数 `fillClaudeMetadataUserID` 完成(内部计算并内嵌 session_id)。
 
 ## 注入流程图
 
@@ -52,15 +54,13 @@ flowchart LR
 flowchart TD
     S["jsonData(RemoveDisabledFields 之后)"] --> Q1{"metadata.user_id 非空?"}
     Q1 -- "是(如 Claude Code)" --> OUT["metadata 原样<br/>→ param-override → 送上游"]
-    Q1 -- "否" --> Q2{"metadata.session_id 非空?"}
-    Q2 -- "否" --> D1["取会话标识(优先级):<br/>1. header x-claude-code-session-id<br/>2. ephemeral cache_control 内容<br/>3. clientIP+UA+apiKey 兜底"]
-    D1 --> D2["seed = model ␟ 稳定system前缀 ␟ 会话标识<br/>→ xxhash64 → 16位hex<br/>→ 写入 metadata.session_id"]
-    D2 --> U
-    Q2 -- "是(保留原值)" --> U["合成 metadata.user_id blob<br/>device_id=key末6位 · session_id=复用 · account_uuid=空"]
+    Q1 -- "否" --> D1["取会话标识(优先级):<br/>1. header x-claude-code-session-id<br/>2. ephemeral cache_control 内容<br/>3. clientIP+UA+apiKey 兜底"]
+    D1 --> D2["seed = model ␟ 稳定system前缀 ␟ 会话标识<br/>→ xxhash64 → 16位hex = sessionID"]
+    D2 --> U["合成 metadata.user_id blob<br/>device_id=key末6位 · session_id=sessionID · account_uuid=空<br/>(不写顶层 metadata.session_id)"]
     U --> OUT
 ```
 
-对应 `ClaudeHelper` 非透传分支里先后调用 `fillClaudeMetadataSessionID` 与 `fillClaudeMetadataUserID`;两者都以 `metadata.user_id` 是否存在为闸门。
+对应 `ClaudeHelper` 非透传分支里调用 `fillClaudeMetadataUserID`,以 `metadata.user_id` 是否存在为闸门。
 
 ## session_id 派生
 
@@ -76,7 +76,7 @@ flowchart TD
 ## 关键实现位置
 
 - `relay/claude_handler.go`
-  - `fillClaudeMetadataSessionID` / `fillClaudeMetadataUserID`
+  - `fillClaudeMetadataUserID`(单一入口;内部派生并内嵌 session_id)
   - `deriveClaudeSessionSeed` / `claudeConversationSeed` / `claudeStableSystemPrefix` / `claudeCacheControlSeed` / `claudeFallbackSessionSeed` / `claudeSessionHash`
   - `claudeMetadataUserID` 结构体(`device_id` / `account_uuid` / `session_id`)、`claudeDerivedDeviceIDLen = 6`
   - 调用点在 `ClaudeHelper` 的非透传分支
@@ -85,17 +85,18 @@ flowchart TD
 
 ## 边界与注意事项
 
-- **真实 Claude Code 不会被注入顶层 `metadata.session_id`**(因其已带 user_id)。若供应商必须在顶层看到 session_id、不愿解析 user_id blob,需要改为"即使有 user_id 也从 blob 提升 session_id"——与当前闸门相反,目前未实现。
-- **`device_id = key 末 6 位是部门级**、低熵:两个 key 末 6 位相同会跨部门撞号。如介意可改用 `token_id` 或 key 的 hash 前缀(仅换派生来源,闸门不变)。
+- **顶层 `metadata.session_id` 一律不写**:实测上游会拒绝该键(Anthropic metadata 只允许 `user_id`)。session 一律放在 `user_id` blob 内;供应商需从 blob 解析 session_id(与真实 Claude Code 一致)。
+- **真实 Claude Code 完全不被改动**(它已带 user_id)。
+- **`device_id` = key 末 6 位是部门级**、低熵:两个 key 末 6 位相同会跨部门撞号。如介意可改用 `token_id` 或 key 的 hash 前缀(仅换派生来源,闸门不变)。
 - **兜底粒度较粗**:同一 `clientIP + UA + apiKey` 会被归为一个 session(多个真实会话合并);但保证稳定、不逐轮漂移。
-- 只补齐、不覆盖:客户端已有的 user_id 原样保留;session_id 仅在客户端未自带时写入。
+- 只在客户端缺 `user_id` 时合成 blob;客户端已有的 user_id 原样保留。
 
 ## 测试
 
 `relay/claude_handler_metadata_test.go`(表驱动,`testify`):
 
-- **user_id**:无 metadata 合成 blob、复用已有 session_id、客户端 user_id 原样保留、空 user_id 视为缺失、key 过短/为空不改。
-- **session_id**:header 优先且与 model + 稳定前缀组合、cache_control 回退、兜底跨轮稳定、换模型改变、system 尾部变化不改变、**有 user_id 则不注入**、已有 session_id 保留。
+- `TestFillClaudeMetadataUserID`:无 metadata 合成 blob(device_id=末6位、内嵌 16 位 session_id、**无顶层 `metadata.session_id`**)、客户端 user_id 原样保留、空 user_id 视为缺失、key 过短/为空不改。
+- `TestClaudeSessionDerivation`(断言 blob 内嵌 session_id):header 优先且与 model + 稳定前缀组合、cache_control 回退、兜底跨轮稳定、换模型改变、system 尾部变化不改变。
 
-运行:`go test ./relay/ -run TestFillClaudeMetadata`。
+运行:`go test ./relay/ -run 'TestFillClaudeMetadataUserID|TestClaudeSessionDerivation'`。
 
