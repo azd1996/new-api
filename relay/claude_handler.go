@@ -112,25 +112,19 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
-		// For clients that did not provide metadata.user_id, derive and fill
-		// metadata.session_id so downstream gateways can perform session
-		// stickiness. Clients that already set user_id (e.g. Claude Code) carry
-		// their own session identity and are left untouched. Done before user_id
-		// synthesis so the synthesized user_id can reuse the same session_id.
-		jsonData, err = fillClaudeMetadataSessionID(
+		// For clients that did not provide metadata.user_id, synthesize a Claude
+		// Code-style metadata.user_id whose device_id is the API key suffix and
+		// whose embedded session_id is a derived session hash. The session is
+		// embedded in the user_id blob (not a top-level metadata.session_id, which
+		// upstream rejects as an unknown metadata key). Clients that already set
+		// user_id (e.g. Claude Code) are left untouched.
+		jsonData, err = fillClaudeMetadataUserID(
 			jsonData,
+			common.GetContextKeyString(c, constant.ContextKeyTokenKey),
 			c.GetHeader("x-claude-code-session-id"),
 			c.ClientIP(),
 			c.GetHeader("User-Agent"),
-			common.GetContextKeyString(c, constant.ContextKeyTokenKey),
 		)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		// Fill metadata.user_id with a Claude Code-style blob when the client
-		// omitted it, reusing metadata.session_id as the blob's session_id.
-		jsonData, err = fillClaudeMetadataUserID(jsonData, common.GetContextKeyString(c, constant.ContextKeyTokenKey))
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
@@ -197,13 +191,15 @@ type claudeMetadataUserID struct {
 	SessionID   string `json:"session_id"`
 }
 
-// fillClaudeMetadataUserID sets metadata.user_id to a Claude Code-style JSON
-// string whose device_id is the trailing suffix of the request's API key, but
-// only when the client did not already provide a user_id. The blob's session_id
-// reuses the current metadata.session_id so the two stay identical. The body is
-// returned unchanged when a non-empty user_id is already present or no suffix is
-// available. Any existing metadata siblings (e.g. session_id) are preserved.
-func fillClaudeMetadataUserID(jsonData []byte, apiKey string) ([]byte, error) {
+// fillClaudeMetadataUserID synthesizes a Claude Code-style metadata.user_id for
+// clients that did not provide one. The blob embeds device_id (the trailing
+// suffix of the request's API key) and a derived session_id, mirroring the exact
+// shape Claude Code sends — which the upstream accepts. The session_id is NOT
+// written as a top-level metadata.session_id, because the Anthropic metadata
+// schema only allows user_id and upstream rejects extra metadata keys. The body
+// is returned unchanged when a non-empty user_id is already present (e.g. real
+// Claude Code, which carries its own session) or when no key suffix is available.
+func fillClaudeMetadataUserID(jsonData []byte, apiKey, headerSessionID, clientIP, userAgent string) ([]byte, error) {
 	if existing := gjson.GetBytes(jsonData, "metadata.user_id"); existing.Exists() && strings.TrimSpace(existing.String()) != "" {
 		return jsonData, nil
 	}
@@ -211,37 +207,15 @@ func fillClaudeMetadataUserID(jsonData []byte, apiKey string) ([]byte, error) {
 		return jsonData, nil
 	}
 	suffix := apiKey[len(apiKey)-claudeDerivedDeviceIDLen:]
+	sessionID := claudeSessionHash(deriveClaudeSessionSeed(jsonData, headerSessionID, clientIP, userAgent, apiKey))
 	encoded, err := common.Marshal(claudeMetadataUserID{
 		DeviceID:  suffix,
-		SessionID: gjson.GetBytes(jsonData, "metadata.session_id").String(),
+		SessionID: sessionID,
 	})
 	if err != nil {
 		return jsonData, err
 	}
 	return sjson.SetBytes(jsonData, "metadata.user_id", string(encoded))
-}
-
-// fillClaudeMetadataSessionID derives a session hash and writes it to
-// metadata.session_id, gated on the client NOT having provided metadata.user_id.
-// Clients that set user_id (e.g. Claude Code) already carry their own session
-// identity inside it, so their metadata is left untouched; only clients missing
-// user_id get a synthesized session_id. An explicit session_id already present
-// is preserved. The seed combines the model and the stable system prefix with a
-// conversation identity (the x-claude-code-session-id header, then ephemeral
-// cache_control content, then a client IP + user agent + API key fallback),
-// reduced to a 16-char xxhash64 hex matching the session-affinity gateway shape.
-func fillClaudeMetadataSessionID(jsonData []byte, headerSessionID, clientIP, userAgent, apiKeyID string) ([]byte, error) {
-	if uid := gjson.GetBytes(jsonData, "metadata.user_id"); uid.Exists() && strings.TrimSpace(uid.String()) != "" {
-		return jsonData, nil
-	}
-	if existing := gjson.GetBytes(jsonData, "metadata.session_id"); existing.Exists() && strings.TrimSpace(existing.String()) != "" {
-		return jsonData, nil
-	}
-	hash := claudeSessionHash(deriveClaudeSessionSeed(jsonData, headerSessionID, clientIP, userAgent, apiKeyID))
-	if hash == "" {
-		return jsonData, nil
-	}
-	return sjson.SetBytes(jsonData, "metadata.session_id", hash)
 }
 
 // claudeSessionHash reduces a session seed to a 16-char xxhash64 hex string.
