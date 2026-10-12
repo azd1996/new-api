@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
@@ -127,6 +128,24 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+
+		// Force 1-hour prompt-cache TTL for configured groups: rewrite every
+		// existing cache_control breakpoint to ttl=1h and append the extended
+		// cache TTL beta header. Gated per using-group (resolving "auto" to the
+		// concrete group picked during channel selection).
+		cacheGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+		if cacheGroup == "auto" {
+			if ag := common.GetContextKeyString(c, constant.ContextKeyAutoGroup); ag != "" {
+				cacheGroup = ag
+			}
+		}
+		if operation_setting.IsExtendedCacheTTLGroup(cacheGroup) {
+			jsonData, err = forceClaudeCacheControlTTL(jsonData, claudeExtendedCacheTTL)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			c.Request.Header.Set("anthropic-beta", mergeAnthropicBeta(c.Request.Header.Get("anthropic-beta"), claudeExtendedCacheBeta))
 		}
 
 		// apply param override
@@ -324,4 +343,62 @@ func claudeCacheControlSeed(jsonData []byte) string {
 // excluded so the seed stays stable across the turns of one conversation.
 func claudeFallbackSessionSeed(clientIP, userAgent, apiKeyID string) string {
 	return clientIP + userAgent + apiKeyID
+}
+
+const (
+	// claudeExtendedCacheTTL is the 1-hour prompt-cache TTL value.
+	claudeExtendedCacheTTL = "1h"
+	// claudeExtendedCacheBeta is the anthropic-beta token enabling the 1h cache.
+	claudeExtendedCacheBeta = "extended-cache-ttl-2025-04-11"
+)
+
+// forceClaudeCacheControlTTL rewrites the ttl of every existing cache_control
+// breakpoint (in system, tools and message content blocks) to the given value.
+// It does not create new breakpoints; blocks without cache_control are left
+// untouched. The block's existing "type" (ephemeral) is preserved.
+func forceClaudeCacheControlTTL(jsonData []byte, ttl string) ([]byte, error) {
+	var err error
+	for _, path := range claudeCacheControlPaths(jsonData) {
+		jsonData, err = sjson.SetBytes(jsonData, path+".ttl", ttl)
+		if err != nil {
+			return jsonData, err
+		}
+	}
+	return jsonData, nil
+}
+
+// claudeCacheControlPaths returns the sjson paths of every cache_control object
+// in the request (system/tools blocks and each message's content blocks).
+func claudeCacheControlPaths(jsonData []byte) []string {
+	var paths []string
+	collect := func(prefix string, blocks gjson.Result) {
+		if !blocks.IsArray() {
+			return
+		}
+		blocks.ForEach(func(idx, block gjson.Result) bool {
+			if block.Get("cache_control").IsObject() {
+				paths = append(paths, fmt.Sprintf("%s.%d.cache_control", prefix, idx.Int()))
+			}
+			return true
+		})
+	}
+	collect("system", gjson.GetBytes(jsonData, "system"))
+	collect("tools", gjson.GetBytes(jsonData, "tools"))
+	gjson.GetBytes(jsonData, "messages").ForEach(func(i, msg gjson.Result) bool {
+		collect(fmt.Sprintf("messages.%d.content", i.Int()), msg.Get("content"))
+		return true
+	})
+	return paths
+}
+
+// mergeAnthropicBeta appends beta to a comma-separated anthropic-beta value,
+// keeping existing tokens and avoiding duplicates.
+func mergeAnthropicBeta(existing, beta string) string {
+	if strings.Contains(existing, beta) {
+		return existing
+	}
+	if existing == "" {
+		return beta
+	}
+	return existing + "," + beta
 }
