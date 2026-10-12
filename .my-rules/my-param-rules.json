@@ -44,6 +44,48 @@
                 {
                     "path": "model",
                     "mode": "prefix",
+                    "value": "claude-sonnet-5"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "thinking的enabled to adaptive参数适配",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "enabled"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-sonnet-5"
+                }
+            ],
+            "logic": "AND"
+        },        
+        {
+            "description": "thinking的enabled to adaptive参数适配",
+            "mode": "set",
+            "path": "output_config",
+            "value": {
+                "effort": "medium"
+            },
+            "conditions": [
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "enabled"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
                     "value": "claude-opus-5"
                 }
             ],
@@ -169,6 +211,16 @@
                 { "path": "messages.0.content.#", "mode": "full", "value": 0 }
             ],
             "logic": "AND"
+        },
+        {
+            "description": "claude 5系列(opus-5/sonnet-5)已弃用temperature，存在即删除，避免400 temperature is deprecated for this model",
+            "mode": "delete",
+            "path": "temperature",
+            "conditions": [
+                { "path": "model", "mode": "contains", "value": "claude-opus-5" },
+                { "path": "model", "mode": "contains", "value": "claude-sonnet-5" }
+            ],
+            "logic": "OR"
         },
         {
             "description": "gpt-6只支持默认temperature(1)，删除非1的temperature避免400",

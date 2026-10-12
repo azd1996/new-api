@@ -208,7 +208,11 @@ func getLogFiles() ([]LogFileInfo, error) {
 			continue
 		}
 		name := entry.Name()
-		if !strings.HasPrefix(name, "oneapi-") || !strings.HasSuffix(name, ".log") {
+		if !strings.HasSuffix(name, ".log") {
+			continue
+		}
+		// 同时纳入常规日志 oneapi-*.log 与 Debug 专用日志 debug-*.log
+		if !strings.HasPrefix(name, "oneapi-") && !strings.HasPrefix(name, "debug-") {
 			continue
 		}
 		info, err := entry.Info()
@@ -221,9 +225,10 @@ func getLogFiles() ([]LogFileInfo, error) {
 			ModTime: info.ModTime(),
 		})
 	}
-	// 按文件名降序排列（最新在前）
+	// 按修改时间降序排列（最新在前）。oneapi-/debug- 两种前缀混在一起时，
+	// 文件名排序不再等于时间排序，因此按 ModTime 排序，保证“最新在前”对 by_count 清理仍成立。
 	sort.Slice(files, func(i, j int) bool {
-		return files[i].Name > files[j].Name
+		return files[i].ModTime.After(files[j].ModTime)
 	})
 	return files, nil
 }
@@ -289,17 +294,18 @@ func CleanupLogFiles(c *gin.Context) {
 	}
 
 	activeLogPath := logger.GetCurrentLogPath()
+	activeDebugLogPath := logger.GetCurrentDebugLogPath()
 	var toDelete []LogFileInfo
 
 	switch mode {
 	case "by_count":
-		// files 已按名称降序（最新在前），保留前 value 个
+		// files 已按修改时间降序（最新在前），保留前 value 个
 		for i, f := range files {
 			if i < value {
 				continue
 			}
 			fullPath := filepath.Join(*common.LogDir, f.Name)
-			if fullPath == activeLogPath {
+			if fullPath == activeLogPath || fullPath == activeDebugLogPath {
 				continue
 			}
 			toDelete = append(toDelete, f)
@@ -309,7 +315,7 @@ func CleanupLogFiles(c *gin.Context) {
 		for _, f := range files {
 			if f.ModTime.Before(cutoff) {
 				fullPath := filepath.Join(*common.LogDir, f.Name)
-				if fullPath == activeLogPath {
+				if fullPath == activeLogPath || fullPath == activeDebugLogPath {
 					continue
 				}
 				toDelete = append(toDelete, f)

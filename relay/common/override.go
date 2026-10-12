@@ -193,10 +193,9 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 	paramOverride := getParamOverrideMap(info)
 	if len(paramOverride) > 0 {
 		overrideCtx := BuildParamOverrideContext(info)
-		// Always attach a recorder so applied operations can feed the admin-only
-		// param-override audit log (info.ParamOverrideMatched). Whether they are
-		// also surfaced on the consume log (info.ParamOverrideAudit / other.po)
-		// stays governed by the existing sensitive-path gating below.
+		// Always attach a recorder so applied operations can be surfaced on the
+		// consume log (info.ParamOverrideAudit / other.po), governed by the
+		// existing sensitive-path gating below.
 		recorder := &paramOverrideAuditRecorder{}
 		overrideCtx[paramOverrideContextAuditRecorder] = recorder
 		auditEnabled := shouldEnableParamOverrideAudit(paramOverride)
@@ -207,9 +206,6 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 		}
 		syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
 		if info != nil {
-			info.ParamOverrideMatched = recorder.allLines
-			info.ParamOverrideMatchedIndices = recorder.matchedIndices
-			info.ParamOverrideMatchedDescriptions = recorder.matchedDescriptions
 			if auditEnabled {
 				info.ParamOverrideAudit = recorder.lines
 			} else {

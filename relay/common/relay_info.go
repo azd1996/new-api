@@ -153,27 +153,6 @@ type RelayInfo struct {
 	RuntimeHeadersOverride                map[string]interface{}
 	UseRuntimeHeadersOverride             bool
 	ParamOverrideAudit                    []string
-	// ParamOverrideMatched holds a human-readable summary of the channel's
-	// static param-override operations that matched and ran on the current
-	// attempt. It is captured unconditionally (independent of the sensitive-path
-	// gating that governs ParamOverrideAudit) so the controller can emit a
-	// dedicated param-override audit log. Retry-override rewrites do NOT feed
-	// this field. The controller consumes and clears it after each attempt.
-	ParamOverrideMatched []string
-	// ParamOverrideMatchedIndices holds the indices (into the channel's
-	// param-override operations array) of the operations whose conditions matched
-	// on the current attempt, so the audit log can reference which rule fired.
-	ParamOverrideMatchedIndices []int
-	// ParamOverrideMatchedDescriptions holds the description of each matched
-	// operation, aligned with ParamOverrideMatchedIndices (configured description
-	// or a summary fallback), for the param-override audit log.
-	ParamOverrideMatchedDescriptions []string
-	// ParamOverrideTemplateOpCount is how many param-override operations were
-	// prepended by the channel-affinity template (0 if none). Operations at an
-	// index below this count are template-injected (e.g. Codex header
-	// passthrough); at or above it are the channel's own configured operations.
-	// Used to label a matched rule's provenance in the param-override audit log.
-	ParamOverrideTemplateOpCount int
 
 	// PendingRetryRewrite holds param-override operations to apply once to the
 	// outgoing request body on an error-triggered fallback retry (see
@@ -268,7 +247,6 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	}
 
 	info.ChannelMeta = channelMeta
-	info.ParamOverrideTemplateOpCount = common.GetContextKeyInt(c, constant.ContextKeyChannelParamOverrideTemplateOps)
 
 	// reset some fields based on channel meta
 	// 重置某些字段，例如模型名称等

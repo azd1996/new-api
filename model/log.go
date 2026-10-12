@@ -91,17 +91,15 @@ const (
 	LogTypeError   = 5
 	LogTypeRefund  = 6
 	LogTypeLogin   = 7
-	// LogTypeRetryOverride / LogTypeParamOverride record how the channel's
-	// retry-override / param-override rules processed a request. Admin-only:
-	// details live under Other.admin_info and these types are filtered out of
-	// non-admin (user) log queries.
+	// LogTypeRetryOverride records how the channel's retry-override rules
+	// processed a request. Admin-only: details live under Other.admin_info and
+	// this type is filtered out of non-admin (user) log queries.
 	LogTypeRetryOverride = 8
-	LogTypeParamOverride = 9
 )
 
 // adminOnlyLogTypes lists log types that must never appear in non-admin (user)
 // log queries; their detail lives under Other.admin_info.
-var adminOnlyLogTypes = []int{LogTypeRetryOverride, LogTypeParamOverride}
+var adminOnlyLogTypes = []int{LogTypeRetryOverride}
 
 func ensureLogRequestId(log *Log) {
 	if log != nil && log.RequestId == "" {
@@ -322,12 +320,6 @@ type OverrideAuditLogParams struct {
 // detail is nested under Other.admin_info.retry_override.
 func RecordRetryOverrideLog(params OverrideAuditLogParams, content string, detail map[string]interface{}) {
 	recordOverrideAuditLog(LogTypeRetryOverride, "retry_override", content, params, detail)
-}
-
-// RecordParamOverrideLog records applied param-override operations
-// (LogTypeParamOverride). detail is nested under Other.admin_info.param_override.
-func RecordParamOverrideLog(params OverrideAuditLogParams, content string, detail map[string]interface{}) {
-	recordOverrideAuditLog(LogTypeParamOverride, "param_override", content, params, detail)
 }
 
 func recordOverrideAuditLog(logType int, section string, content string, params OverrideAuditLogParams, detail map[string]interface{}) {

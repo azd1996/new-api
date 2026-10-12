@@ -2,14 +2,26 @@
 
 ## 背景
 
-Debug 模式(`common.DebugEnabled`)会让转发链路把**完整请求体(含 `messages` 会话历史、system 提示)和上游响应**以明文 JSON 打到日志里(stdout/stderr,设了 `LOG_DIR` 时同时落 `oneapi-*.log`)。它用于排查缓存命中率、会话内容、上游行为等问题。
+Debug 模式(`common.DebugEnabled`)会让转发链路把**完整请求体(含 `messages` 会话历史、system 提示)和上游响应**以明文 JSON 记录下来。它用于排查缓存命中率、会话内容、上游行为等问题。
 
 此前该开关**只能在部署时通过环境变量 `DEBUG=true` 设置**,启动后无法更改。这带来两个问题:
 
 - 默认开启日志体积巨大(全量明文)。
 - 关闭状态下想临时排查,必须改环境变量并重启/重新部署,无法即时开启。
 
-本次改动把它接入运行时 option 系统,管理员可通过 option 接口**即开即关、无需重启**(控制台暂无可视化开关,见「使用」)。
+本次改动把它接入运行时 option 系统,管理员可通过 option 接口**即开即关、无需重启**(控制台暂无可视化开关,见「使用」)。另外,为避免 Debug 日志刷爆 docker logs,DEBUG 级日志改为写入专用文件(见「Debug 日志输出」)。
+
+## Debug 日志输出(专用文件)
+
+为避免 Debug 开启后日志量激增、刷爆 docker logs(stdout/stderr),**所有 DEBUG 级日志(`logger.LogDebug` / `logger.LogJson`)单独写入专用文件 `debug-*.log`,不再进入 stdout/stderr**。
+
+- **默认不产生**:文件是否生成完全跟随 `DebugEnabled` 开关,默认关闭;开启后在**首次写 DEBUG 时惰性创建**。不开 Debug 就不会有 debug 文件。
+- **输出目录**:由命令行参数 `--log-dir`(默认 `./logs`)决定,DEBUG 行落到 `<log-dir>/debug-<时间戳>.log`,与常规日志 `oneapi-*.log` 分开存放,且**不**混进 docker logs。**文件名由时间戳自动生成,不可自定义**;要换位置改 `--log-dir` 即可(注意是启动参数,不是环境变量)。
+- **回退**:`--log-dir` 为空字符串时,DEBUG 行回退到 stderr(docker logs),并打印一次告警。
+- **轮转**:按行数轮转(与主日志一致,阈值 `maxLogCount` = 100 万行);超过后新建 `debug-<新时间戳>.log`,**旧文件保留在磁盘上不自动删除**,因此总量不设上限,需自行留意磁盘占用(可用下面的管理台清理)。
+- **管理台**:`debug-*.log` 与 `oneapi-*.log` 一样纳入管理台「日志文件」列表与清理,可在系统设置里查看大小、按个数/天数清理;当前正在写入的 debug 文件会被跳过不删。
+- **分流范围**:`common/redis.go` 等处用 `common.SysLog` + `if DebugEnabled` 打的系统级调试行(如 Redis GET/SET)属常规系统日志,仍走 stdout/stderr 与 `oneapi-*.log`,不在本次分流范围内。
+- **实现**:`logger/logger.go`(`writeDebugLine` / `openDebugLogLocked`,`logHelper` 对 `loggerDebug` 分流);管理台收集/清理见 `controller/performance.go`(`getLogFiles` / `CleanupLogFiles`,按前缀 `oneapi-`/`debug-` 收集、按修改时间降序)。
 
 ## 行为
 
@@ -90,6 +102,7 @@ curl 'https://<your-host>/api/option/' \
 
 ## 注意事项
 
-- Debug 日志是**客户对话明文全文**,属敏感数据。排查完请及时关闭,并控制 `oneapi-*.log` 的访问权限、留存周期,避免接入会外发日志的第三方采集。
+- Debug 日志是**客户对话明文全文**,属敏感数据。排查完请及时关闭,并控制 `debug-*.log`(及回退时的 `oneapi-*.log`)的访问权限、留存周期,避免接入会外发日志的第三方采集。
+- `debug-*.log` 轮转后旧文件**不会自动删除**,长期开启会持续占用磁盘;请及时用管理台「日志文件」清理,或按天数/个数设置保留策略。
 - 该开关仅 **root 权限**可改,防止任意管理员打印全体客户对话。
 - 这是**全局**开关,开启期间所有流量都会被记录,日志增长很快,不建议长期开启。

@@ -33,10 +33,28 @@ var currentLogPath string
 var currentLogPathMu sync.RWMutex
 var currentLogFile *os.File
 
+// Debug-level logs are routed to a dedicated debug-*.log file (when LOG_DIR is
+// set) instead of the shared gin writers, so the high-volume debug dumps do not
+// flood stdout/stderr (docker logs). These vars track that separate file.
+var debugLogMu sync.Mutex
+var debugLogFile *os.File
+var debugLogWriter io.Writer
+var debugLogPath string
+var debugLogCount int
+var debugFallbackWarned bool
+
 func GetCurrentLogPath() string {
 	currentLogPathMu.RLock()
 	defer currentLogPathMu.RUnlock()
 	return currentLogPath
+}
+
+// GetCurrentDebugLogPath returns the path of the active dedicated debug log
+// file, or an empty string if debug output is falling back to stderr.
+func GetCurrentDebugLogPath() string {
+	debugLogMu.Lock()
+	defer debugLogMu.Unlock()
+	return debugLogPath
 }
 
 func SetupLogger() {
@@ -102,12 +120,17 @@ func logHelper(ctx context.Context, level string, msg string) {
 		}
 	}
 	now := time.Now()
+	line := fmt.Sprintf("[%s] %v | %s | %s \n", level, now.Format("2006/01/02 - 15:04:05"), id, msg)
+	if level == loggerDebug {
+		writeDebugLine(line)
+		return
+	}
 	common.LogWriterMu.RLock()
 	writer := gin.DefaultErrorWriter
 	if level == loggerINFO {
 		writer = gin.DefaultWriter
 	}
-	_, _ = fmt.Fprintf(writer, "[%s] %v | %s | %s \n", level, now.Format("2006/01/02 - 15:04:05"), id, msg)
+	_, _ = io.WriteString(writer, line)
 	common.LogWriterMu.RUnlock()
 	logCount++ // we don't need accurate count, so no lock here
 	if logCount > maxLogCount && !setupLogWorking {
@@ -116,6 +139,51 @@ func logHelper(ctx context.Context, level string, msg string) {
 		gopool.Go(func() {
 			SetupLogger()
 		})
+	}
+}
+
+// writeDebugLine writes a preformatted DEBUG line to the dedicated debug log
+// file, rotating it like the main log and lazily (re)opening it so that
+// toggling DebugEnabled at runtime works without a restart.
+func writeDebugLine(line string) {
+	debugLogMu.Lock()
+	defer debugLogMu.Unlock()
+	if debugLogWriter == nil || (debugLogFile != nil && debugLogCount > maxLogCount) {
+		openDebugLogLocked()
+	}
+	_, _ = io.WriteString(debugLogWriter, line)
+	debugLogCount++
+}
+
+// openDebugLogLocked opens (or rotates) the dedicated debug log file. It must be
+// called with debugLogMu held. When LOG_DIR is unset or the file cannot be
+// opened, debug output falls back to stderr (docker logs) and warns once.
+func openDebugLogLocked() {
+	if *common.LogDir == "" {
+		if !debugFallbackWarned {
+			debugFallbackWarned = true
+			log.Println("debug log: log directory not configured, debug logs fall back to stderr")
+		}
+		debugLogWriter = os.Stderr
+		return
+	}
+	logPath := filepath.Join(*common.LogDir, fmt.Sprintf("debug-%s.log", time.Now().Format("20060102150405")))
+	fd, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		if !debugFallbackWarned {
+			debugFallbackWarned = true
+			log.Printf("debug log: failed to open %s, fall back to stderr: %v", logPath, err)
+		}
+		debugLogWriter = os.Stderr
+		return
+	}
+	oldFile := debugLogFile
+	debugLogFile = fd
+	debugLogWriter = fd
+	debugLogPath = logPath
+	debugLogCount = 0
+	if oldFile != nil {
+		_ = oldFile.Close()
 	}
 }
 

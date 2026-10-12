@@ -101,6 +101,26 @@
       { "mode": "prune_objects", "path": "input", "value": { "where": { "type": "reasoning" } } }
     ],
     "phase4_retry_action": "retry_same_channel"
+  },
+  {
+    "description": "解决claude经AWS Bedrock兜底时thinking块signature验证不过的问题（Bedrock报错用反引号包裹signature/thinking）",
+    "phase1_request_condition": {
+        "conditions": [
+            { "path": "relay_format", "mode": "full", "value": "claude" }
+        ],
+        "logic": "AND"
+    },
+    "phase2_response_conditions": {
+      "conditions": [
+        { "path": "error_message", "mode": "contains", "value": "Invalid `signature` in `thinking` block" }
+      ],
+      "logic": "AND"
+    },
+    "phase3_request_rewrite": [
+      { "mode": "prune_objects", "path": "messages", "value": { "where": { "type": "thinking" } } },
+      { "mode": "prune_objects", "path": "messages", "value": { "where": { "type": "redacted_thinking" } } }
+    ],
+    "phase4_retry_action": "retry_same_channel"
   }
 ]
 

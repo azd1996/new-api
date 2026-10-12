@@ -227,8 +227,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = relayHandler(c, relayInfo)
 		}
 
-		recordParamOverrideAudit(c, relayInfo, channel.Id)
-
 		if newAPIError == nil {
 			relayInfo.LastError = nil
 			return

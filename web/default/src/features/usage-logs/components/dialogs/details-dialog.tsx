@@ -589,10 +589,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
     props.isAdmin && props.log.type === 8
       ? other?.admin_info?.retry_override
       : undefined
-  const paramOverride =
-    props.isAdmin && props.log.type === 9
-      ? other?.admin_info?.param_override
-      : undefined
   let reasoningEffortVariant: StatusBadgeProps['variant'] = 'green'
   if (other?.reasoning_effort === 'high') {
     reasoningEffortVariant = 'orange'
@@ -857,48 +853,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 value={retryOverride.error_message}
               />
             )}
-          </DetailSection>
-        )}
-
-        {/* Param-override audit (admin only, type=9) */}
-        {paramOverride && (
-          <DetailSection label={t('Param Override')}>
-            {paramOverride.rule_labels && paramOverride.rule_labels.length > 0 ? (
-              <DetailRow
-                label={t('Rule')}
-                value={paramOverride.rule_labels.join(', ')}
-                mono
-              />
-            ) : (
-              paramOverride.rule_ids &&
-              paramOverride.rule_ids.length > 0 && (
-                <DetailRow
-                  label={t('Rule')}
-                  value={`#${paramOverride.rule_ids.join(', #')}`}
-                  mono
-                />
-              )
-            )}
-            {paramOverride.descriptions &&
-              paramOverride.descriptions.length > 0 && (
-                <DetailRow
-                  label={t('Description')}
-                  value={
-                    <div className='flex flex-col gap-0.5'>
-                      {paramOverride.descriptions.map((desc, i) => {
-                        const label =
-                          paramOverride.rule_labels?.[i] ??
-                          `#${paramOverride.rule_ids?.[i] ?? i}`
-                        return (
-                          <span key={label}>
-                            {label} {desc}
-                          </span>
-                        )
-                      })}
-                    </div>
-                  }
-                />
-              )}
           </DetailSection>
         )}
 

@@ -154,24 +154,6 @@ function buildTypeDetailSegments(
     return segments
   }
 
-  // Param-override audit (type=9): the channel's static param-override
-  // operations that matched and ran. Detail lives under admin_info (admin-only).
-  if (log.type === 9) {
-    const po = other?.admin_info?.param_override
-    const segments: DetailSegment[] = [{ text: t('Param override applied') }]
-    if (po?.rule_labels?.length) {
-      segments.push({ text: `${t('Rule')} ${po.rule_labels.join(', ')}` })
-    } else if (po?.rule_ids?.length) {
-      segments.push({ text: `${t('Rule')} #${po.rule_ids.join(',')}` })
-    }
-    if (po?.applied?.length) {
-      segments.push({ text: po.applied.join(', '), muted: true })
-    } else if (po?.count != null) {
-      segments.push({ text: String(po.count), muted: true })
-    }
-    return segments
-  }
-
   if (log.type !== 2) return []
 
   const isViolation = isViolationFeeLog(other)
