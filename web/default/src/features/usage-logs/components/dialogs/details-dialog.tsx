@@ -584,6 +584,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const useChannel = other?.admin_info?.use_channel
   const channelChain =
     useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+  // Which cluster node handled this request (admin-only). Rendered for
+  // consume/error logs; topup logs show it in their own audit section.
+  const nodeName =
+    props.isAdmin && !isTopup ? adminInfo?.node_name : undefined
   // Override-audit detail (admin-only): which rule (by index) fired and how.
   const retryOverride =
     props.isAdmin && props.log.type === 8
@@ -661,6 +665,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
 
           {channelChain && props.isAdmin && (
             <DetailRow label={t('Retry Chain')} value={channelChain} mono />
+          )}
+
+          {nodeName && (
+            <DetailRow label={t('Node Name')} value={nodeName} mono />
           )}
 
           {props.log.token_name && (
