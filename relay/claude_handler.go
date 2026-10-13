@@ -118,29 +118,33 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		// whose embedded session_id is a derived session hash. The session is
 		// embedded in the user_id blob (not a top-level metadata.session_id, which
 		// upstream rejects as an unknown metadata key). Clients that already set
-		// user_id (e.g. Claude Code) are left untouched.
-		jsonData, err = fillClaudeMetadataUserID(
-			jsonData,
-			common.GetContextKeyString(c, constant.ContextKeyTokenKey),
-			c.GetHeader("x-claude-code-session-id"),
-			c.ClientIP(),
-			c.GetHeader("User-Agent"),
-		)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		// user_id (e.g. Claude Code) are left untouched. Gated by the Claude
+		// metadata.user_id auto-fill switch (default on).
+		if model_setting.GetClaudeSettings().MetadataUserIdFillEnabled {
+			jsonData, err = fillClaudeMetadataUserID(
+				jsonData,
+				common.GetContextKeyString(c, constant.ContextKeyTokenKey),
+				c.GetHeader("x-claude-code-session-id"),
+				c.ClientIP(),
+				c.GetHeader("User-Agent"),
+			)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
 		}
 
-		// Force 1-hour prompt-cache TTL for configured groups: rewrite every
-		// existing cache_control breakpoint to ttl=1h and append the extended
-		// cache TTL beta header. Gated per using-group (resolving "auto" to the
-		// concrete group picked during channel selection).
+		// Force 1-hour prompt-cache TTL for configured (group, model) rules:
+		// rewrite every existing cache_control breakpoint to ttl=1h and append
+		// the extended cache TTL beta header. Gated per using-group (resolving
+		// "auto" to the concrete group) AND the outbound model, so the ttl field
+		// is only sent to models that support it.
 		cacheGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 		if cacheGroup == "auto" {
 			if ag := common.GetContextKeyString(c, constant.ContextKeyAutoGroup); ag != "" {
 				cacheGroup = ag
 			}
 		}
-		if operation_setting.IsExtendedCacheTTLGroup(cacheGroup) {
+		if operation_setting.ShouldForceExtendedCacheTTL(cacheGroup, gjson.GetBytes(jsonData, "model").String()) {
 			jsonData, err = forceClaudeCacheControlTTL(jsonData, claudeExtendedCacheTTL)
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
