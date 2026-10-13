@@ -21,7 +21,6 @@ type ClaudeSettings struct {
 	DefaultMaxTokens                      map[string]int                 `json:"default_max_tokens"`
 	ThinkingAdapterEnabled                bool                           `json:"thinking_adapter_enabled"`
 	ThinkingAdapterBudgetTokensPercentage float64                        `json:"thinking_adapter_budget_tokens_percentage"`
-	MetadataUserIdFillEnabled             bool                           `json:"metadata_user_id_fill_enabled"`
 }
 
 // 默认配置
@@ -32,7 +31,6 @@ var defaultClaudeSettings = ClaudeSettings{
 		"default": 8192,
 	},
 	ThinkingAdapterBudgetTokensPercentage: 0.8,
-	MetadataUserIdFillEnabled:             true,
 }
 
 // 全局实例
