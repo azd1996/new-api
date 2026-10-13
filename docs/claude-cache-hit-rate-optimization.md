@@ -148,7 +148,7 @@ Anthropic/Bedrock 的缓存是**内容寻址**:键 = `tools → system → messa
 ## 相关文件
 
 - 实现与测试:`relay/claude_handler.go`、`relay/claude_handler_metadata_test.go`、`relay/claude_handler_cache_ttl_test.go`
-- 1h TTL 分组+模型设置:`setting/operation_setting/extended_cache_ttl_setting.go`(+ `_test.go`)
+- 1h TTL 分组+模型设置:`setting/operation_setting/group_model_rule.go`(`GroupModelRuleSetting` + `ShouldForceExtendedCacheTTL`,测试 `group_model_rule_test.go`)
 - 实现参考文档:`docs/claude-metadata-session-injection.md`
 - Debug 运行时开关:`docs/debug-mode-runtime-toggle.md`
 

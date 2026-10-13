@@ -34,20 +34,34 @@ flowchart LR
 - 仅作用于 Claude 原生 `/v1/messages` 路径(`relay.ClaudeHelper`,`relay/claude_handler.go`)。
 - 仅在**非透传**分支生效:若开启全局 `PassThroughRequestEnabled` 或渠道 `PassThroughBodyEnabled`,走原始 body 透传,不注入。
 - 注入发生在 `RemoveDisabledFields` 之后、param-override 之前。
-- 受开关 `claude.metadata_user_id_fill_enabled` 控制,**默认开**;关闭后整段注入逻辑跳过(见「开关」)。
+- **默认对所有 (group, model) 开启**;可用 option `metadata_injection_disable_setting` 的 `rules` 指定要**关闭**的 (分组, 模型)(见「开关」)。
 
-## 开关
+## 开关(默认开,按 分组 + 模型 指定关闭)
 
-该功能由 Claude 配置项 `claude.metadata_user_id_fill_enabled`(`setting/model_setting/claude.go` 中 `ClaudeSettings.MetadataUserIdFillEnabled`)控制,默认 `true`。
+metadata 注入**默认对所有 (group, model) 开启**;option `metadata_injection_disable_setting` 的 `rules` 列出要**关闭**的 (group, model) 对:
 
-它已通过 `config.GlobalConfig.Register("claude", ...)` 注册到配置系统,因此直接复用现成的 option 接口读写、持久化与重启加载,无需额外前端或迁移:
-
+```json
+{
+  "rules": [
+    { "group": "deptA", "models": ["claude-opus-5-5"] },
+    { "group": "deptB", "models": ["*"] }
+  ]
+}
 ```
-PUT /api/option/
-{ "key": "claude.metadata_user_id_fill_enabled", "value": "false" }
-```
 
-`ClaudeHelper` 非透传分支里以 `model_setting.GetClaudeSettings().MetadataUserIdFillEnabled` 为前置闸门:为 `false` 时**完全不调用** `fillClaudeMetadataUserID`,出站 body 的 metadata 原样透出;为 `true`(默认)时才进入下方「行为」描述的 user_id 闸门判断。
+- 空 `rules`(默认)= 全部开启;命中某条规则的 (group, model) 才关闭。
+- `models` 匹配:精确名、以 `*` 结尾的前缀、或单独 `*`(该组所有模型)。
+- 默认行为在**调用处**决定:`ClaudeHelper` 非透传分支里 `if !operation_setting.MatchGroupModel(GetMetadataInjectionDisableSetting().Rules, group, model)` 才调用 `fillClaudeMetadataUserID`。`group` = 请求 using group(auto 解析为实际命中组),`model` = 出站 body 的 `model`。
+- 命中关闭规则时**完全不调用** `fillClaudeMetadataUserID`,出站 metadata 原样透出;否则进入下方「行为」描述的 user_id 闸门。
+
+关闭示例(把 deptA 的 claude-opus-5-5 关掉;root access token):
+
+```bash
+curl -X PUT 'https://<your-host>/api/option/' \
+  -H 'Authorization: <root-access-token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"metadata_injection_disable_setting","value":"{\"rules\":[{\"group\":\"deptA\",\"models\":[\"claude-opus-5-5\"]}]}"}'
+```
 
 ## 行为
 
@@ -66,9 +80,9 @@ PUT /api/option/
 
 ```mermaid
 flowchart TD
-    S["jsonData(RemoveDisabledFields 之后)"] --> Q0{"开关 claude.metadata_user_id_fill_enabled?"}
-    Q0 -- "否" --> OUT["metadata 原样<br/>→ param-override → 送上游"]
-    Q0 -- "是(默认)" --> Q1{"metadata.user_id 非空?"}
+    S["jsonData(RemoveDisabledFields 之后)"] --> Q0{"命中 metadata_injection_disable_setting.rules 的 (group, model)?"}
+    Q0 -- "是(关闭)" --> OUT["metadata 原样<br/>→ param-override → 送上游"]
+    Q0 -- "否(默认开)" --> Q1{"metadata.user_id 非空?"}
     Q1 -- "是(如 Claude Code)" --> OUT
     Q1 -- "否" --> D1["取会话标识(优先级):<br/>1. header x-claude-code-session-id<br/>2. ephemeral cache_control 内容<br/>3. clientIP+UA+apiKey 兜底"]
     D1 --> D2["seed = model ␟ 稳定system前缀 ␟ 会话标识<br/>→ xxhash64 → 16位hex = sessionID"]
@@ -76,7 +90,7 @@ flowchart TD
     U --> OUT
 ```
 
-对应 `ClaudeHelper` 非透传分支里,先判开关再调用 `fillClaudeMetadataUserID`,以 `metadata.user_id` 是否存在为闸门。
+对应 `ClaudeHelper` 非透传分支里**默认调用** `fillClaudeMetadataUserID`;仅当 (group, model) 命中 `metadata_injection_disable_setting.rules` 时跳过。调用后再以 `metadata.user_id` 是否存在为闸门。
 
 ## session_id 派生
 
@@ -95,8 +109,8 @@ flowchart TD
   - `fillClaudeMetadataUserID`(单一入口;内部派生并内嵌 session_id)
   - `deriveClaudeSessionSeed` / `claudeConversationSeed` / `claudeStableSystemPrefix` / `claudeCacheControlSeed` / `claudeFallbackSessionSeed` / `claudeSessionHash`
   - `claudeMetadataUserID` 结构体(`device_id` / `account_uuid` / `session_id`)、`claudeDerivedDeviceIDLen = 6`
-  - 调用点在 `ClaudeHelper` 的非透传分支,前置判断 `MetadataUserIdFillEnabled` 开关
-- 开关配置:`setting/model_setting/claude.go` 的 `ClaudeSettings.MetadataUserIdFillEnabled`(json `metadata_user_id_fill_enabled`,默认 `true`),复用 option 接口
+  - 调用点在 `ClaudeHelper` 的非透传分支,默认行为在调用处:`if !operation_setting.MatchGroupModel(GetMetadataInjectionDisableSetting().Rules, group, model)` 才注入
+- 开关配置:`setting/operation_setting/group_model_rule.go`(两套 key 复用同一 `GroupModelRuleSetting`;metadata 用 option key `metadata_injection_disable_setting`,`{"rules":[{"group","models"}]}`,默认空=**全部开启**,命中即关闭)
 - API key 来源:上下文 `constant.ContextKeyTokenKey`(= `token.Key`,已去除 `sk-` 前缀)
 - 依赖:`github.com/cespare/xxhash/v2`(go.sum 已存在;如需把 go.mod 的 `// indirect` 清理掉可执行 `go mod tidy`)
 

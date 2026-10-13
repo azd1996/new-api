@@ -7,15 +7,14 @@ import (
 )
 
 func TestShouldForceExtendedCacheTTL(t *testing.T) {
-	// Explicitly initialize the setting state for this test.
-	extendedCacheTTLSetting = ExtendedCacheTTLSetting{
-		Rules: []ExtendedCacheTTLRule{
+	extendedCacheTTLSetting = GroupModelRuleSetting{
+		Rules: []GroupModelRule{
 			{Group: "groupA", Models: []string{"claude-opus-5-5", "claude-sonnet-5-5"}},
 			{Group: "groupB", Models: []string{"claude-*"}},
 			{Group: "groupC", Models: []string{"*"}},
 		},
 	}
-	t.Cleanup(func() { extendedCacheTTLSetting = ExtendedCacheTTLSetting{} })
+	t.Cleanup(func() { extendedCacheTTLSetting = GroupModelRuleSetting{} })
 
 	cases := []struct {
 		name  string

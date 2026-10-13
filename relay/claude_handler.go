@@ -182,14 +182,24 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
-		// For clients that did not provide metadata.user_id, synthesize a Claude
-		// Code-style metadata.user_id whose device_id is the API key suffix and
-		// whose embedded session_id is a derived session hash. The session is
-		// embedded in the user_id blob (not a top-level metadata.session_id, which
-		// upstream rejects as an unknown metadata key). Clients that already set
-		// user_id (e.g. Claude Code) are left untouched. Gated by the Claude
-		// metadata.user_id auto-fill switch (default on).
-		if model_setting.GetClaudeSettings().MetadataUserIdFillEnabled {
+		// Resolve the request's using-group (auto cross-group retry resolves to
+		// the concrete group) and the outbound model once, for the group+model
+		// gated Claude behaviors below.
+		claudeGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+		if claudeGroup == "auto" {
+			if ag := common.GetContextKeyString(c, constant.ContextKeyAutoGroup); ag != "" {
+				claudeGroup = ag
+			}
+		}
+		claudeModel := gjson.GetBytes(jsonData, "model").String()
+
+		// Metadata.user_id synthesis defaults ON for every (group, model); it is
+		// skipped only for (group, model) pairs listed in
+		// metadata_injection_disable_setting. Synthesizes a Claude Code-style
+		// metadata.user_id (device_id = API key suffix + embedded derived
+		// session_id) when the client omitted user_id; clients that already set
+		// user_id (e.g. Claude Code) are left untouched.
+		if !operation_setting.MatchGroupModel(operation_setting.GetMetadataInjectionDisableSetting().Rules, claudeGroup, claudeModel) {
 			jsonData, err = fillClaudeMetadataUserID(
 				jsonData,
 				common.GetContextKeyString(c, constant.ContextKeyTokenKey),
@@ -202,18 +212,11 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
-		// Force 1-hour prompt-cache TTL for configured (group, model) rules:
-		// rewrite every existing cache_control breakpoint to ttl=1h and append
-		// the extended cache TTL beta header. Gated per using-group (resolving
-		// "auto" to the concrete group) AND the outbound model, so the ttl field
-		// is only sent to models that support it.
-		cacheGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-		if cacheGroup == "auto" {
-			if ag := common.GetContextKeyString(c, constant.ContextKeyAutoGroup); ag != "" {
-				cacheGroup = ag
-			}
-		}
-		if operation_setting.ShouldForceExtendedCacheTTL(cacheGroup, gjson.GetBytes(jsonData, "model").String()) {
+		// For configured (group, model) rules, force the 1-hour prompt-cache TTL:
+		// rewrite every existing cache_control breakpoint to ttl=1h and append the
+		// extended cache TTL beta header. Only list models that support 1h, else
+		// Bedrock returns ValidationException.
+		if operation_setting.ShouldForceExtendedCacheTTL(claudeGroup, claudeModel) {
 			jsonData, err = forceClaudeCacheControlTTL(jsonData, claudeExtendedCacheTTL)
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
