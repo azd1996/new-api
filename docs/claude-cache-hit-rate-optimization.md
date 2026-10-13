@@ -77,13 +77,13 @@ flowchart TD
 
 - 期望:合成请求的 `metadata.user_id` 是含 `session_id` 的 blob,且 `has_top_session=false`(不写顶层)。
 
-## 按分组强制 1 小时缓存 TTL
+## 按分组+模型强制 1 小时缓存 TTL
 
-针对"长会话有自然停顿、5m 缓存频繁过期"的场景,可对**指定分组**强制把 prompt 缓存 TTL 从默认 5m 提升到 1h。
+针对"长会话有自然停顿、5m 缓存频繁过期"的场景,可对**指定 (分组, 模型)** 强制把 prompt 缓存 TTL 从默认 5m 提升到 1h。按模型收敛是必须的:**对只支持 5m 的模型发送 `ttl` 字段会被 Bedrock 直接 `ValidationException`**。
 
 生效条件(全部满足):
 
-- 请求的 **using group**(auto 跨组重试时解析为实际命中的 group)在配置名单内;
+- 请求的 **using group**(auto 跨组重试时解析为实际命中的 group)+ **出站 model** 命中某条规则;
 - 走 Claude `/v1/messages` 的**非透传**路径;
 - 请求体里**已存在** `cache_control` 断点(不新建断点)。
 
@@ -92,20 +92,51 @@ flowchart TD
 1. **Body**:把 `system` / `tools` / 各 `messages[].content` 中已有的 `cache_control` 全部改为 `{"type":"ephemeral","ttl":"1h"}`(保留 type,覆盖原 5m);无断点的块、string 型 system/content 不动。
 2. **Header**:向出站 `anthropic-beta` 追加 `extended-cache-ttl-2025-04-11`(保留客户端已有 beta、去重)。
 
-配置(option key `extended_cache_ttl_setting`):
+配置(option key `extended_cache_ttl_setting`,按 `(group, models)` 规则):
 
 ```json
-{ "groups": ["groupA", "groupB"] }
+{
+  "rules": [
+    { "group": "groupA", "models": ["claude-opus-5-5", "claude-sonnet-5-5"] },
+    { "group": "groupB", "models": ["claude-*"] }
+  ]
+}
 ```
 
-- `groups` 为空 = 关闭;某 group 在名单内即对该组强制 1h。
-- 判定:`operation_setting.IsExtendedCacheTTLGroup(group)`。
+- `rules` 为空 = 关闭。model 匹配:精确名、以 `*` 结尾的前缀、或单独 `*`(该组所有模型)。
+- 判定:`operation_setting.ShouldForceExtendedCacheTTL(group, model)`,`model` 取出站 body 的 `model` 字段。
 
-前提与成本:
+设置示例(root access token;option 接口同 Debug 开关,见 `docs/debug-mode-runtime-toggle.md`):
 
-- **模型/区域需支持 1h**(claude-opus-5-5 已确认支持);Bedrock 2026-01-26 起 GA。
-- `cache_control` 与 `anthropic-beta` 需能穿过沿路网关到达 Bedrock(与前述"转发层丢失"同理,逐跳确认)。
-- **1h 写入成本约为 5m 的 ~2x**(读取不变),按组灰度、观察 `cache_creation`/`cache_read` 与成本再放量。
+```bash
+curl -X PUT 'https://<your-host>/api/option/' \
+  -H 'Authorization: <root-access-token>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "key": "extended_cache_ttl_setting",
+    "value": "{\"rules\":[{\"group\":\"groupA\",\"models\":[\"claude-opus-5-5\"]},{\"group\":\"groupB\",\"models\":[\"claude-*\"]}]}"
+  }'
+```
+
+> `value` 需为该配置对象的 **JSON 字符串**(整段转义)。确认当前值:`curl 'https://<your-host>/api/option/' -H 'Authorization: <root-access-token>'`,在列表里找 `extended_cache_ttl_setting`。
+
+<!-- TTL-MATRIX -->
+
+### Bedrock 支持矩阵(AWS 官方 Prompt caching 文档)
+
+- **模型**:5.5 系(`claude-opus-5-5` / `sonnet-5-5` / `haiku-5-5` / `fable-5-1`)GA 支持 `5m, 1h`,断点字段 `system`/`messages`/`tools`,min 512 token/断点、最多 4 断点。旧模型仅 5m,带 `ttl` 会 `ValidationException`(无优雅降级)。
+- **推理类型**:**仅 on-demand 支持 prompt caching**(含 cross-region inference profile,高峰期可能增加 cache write);**批处理 batch 不支持**;**Provisioned Throughput 不支持**(非 on-demand)。
+- **"订阅"类资源**:能否命中取决于其底层推理类型——on-demand 可以,预置吞吐/批处理不行。需向供应商确认该资源在 Bedrock 侧的推理类型。
+- 混用约束:同请求里 1h 断点必须排在 5m 之前(我们全部统一 1h,无此问题)。
+
+### 后端是否参考 agent 等标识?不参考
+
+Anthropic/Bedrock 的缓存是**内容寻址**:键 = `tools → system → messages` 前缀字节 + `cache_control` 断点 + model。`metadata.user_id` / `session_id` / agent / request-id 等标识**都不进缓存键**,而且把它们塞进被缓存的 prefix 反而会**破坏**缓存。这些标识只在**供应商网关的黏滞路由层**被使用;Bedrock 缓存既不读它们、也不用它们做路由。
+
+### 前提与成本
+
+- `cache_control` 与 `anthropic-beta` 需能穿过沿路网关到达 Bedrock(与"转发层丢失"同理,逐跳确认)。
+- **1h 写入成本约为 5m 的 ~2x**(读取不变),按 (组, 模型) 灰度、观察 `cache_creation`/`cache_read` 与成本再放量。
 
 ## 风险与待确认
 
@@ -117,7 +148,7 @@ flowchart TD
 ## 相关文件
 
 - 实现与测试:`relay/claude_handler.go`、`relay/claude_handler_metadata_test.go`、`relay/claude_handler_cache_ttl_test.go`
-- 1h TTL 分组设置:`setting/operation_setting/extended_cache_ttl_setting.go`
+- 1h TTL 分组+模型设置:`setting/operation_setting/extended_cache_ttl_setting.go`(+ `_test.go`)
 - 实现参考文档:`docs/claude-metadata-session-injection.md`
 - Debug 运行时开关:`docs/debug-mode-runtime-toggle.md`
 

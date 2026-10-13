@@ -1,11 +1,25 @@
 package operation_setting
 
-import "github.com/QuantumNous/new-api/setting/config"
+import (
+	"strings"
 
-// ExtendedCacheTTLSetting lists the groups whose Claude requests should have
-// their prompt-cache breakpoints forced to the 1-hour TTL. Empty list = off.
+	"github.com/QuantumNous/new-api/setting/config"
+)
+
+// ExtendedCacheTTLRule forces the 1-hour prompt-cache TTL for requests in Group
+// whose model matches one of Models. A model entry matches by exact name, by
+// prefix when it ends with "*", or matches any model when it is "*".
+type ExtendedCacheTTLRule struct {
+	Group  string   `json:"group"`
+	Models []string `json:"models"`
+}
+
+// ExtendedCacheTTLSetting lists per-(group, model) rules that force the 1-hour
+// prompt-cache TTL. Empty rules = off. Restricting by model avoids sending the
+// ttl field to models that only support 5m (which Bedrock rejects with a
+// ValidationException).
 type ExtendedCacheTTLSetting struct {
-	Groups []string `json:"groups"`
+	Rules []ExtendedCacheTTLRule `json:"rules"`
 }
 
 var extendedCacheTTLSetting = ExtendedCacheTTLSetting{}
@@ -18,16 +32,31 @@ func GetExtendedCacheTTLSetting() *ExtendedCacheTTLSetting {
 	return &extendedCacheTTLSetting
 }
 
-// IsExtendedCacheTTLGroup reports whether the given group is configured to force
-// the 1-hour prompt-cache TTL.
-func IsExtendedCacheTTLGroup(group string) bool {
-	if group == "" {
+// ShouldForceExtendedCacheTTL reports whether the given group+model is
+// configured to force the 1-hour prompt-cache TTL.
+func ShouldForceExtendedCacheTTL(group, model string) bool {
+	if group == "" || model == "" {
 		return false
 	}
-	for _, g := range extendedCacheTTLSetting.Groups {
-		if g == group {
-			return true
+	for _, rule := range extendedCacheTTLSetting.Rules {
+		if rule.Group != group {
+			continue
 		}
+		for _, pattern := range rule.Models {
+			if matchModelPattern(pattern, model) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func matchModelPattern(pattern, model string) bool {
+	if pattern == "*" || pattern == model {
+		return true
+	}
+	if strings.HasSuffix(pattern, "*") && strings.HasPrefix(model, strings.TrimSuffix(pattern, "*")) {
+		return true
 	}
 	return false
 }
