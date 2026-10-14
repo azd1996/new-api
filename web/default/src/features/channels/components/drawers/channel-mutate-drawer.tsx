@@ -287,6 +287,7 @@ const SENSITIVE_FORM_FIELDS = [
   'pass_through_body_enabled',
   'system_prompt',
   'system_prompt_override',
+  'upstream_request_id_header',
   'allow_service_tier',
   'disable_store',
   'allow_safety_identifier',
@@ -335,6 +336,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.weight ||
     values.proxy?.trim() ||
     values.system_prompt?.trim() ||
+    values.upstream_request_id_header?.trim() ||
     values.force_format ||
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
@@ -4234,6 +4236,30 @@ export function ChannelMutateDrawer({
                                       onCheckedChange={field.onChange}
                                     />
                                   </FormControl>
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name='upstream_request_id_header'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('Upstream Request ID Header')}
+                                  </FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      placeholder='X-Oneapi-Request-Id'
+                                      {...field}
+                                    />
+                                  </FormControl>
+                                  <FormDescription>
+                                    {t(
+                                      'Upstream response header to record as the upstream request ID in logs. Leave empty to use the default.'
+                                    )}
+                                  </FormDescription>
+                                  <FormMessage />
                                 </FormItem>
                               )}
                             />

@@ -4859,6 +4859,8 @@
     "Upstream prices fetched successfully": "Цены провайдера успешно получены",
     "Upstream ratios fetched successfully": "Коэффициенты upstream успешно получены",
     "Upstream Request ID": "ID вышестоящего запроса",
+    "Upstream Request ID Header": "Заголовок ID вышестоящего запроса",
+    "Upstream response header to record as the upstream request ID in logs. Leave empty to use the default.": "Заголовок ответа вышестоящего сервера, записываемый в журналы как ID запроса. Оставьте пустым для значения по умолчанию.",
     "Upstream Response": "Ответ Upstream",
     "Upstream Response (billing-usage-anthropic-estimated)": "Ответ upstream (billing-usage-anthropic-estimated)",
     "Upstream Response (billing-usage-anthropic)": "Ответ upstream (billing-usage-anthropic)",

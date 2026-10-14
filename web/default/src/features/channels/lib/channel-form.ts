@@ -191,6 +191,7 @@ export const channelFormSchema = z
     pass_through_body_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
+    upstream_request_id_header: z.string().optional(),
     // Retry override (stored in setting JSON): {operations:[...]} JSON string,
     // edited with the param-override editor; conditions match the response.
     retry_override: z.string().optional(),
@@ -334,6 +335,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   pass_through_body_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
+  upstream_request_id_header: '',
   retry_override: '',
   // Type-specific settings
   is_enterprise_account: false,
@@ -373,6 +375,7 @@ export function transformChannelToFormDefaults(
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    upstream_request_id_header: '',
     retry_override: '',
   }
 
@@ -386,6 +389,7 @@ export function transformChannelToFormDefaults(
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
+        upstream_request_id_header: parsed.upstream_request_id_header || '',
         retry_override: Array.isArray(parsed.retry_override)
           ? JSON.stringify(parsed.retry_override, null, 2)
           : '',
@@ -517,6 +521,10 @@ function buildSettingJSON(formData: ChannelFormValues): string {
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
+  }
+  if (formData.upstream_request_id_header?.trim()) {
+    settingObj.upstream_request_id_header =
+      formData.upstream_request_id_header.trim()
   }
   if (retryOverride.length > 0) {
     settingObj.retry_override = retryOverride

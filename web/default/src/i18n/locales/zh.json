@@ -4859,6 +4859,8 @@
     "Upstream prices fetched successfully": "已成功获取上游价格",
     "Upstream ratios fetched successfully": "上游比率获取成功",
     "Upstream Request ID": "上游请求 ID",
+    "Upstream Request ID Header": "上游请求 ID 响应头",
+    "Upstream response header to record as the upstream request ID in logs. Leave empty to use the default.": "作为上游请求 ID 记录到日志的上游响应头，留空则使用默认值。",
     "Upstream Response": "上游返回",
     "Upstream Response (billing-usage-anthropic-estimated)": "上游返回（billing-usage-anthropic-estimated）",
     "Upstream Response (billing-usage-anthropic)": "上游返回（billing-usage-anthropic）",

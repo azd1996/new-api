@@ -4859,6 +4859,8 @@
     "Upstream prices fetched successfully": "上流価格を正常に取得しました",
     "Upstream ratios fetched successfully": "アップストリーム比率が正常に取得されました",
     "Upstream Request ID": "上流リクエストID",
+    "Upstream Request ID Header": "上流リクエストIDヘッダー",
+    "Upstream response header to record as the upstream request ID in logs. Leave empty to use the default.": "ログに上流リクエストIDとして記録する上流応答ヘッダー。空欄の場合はデフォルトを使用します。",
     "Upstream Response": "アップストリームレスポンス",
     "Upstream Response (billing-usage-anthropic-estimated)": "アップストリームレスポンス (billing-usage-anthropic-estimated)",
     "Upstream Response (billing-usage-anthropic)": "アップストリームレスポンス (billing-usage-anthropic)",

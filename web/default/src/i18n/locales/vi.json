@@ -4859,6 +4859,8 @@
     "Upstream prices fetched successfully": "Lấy giá upstream thành công",
     "Upstream ratios fetched successfully": "Đã lấy tỷ lệ upstream thành công",
     "Upstream Request ID": "ID yêu cầu thượng nguồn",
+    "Upstream Request ID Header": "Header ID yêu cầu thượng nguồn",
+    "Upstream response header to record as the upstream request ID in logs. Leave empty to use the default.": "Header phản hồi thượng nguồn để ghi làm ID yêu cầu thượng nguồn trong nhật ký. Để trống để dùng mặc định.",
     "Upstream Response": "Upstream feedback",
     "Upstream Response (billing-usage-anthropic-estimated)": "Phản hồi upstream (billing-usage-anthropic-estimated)",
     "Upstream Response (billing-usage-anthropic)": "Phản hồi upstream (billing-usage-anthropic)",

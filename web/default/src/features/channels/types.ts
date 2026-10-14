@@ -86,6 +86,7 @@ export interface ChannelSettings {
   pass_through_body_enabled?: boolean
   system_prompt?: string
   system_prompt_override?: boolean
+  upstream_request_id_header?: string
   retry_override?: Array<Record<string, unknown>>
 }
 

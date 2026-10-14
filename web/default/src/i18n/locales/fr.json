@@ -4859,6 +4859,8 @@
     "Upstream prices fetched successfully": "Prix amont récupérés avec succès",
     "Upstream ratios fetched successfully": "Ratios en amont récupérés avec succès",
     "Upstream Request ID": "ID de requête en amont",
+    "Upstream Request ID Header": "En-tête d'ID de requête en amont",
+    "Upstream response header to record as the upstream request ID in logs. Leave empty to use the default.": "En-tête de réponse amont à enregistrer comme ID de requête en amont dans les journaux. Laissez vide pour utiliser la valeur par défaut.",
     "Upstream Response": "Réponse amont",
     "Upstream Response (billing-usage-anthropic-estimated)": "Réponse amont (billing-usage-anthropic-estimated)",
     "Upstream Response (billing-usage-anthropic)": "Réponse amont (billing-usage-anthropic)",

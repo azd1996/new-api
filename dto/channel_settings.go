@@ -17,6 +17,10 @@ type ChannelSettings struct {
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`
 	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	// UpstreamRequestIdHeader is the upstream response header to read as the
+	// upstream request ID for logging. Empty falls back to common.RequestIdKey
+	// (X-Oneapi-Request-Id). Matched case-insensitively via http.Header.Get.
+	UpstreamRequestIdHeader string `json:"upstream_request_id_header,omitempty"`
 	// RetryOverride configures error-triggered request rewrites as an ordered list
 	// of four-phase rules. Each rule runs its phases in order and short-circuits:
 	// phase1 filters the request (model/relay_format/group, etc.); phase2 matches
