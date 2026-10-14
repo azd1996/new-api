@@ -28,7 +28,7 @@ import (
 //     budget); guarded one-shot per request via RetryFallbackDone.
 //   - fallback_next_channel: neither pin nor reset, so the loop advances to the
 //     next channel; multi-hop (not one-shot), bounded by RetryTimes and channel
-//     availability. A 200-body trigger is always coerced to this action.
+//     availability.
 func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel, apiErr *types.NewAPIError, relayFormat types.RelayFormat, retryParam *service.RetryParam) bool {
 	if info == nil || channel == nil || apiErr == nil || info.RetryFallbackDone {
 		logger.LogDebug(c, fmt.Sprintf("retry-override: hook skipped by guard (info=%t channel=%t apiErr=%t fallbackDone=%t)",

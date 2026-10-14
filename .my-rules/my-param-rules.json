@@ -175,6 +175,17 @@
             "logic": "AND"
         },
         {
+            "description": "claude-sonnet-5-5: 关闭thinking需用type=between_tools而非disabled，避免Bedrock 400",
+            "mode": "set",
+            "path": "thinking.type",
+            "value": "between_tools",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-sonnet-5-5" },
+                { "path": "thinking.type", "mode": "full", "value": "disabled" }
+            ],
+            "logic": "AND"
+        },
+        {
             "description": "删除messages里的system角色",
             "mode": "prune_objects",
             "path": "messages",

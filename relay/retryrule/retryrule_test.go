@@ -130,9 +130,10 @@ func TestCollectRewritesFallbackWinsAndAction(t *testing.T) {
 	assert.Equal(t, ActionFallbackNextChannel, action, "fallback wins when any matched rule requests it")
 }
 
-func TestCollectRewrites200ForcesFallback(t *testing.T) {
-	// Authored (wrongly) with retry_same_channel; a 200-body trigger must coerce
-	// the action to fallback. An empty phase3 still matches (pure detect + action).
+func TestCollectRewrites200HonorsRuleAction(t *testing.T) {
+	// A 200-body trigger must honor the rule's own phase4_retry_action: when the
+	// rule asks for retry_same_channel, the action stays retry_same_channel (no
+	// forced coercion to fallback). An empty phase3 still matches (detect + action).
 	rule := dto.RetryRule{
 		Phase2ResponseConditions: phase("AND", cond("response_body", "contains", "rate limit")),
 		Phase4RetryAction:        ActionRetrySameChannel,
@@ -141,7 +142,7 @@ func TestCollectRewrites200ForcesFallback(t *testing.T) {
 	rewrites, matched, action, _ := CollectRewrites([]dto.RetryRule{rule}, map[string]any{}, respCtx)
 	assert.True(t, matched)
 	assert.Empty(t, rewrites, "no rewrite staged for a detect-only rule")
-	assert.Equal(t, ActionFallbackNextChannel, action, "200-body trigger forces fallback")
+	assert.Equal(t, ActionRetrySameChannel, action, "200-body trigger honors the rule's action")
 }
 
 func TestCollectRewritesReturnsMatchedRuleIndices(t *testing.T) {

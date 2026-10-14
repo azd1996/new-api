@@ -69,7 +69,7 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
           </p>
           <p className='text-sm text-muted-foreground'>
             {t(
-              'To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a phase2 "response_body" condition with status_code 200; such 200-body matches are always retried on the next channel regardless of phase4_retry_action. "fallback_next_channel" requires RetryTimes > 0 and another available channel.'
+              'To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a phase2 "response_body" condition with status_code 200; such 200-body matches honor phase4_retry_action (default "retry_same_channel"). "fallback_next_channel" requires RetryTimes > 0 and another available channel.'
             )}
           </p>
         </div>

@@ -16,8 +16,6 @@
 package retryrule
 
 import (
-	"strconv"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -81,9 +79,8 @@ func ShouldTriggerOnBody(rules []dto.RetryRule, reqCtx, respCtx map[string]any) 
 // request body on retry, reports whether any rule matched, resolves the retry
 // action (ActionFallbackNextChannel if any matched rule requests it, otherwise
 // ActionRetrySameChannel), and returns the indices (into rules) of every matched
-// rule so callers can audit which rule triggered. When the trigger is a 200
-// response body (respCtx.status_code == 200) the action is forced to
-// ActionFallbackNextChannel — retrying the same rate-limited channel is pointless.
+// rule so callers can audit which rule triggered. The resolved action always
+// honors the matched rule's phase4_retry_action, including for 200-body triggers.
 func CollectRewrites(rules []dto.RetryRule, reqCtx, respCtx map[string]any) ([]map[string]any, bool, string, []int) {
 	reqDoc := marshalContext(reqCtx)
 	respDoc := marshalContext(respCtx)
@@ -111,9 +108,6 @@ func CollectRewrites(rules []dto.RetryRule, reqCtx, respCtx map[string]any) ([]m
 				rewrites = append(rewrites, rewrite)
 			}
 		}
-	}
-	if matched && toString(respCtx["status_code"]) == "200" {
-		action = ActionFallbackNextChannel
 	}
 	return rewrites, matched, action, matchedIndices
 }
@@ -155,21 +149,4 @@ func marshalContext(ctx map[string]any) []byte {
 		return []byte("{}")
 	}
 	return data
-}
-
-func toString(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case float64:
-		return strconv.FormatFloat(x, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(x)
-	case int64:
-		return strconv.FormatInt(x, 10)
-	case bool:
-		return strconv.FormatBool(x)
-	default:
-		return ""
-	}
 }
