@@ -27,6 +27,7 @@ import type {
   ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
+  CopyBehindCdnAigwParams,
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
@@ -280,6 +281,21 @@ export async function copyChannel(
     `/api/channel/copy/${id}`,
     null,
     channelActionConfig({ params })
+  )
+  return res.data
+}
+
+/**
+ * Copy a behind-cdnaigw channel and provision its matching group + API key
+ */
+export async function copyBehindCdnAigwChannel(
+  id: number,
+  params: CopyBehindCdnAigwParams
+): Promise<CopyChannelResponse> {
+  const res = await api.post(
+    `/api/channel/copy_behind_cdnaigw/${id}`,
+    params,
+    channelActionConfig()
   )
   return res.data
 }

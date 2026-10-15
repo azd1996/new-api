@@ -300,6 +300,11 @@ export interface CopyChannelParams {
   reset_balance?: boolean
 }
 
+export interface CopyBehindCdnAigwParams {
+  name: string
+  reset_balance?: boolean
+}
+
 export interface MultiKeyManageParams {
   channel_id: number
   action:

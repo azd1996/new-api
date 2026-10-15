@@ -28,6 +28,11 @@ func registerChannelRoutes(apiRouter *gin.RouterGroup) {
 		controller.GetChannelKey,
 	)
 
+	channelRoute.POST("/copy_behind_cdnaigw/:id",
+		middleware.RootAuth(),
+		controller.CopyBehindCdnAigwChannel,
+	)
+
 	for _, route := range channelPermissionRoutes {
 		channelRoute.Handle(route.method, route.path,
 			middleware.RequirePermission(route.permission),

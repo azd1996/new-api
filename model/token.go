@@ -242,6 +242,24 @@ func GetTokenByIds(id int, userId int) (*Token, error) {
 	return &token, err
 }
 
+// GetUserTokenByName looks up a token owned by userId with the exact name.
+// Returns (nil, nil) when no such token exists so callers can treat the
+// provisioning step as idempotent.
+func GetUserTokenByName(userId int, name string) (*Token, error) {
+	if userId == 0 || name == "" {
+		return nil, nil
+	}
+	var token Token
+	err := DB.Where("user_id = ? and name = ?", userId, name).First(&token).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &token, nil
+}
+
 func GetTokenById(id int) (*Token, error) {
 	if id == 0 {
 		return nil, errors.New("id 为空！")
