@@ -352,6 +352,33 @@ export interface GetLogsResponse {
   }
 }
 
+// Session-id async search (admin common logs). The backend runs a chunked
+// scan into a cache file; the frontend polls status and reads pages.
+export interface SessionLogSearchQuery {
+  session_id: string
+  username: string
+  start_timestamp: number
+  end_timestamp: number
+}
+
+export interface SessionLogSearchStatus {
+  state: '' | 'running' | 'done' | 'error'
+  total?: number
+  done?: number
+  matched?: number
+  err?: string
+  key_hint?: string
+}
+
+export interface SessionLogSearchResult {
+  found: boolean
+  status: SessionLogSearchStatus
+  items: UsageLog[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface GetLogStatsParams {
   type?: number
   username?: string

@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -53,6 +54,63 @@ func GetUserLogs(c *gin.Context) {
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
 	return
+}
+
+// parseSessionLogSearchParams reads the shared session-search query params
+// (session_id / username / time range) used by both start and poll endpoints.
+func parseSessionLogSearchParams(c *gin.Context) service.SessionLogSearchParams {
+	start, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	end, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	return service.SessionLogSearchParams{
+		SessionID: c.Query("session_id"),
+		Username:  c.Query("username"),
+		StartSec:  start,
+		EndSec:    end,
+	}
+}
+
+// StartSessionLogSearch kicks off (or serves from cache) an async session-id
+// log search. Admin only. force=true backs up any cached result and rescans.
+func StartSessionLogSearch(c *gin.Context) {
+	p := parseSessionLogSearchParams(c)
+	p.Force = c.Query("force") == "true"
+	st, err := service.StartSessionLogSearch(p)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, st)
+}
+
+// GetSessionLogSearch returns the current status plus a page of matched rows
+// for a prior StartSessionLogSearch. Admin only.
+func GetSessionLogSearch(c *gin.Context) {
+	p := parseSessionLogSearchParams(c)
+	if err := service.ValidateSessionLogSearch(p); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	if page < 0 {
+		page = 0
+	}
+	size, _ := strconv.Atoi(c.Query("page_size"))
+	if size <= 0 {
+		size = 20
+	}
+	if size > 200 {
+		size = 200
+	}
+	st, ok := service.QuerySessionLogSearch(p)
+	items, total := service.ReadSessionLogSearch(p, page, size)
+	common.ApiSuccess(c, gin.H{
+		"found":     ok,
+		"status":    st,
+		"items":     items,
+		"total":     total,
+		"page":      page,
+		"page_size": size,
+	})
 }
 
 // Deprecated: SearchAllLogs 已废弃，前端未使用该接口。

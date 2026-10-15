@@ -274,6 +274,8 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
+		logRoute.POST("/session_search", middleware.AdminAuth(), controller.StartSessionLogSearch)
+		logRoute.GET("/session_search", middleware.AdminAuth(), controller.GetSessionLogSearch)
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 		// The hourly billing summary comes either from LOG_DB's csl_hourly table

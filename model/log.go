@@ -57,6 +57,41 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 	return input, nil
 }
 
+// sessionOtherLikeCondition builds a cross-dialect `other LIKE` condition that
+// matches a literal substring (e.g. `"session_id":"abc"`) anywhere in the other
+// JSON. The literal's LIKE metacharacters are escaped so a session id that
+// happens to contain %, _, or the escape char cannot alter the pattern.
+func sessionOtherLikeCondition(literal string) (string, string) {
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(literal)
+		return "other LIKE ?", "%" + esc + "%"
+	}
+	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(literal)
+	return "other LIKE ? ESCAPE '!'", "%" + esc + "%"
+}
+
+// SearchLogsBySessionWindow returns the logs for a user within the half-open
+// window [startSec, endSec) whose other JSON carries the given session_id. It
+// powers the async session-search engine one time window at a time; limit caps
+// the rows pulled per window.
+func SearchLogsBySessionWindow(username string, startSec, endSec int64, sessionID string, limit int) ([]*Log, error) {
+	if username == "" || sessionID == "" || endSec <= startSec {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 10000 {
+		limit = 10000
+	}
+	condition, pattern := sessionOtherLikeCondition(`"session_id":"` + sessionID + `"`)
+	var logs []*Log
+	err := LOG_DB.Where("username = ?", username).
+		Where("created_at >= ? AND created_at < ?", startSec, endSec).
+		Where(condition, pattern).
+		Order("created_at desc").
+		Limit(limit).
+		Find(&logs).Error
+	return logs, err
+}
+
 type Log struct {
 	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
 	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`

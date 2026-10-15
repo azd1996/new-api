@@ -26,6 +26,9 @@ import type {
   GetLogStatsResponse,
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
+  SessionLogSearchQuery,
+  SessionLogSearchResult,
+  SessionLogSearchStatus,
   UserInfo,
 } from './types'
 
@@ -83,6 +86,33 @@ export const getLogStats = (params: GetLogStatsParams = {}) =>
 export const getUserLogStats = (
   params: Omit<GetLogStatsParams, 'username' | 'channel'> = {}
 ) => fetchLogStats('/api/log', params, false)
+
+// ============================================================================
+// Session-ID Log Search APIs (admin only, async + file-cached)
+// ============================================================================
+
+// startSessionLogSearch kicks off (or serves from cache) the async search.
+// force=true backs up any cached result and rescans.
+export async function startSessionLogSearch(
+  params: SessionLogSearchQuery,
+  force = false
+): Promise<{ success: boolean; message?: string; data?: SessionLogSearchStatus }> {
+  const query = buildQueryParams({
+    ...params,
+    ...(force ? { force: 'true' } : {}),
+  })
+  const res = await api.post(`/api/log/session_search?${query}`)
+  return res.data
+}
+
+// getSessionLogSearch polls the current status and reads a page of results.
+export async function getSessionLogSearch(
+  params: SessionLogSearchQuery & { page?: number; page_size?: number }
+): Promise<{ success: boolean; message?: string; data?: SessionLogSearchResult }> {
+  const query = buildQueryParams({ ...params })
+  const res = await api.get(`/api/log/session_search?${query}`)
+  return res.data
+}
 
 export async function getUserInfo(
   userId: number
