@@ -53,6 +53,9 @@ export interface CommonLogFilters extends CommonFilters {
   username?: string
   requestId?: string
   upstreamRequestId?: string
+  // Async session-id search (admin). Enter "notfound" to find logs with no
+  // session id. Requires username + time range.
+  sessionId?: string
 }
 
 /**

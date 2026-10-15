@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { type ColumnDef } from '@tanstack/react-table'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -39,6 +40,7 @@ import {
 import { useColumnsByCategory } from '../lib/columns'
 import { parseLogOther } from '../lib/format'
 import { fetchLogsByCategory } from '../lib/utils'
+import { getSessionLogSearch, startSessionLogSearch } from '../api'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
@@ -77,6 +79,22 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const { isAdminView: isAdmin } = useLogsViewScope()
   const isMobile = useMediaQuery('(max-width: 640px)')
   const searchParams = route.useSearch()
+
+  // Session-id async search mode (admin common logs only). When a session id is
+  // present the table is driven by the chunked search engine instead of the
+  // normal paged list query.
+  const sessionId =
+    logCategory === 'common' && isAdmin
+      ? String(searchParams.sessionId ?? '').trim()
+      : ''
+  const sessionMode = sessionId !== ''
+  const sessionUsername = String(searchParams.username ?? '')
+  const sessionStartSec = searchParams.startTime
+    ? Math.floor(Number(searchParams.startTime) / 1000)
+    : 0
+  const sessionEndSec = searchParams.endTime
+    ? Math.floor(Number(searchParams.endTime) / 1000)
+    : 0
 
   const {
     columnFilters,
@@ -127,6 +145,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       searchParams,
       t,
     ],
+    enabled: !sessionMode,
     queryFn: async () => {
       const result = await fetchLogsByCategory({
         logCategory,
@@ -152,9 +171,88 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     },
   })
 
-  const logs = data?.items || []
+  const sessionQuery = useQuery({
+    queryKey: [
+      'session-logs',
+      sessionId,
+      sessionUsername,
+      sessionStartSec,
+      sessionEndSec,
+      pagination.pageIndex,
+      pagination.pageSize,
+    ],
+    enabled: sessionMode,
+    queryFn: async () => {
+      const res = await getSessionLogSearch({
+        session_id: sessionId,
+        username: sessionUsername,
+        start_timestamp: sessionStartSec,
+        end_timestamp: sessionEndSec,
+        page: pagination.pageIndex,
+        page_size: pagination.pageSize,
+      })
+      if (!res?.success) {
+        toast.error(res?.message || t('Failed to load logs'))
+        return {
+          found: false,
+          items: [],
+          total: 0,
+          status: { state: 'error' as const },
+          page: pagination.pageIndex,
+          page_size: pagination.pageSize,
+        }
+      }
+      return (
+        res.data ?? {
+          found: false,
+          items: [],
+          total: 0,
+          status: { state: '' as const },
+          page: pagination.pageIndex,
+          page_size: pagination.pageSize,
+        }
+      )
+    },
+    refetchInterval: (query) =>
+      query.state.data?.status?.state === 'running' ? 1500 : false,
+    placeholderData: (previousData) => previousData,
+  })
+
+  const sessionData = sessionMode ? sessionQuery.data : undefined
+  const sessionFound = sessionData?.found
+  const refetchSession = sessionQuery.refetch
+
+  // On direct load / reload the job may not exist yet; kick it off once when a
+  // poll reports it is not found, then let the poll pick up progress.
+  useEffect(() => {
+    if (!sessionMode || sessionFound !== false) return
+    void startSessionLogSearch({
+      session_id: sessionId,
+      username: sessionUsername,
+      start_timestamp: sessionStartSec,
+      end_timestamp: sessionEndSec,
+    })
+      .then(() => {
+        void refetchSession()
+      })
+      .catch(() => {})
+  }, [
+    sessionMode,
+    sessionId,
+    sessionUsername,
+    sessionStartSec,
+    sessionEndSec,
+    sessionFound,
+    refetchSession,
+  ])
+
+  const logs = (sessionMode ? sessionData?.items : data?.items) || []
+  const activeTotal = (sessionMode ? sessionData?.total : data?.total) || 0
   const columns = useColumnsByCategory(logCategory, isAdmin)
-  const isLoadingData = isLoading || (isFetching && !data)
+  const isLoadingData = sessionMode
+    ? sessionQuery.isLoading || (sessionQuery.isFetching && !sessionData)
+    : isLoading || (isFetching && !data)
+  const isFetchingActive = sessionMode ? sessionQuery.isFetching : isFetching
 
   const { table } = useDataTable({
     data: logs as Record<string, unknown>[],
@@ -170,7 +268,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     onColumnFiltersChange,
     manualPagination: true,
     manualFiltering: true,
-    totalCount: data?.total || 0,
+    totalCount: activeTotal,
     ensurePageInRange,
   })
 
@@ -181,7 +279,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       table={table}
       columns={columns as ColumnDef<Record<string, unknown>>[]}
       isLoading={isLoadingData}
-      isFetching={isFetching}
+      isFetching={isFetchingActive}
       emptyTitle={t('No Logs Found')}
       emptyDescription={t(
         'No usage logs available. Logs will appear here once API calls are made.'

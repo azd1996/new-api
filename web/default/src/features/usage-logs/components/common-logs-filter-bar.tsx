@@ -22,6 +22,7 @@ import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -39,6 +40,7 @@ import {
 } from '@/components/ui/tooltip'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import { startSessionLogSearch } from '../api'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
@@ -87,6 +89,7 @@ function buildSearchSourceKey(values: {
   username?: unknown
   requestId?: unknown
   upstreamRequestId?: unknown
+  sessionId?: unknown
   type?: unknown
 }) {
   return [
@@ -99,6 +102,7 @@ function buildSearchSourceKey(values: {
     values.username,
     values.requestId,
     values.upstreamRequestId,
+    values.sessionId,
     Array.isArray(values.type) ? values.type.join(',') : values.type,
   ]
     .map((value) => String(value ?? ''))
@@ -132,6 +136,7 @@ export function CommonLogsFilterBar<TData>(
       username: searchParams.username,
       requestId: searchParams.requestId,
       upstreamRequestId: searchParams.upstreamRequestId,
+      sessionId: searchParams.sessionId,
       type: searchParams.type,
     }
     const filters: CommonLogFilters = {
@@ -146,6 +151,7 @@ export function CommonLogsFilterBar<TData>(
       username: searchParams.username || undefined,
       requestId: searchParams.requestId || undefined,
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
+      sessionId: searchParams.sessionId || undefined,
     }
     return {
       sourceKey: buildSearchSourceKey(sourceValues),
@@ -162,6 +168,7 @@ export function CommonLogsFilterBar<TData>(
     searchParams.username,
     searchParams.requestId,
     searchParams.upstreamRequestId,
+    searchParams.sessionId,
     searchParams.type,
   ])
   const [draft, setDraft] = useState<CommonLogDraft>(() => searchState)
@@ -185,7 +192,32 @@ export function CommonLogsFilterBar<TData>(
     [searchState]
   )
 
-  const handleApply = useCallback(() => {
+  // Session search needs an explicit username + time range; "notfound" finds
+  // logs with no session id. Returns the query, or null (after a toast) if the
+  // required fields are missing.
+  const buildSessionQuery = useCallback(() => {
+    const sessionId = (filters.sessionId || '').trim()
+    if (!sessionId) return null
+    const username = (filters.username || '').trim()
+    const startSec = filters.startTime
+      ? Math.floor(filters.startTime.getTime() / 1000)
+      : 0
+    const endSec = filters.endTime
+      ? Math.floor(filters.endTime.getTime() / 1000)
+      : 0
+    if (!username || !startSec || !endSec) {
+      toast.error(t('Username and time range are required for session search'))
+      return null
+    }
+    return {
+      session_id: sessionId,
+      username,
+      start_timestamp: startSec,
+      end_timestamp: endSec,
+    }
+  }, [filters, t])
+
+  const applyFilters = useCallback(() => {
     const filterParams = buildSearchParams(filters, 'common')
     navigate({
       to: '/usage-logs/$section',
@@ -198,7 +230,30 @@ export function CommonLogsFilterBar<TData>(
     })
     queryClient.invalidateQueries({ queryKey: ['logs'] })
     queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
+    queryClient.invalidateQueries({ queryKey: ['session-logs'] })
   }, [filters, logType, navigate, queryClient])
+
+  const handleApply = useCallback(() => {
+    if ((filters.sessionId || '').trim() && !buildSessionQuery()) return
+    applyFilters()
+  }, [filters.sessionId, buildSessionQuery, applyFilters])
+
+  // Force Search: for a session-id query, back up any cached result and rescan;
+  // identical to Search when no session id is entered.
+  const handleForceApply = useCallback(async () => {
+    const query = buildSessionQuery()
+    if (!query) {
+      if (!(filters.sessionId || '').trim()) applyFilters()
+      return
+    }
+    try {
+      await startSessionLogSearch(query, true)
+    } catch {
+      toast.error(t('Failed to start session search'))
+      return
+    }
+    applyFilters()
+  }, [buildSessionQuery, applyFilters, filters.sessionId, t])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
@@ -238,7 +293,8 @@ export function CommonLogsFilterBar<TData>(
     !!filters.username ||
     !!filters.channel ||
     !!filters.requestId ||
-    !!filters.upstreamRequestId
+    !!filters.upstreamRequestId ||
+    !!filters.sessionId
 
   const hasTypeFilter = logType !== LOG_TYPE_ALL_VALUE
   const hasAdditionalFilters =
@@ -250,6 +306,7 @@ export function CommonLogsFilterBar<TData>(
     isAdmin ? filters.channel : undefined,
     filters.requestId,
     filters.upstreamRequestId,
+    isAdmin ? filters.sessionId : undefined,
   ].filter(Boolean).length
   const sensitiveType = sensitiveVisible ? 'text' : 'password'
   const logTypeItems = useMemo(
@@ -406,6 +463,27 @@ export function CommonLogsFilterBar<TData>(
           onKeyDown={handleKeyDown}
         />
       </LogsFilterField>
+      {isAdmin && (
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Session ID')}
+            value={filters.sessionId || ''}
+            onChange={(e) => handleChange('sessionId', e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </LogsFilterField>
+      )}
+      {isAdmin && !!(filters.sessionId || '').trim() && (
+        <LogsFilterField>
+          <Button
+            variant='outline'
+            onClick={handleForceApply}
+            className='h-8 w-full'
+          >
+            {t('Force Search')}
+          </Button>
+        </LogsFilterField>
+      )}
     </>
   )
 
