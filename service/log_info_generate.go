@@ -92,6 +92,12 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 		other["is_system_prompt_overwritten"] = true
 	}
 
+	// session_id (Claude metadata session / OpenAI prompt_cache_key) is stored
+	// top-level so it is visible in the log detail and searchable via LIKE.
+	if sessionID := common.GetContextKeyString(ctx, constant.ContextKeySessionID); sessionID != "" {
+		other["session_id"] = sessionID
+	}
+
 	adminInfo := make(map[string]interface{})
 	adminInfo["use_channel"] = ctx.GetStringSlice("use_channel")
 	adminInfo["node_name"] = common.NodeName

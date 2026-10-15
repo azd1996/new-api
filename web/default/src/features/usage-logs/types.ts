@@ -159,6 +159,9 @@ export interface LogOtherData {
       applied?: string[]
     }
   }
+  // Resolved session identifier (Claude metadata session_id / OpenAI
+  // prompt_cache_key). "notfound" when a session-capable request carried none.
+  session_id?: string
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.
   op?: {

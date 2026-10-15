@@ -68,6 +68,13 @@ const (
 	ContextKeyLanguage ContextKey = "language"
 	ContextKeyIsStream ContextKey = "is_stream"
 
+	// ContextKeySessionID stores the request's resolved session identifier
+	// (Claude metadata.user_id's session_id, or OpenAI prompt_cache_key /
+	// client_metadata.session_id). It is persisted into consume/error logs
+	// under other.session_id. A session-capable relay path that resolved no
+	// id stores the "notfound" sentinel so it stays searchable.
+	ContextKeySessionID ContextKey = "session_id"
+
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit
 	// fallback in authHelper (finishAdminAudit) skips its record to avoid

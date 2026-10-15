@@ -235,6 +235,10 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
+		// Capture the resolved session_id (client-supplied or injected) from the
+		// final metadata.user_id blob for the consume/error log.
+		recordRequestSessionID(c, claudeSessionID(jsonData))
+
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {

@@ -671,6 +671,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DetailRow label={t('Node Name')} value={nodeName} mono />
           )}
 
+          {other?.session_id && (
+            <DetailRow
+              label={t('Session ID')}
+              value={other.session_id}
+              mono
+            />
+          )}
+
           {props.log.token_name && (
             <DetailRow label={t('Token')} value={props.log.token_name} mono />
           )}
