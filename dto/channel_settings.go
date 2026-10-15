@@ -36,6 +36,16 @@ type ChannelSettings struct {
 	// so a matching rule (e.g. a 200-body rate-limit) can fall back cleanly with
 	// nothing sent to the client. Unset/0 falls back to a small built-in default.
 	RetryOverrideStreamPrecommitChunks int `json:"retry_override_stream_precommit_chunks,omitempty"`
+	// ParamOverrideTemplateRefs are names of shared parameter-override templates
+	// (operation_setting.OverrideTemplateSetting.ParamTemplates) this channel
+	// pulls in. At request time the referenced templates are merged ahead of the
+	// channel's own param-override (template ops first, channel own last).
+	ParamOverrideTemplateRefs []string `json:"param_override_template_refs,omitempty"`
+	// RetryOverrideTemplateRefs are names of shared retry-override templates
+	// (operation_setting.OverrideTemplateSetting.RetryTemplates) this channel
+	// pulls in. At request time the referenced rules are prepended before the
+	// channel's own RetryOverride rules, in selection order.
+	RetryOverrideTemplateRefs []string `json:"retry_override_template_refs,omitempty"`
 }
 
 // RetryRulePhaseCondition is a phase's condition block. Conditions are raw JSON

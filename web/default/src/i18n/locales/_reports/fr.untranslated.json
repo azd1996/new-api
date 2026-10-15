@@ -1,0 +1,5 @@
+{
+  "Parameter template content must be a JSON object or array": "Parameter template content must be a JSON object or array",
+  "Define reusable parameter override and retry override templates. Channels can reference these templates by name.": "Define reusable parameter override and retry override templates. Channels can reference these templates by name.",
+  "Retry override rules as a JSON array. Leave empty to disable.": "Retry override rules as a JSON array. Leave empty to disable."
+}

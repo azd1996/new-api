@@ -132,6 +132,7 @@ import {
   getChannel,
   getChannelKey,
   getGroups,
+  getOverrideTemplates,
   getPrefillGroups,
   refreshCodexCredential,
 } from '../../api'
@@ -678,6 +679,25 @@ export function ChannelMutateDrawer({
     queryKey: ['prefill_groups', 'model'],
     queryFn: () => getPrefillGroups('model'),
   })
+
+  // Fetch available parameter / retry override template names
+  const { data: overrideTemplatesData } = useQuery({
+    queryKey: ['channel_override_templates'],
+    queryFn: getOverrideTemplates,
+  })
+
+  const paramTemplateOptions = (overrideTemplatesData?.data?.param || []).map(
+    (tpl) => ({
+      value: tpl.name,
+      label: tpl.description ? `${tpl.name} — ${tpl.description}` : tpl.name,
+    })
+  )
+  const retryTemplateOptions = (overrideTemplatesData?.data?.retry || []).map(
+    (tpl) => ({
+      value: tpl.name,
+      label: tpl.description ? `${tpl.name} — ${tpl.description}` : tpl.name,
+    })
+  )
 
   const { copyToClipboard } = useCopyToClipboard()
 
@@ -3918,6 +3938,72 @@ export function ChannelMutateDrawer({
                               <RetryRulesSection
                                 form={form}
                                 disabled={sensitiveLocked}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='param_override_template_refs'
+                                render={({ field }) => (
+                                  <FormItem className='space-y-3 border-t pt-4'>
+                                    <div className='space-y-1'>
+                                      <FormLabel>
+                                        {t('Parameter Override Templates')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Reference reusable parameter override templates by name.'
+                                        )}
+                                      </FormDescription>
+                                    </div>
+                                    <FormControl>
+                                      <MultiSelect
+                                        options={paramTemplateOptions}
+                                        selected={field.value || []}
+                                        onChange={field.onChange}
+                                        disabled={sensitiveLocked}
+                                        allowCreate
+                                        createLabel='Add template "{{value}}"'
+                                        placeholder={t(
+                                          'Select parameter override templates'
+                                        )}
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='retry_override_template_refs'
+                                render={({ field }) => (
+                                  <FormItem className='space-y-3 border-t pt-4'>
+                                    <div className='space-y-1'>
+                                      <FormLabel>
+                                        {t('Retry Override Templates')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Reference reusable retry override templates by name.'
+                                        )}
+                                      </FormDescription>
+                                    </div>
+                                    <FormControl>
+                                      <MultiSelect
+                                        options={retryTemplateOptions}
+                                        selected={field.value || []}
+                                        onChange={field.onChange}
+                                        disabled={sensitiveLocked}
+                                        allowCreate
+                                        createLabel='Add template "{{value}}"'
+                                        placeholder={t(
+                                          'Select retry override templates'
+                                        )}
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
                               />
 
                               <FormField

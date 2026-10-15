@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { ChannelAffinitySection } from '../general/channel-affinity'
+import { OverrideTemplatesSection } from '../general/override-templates'
 import { IoNetDeploymentSettingsSection } from '../integrations/ionet-deployment-settings-section'
 import type { ModelSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
@@ -163,6 +164,20 @@ const MODELS_SECTIONS = [
             settings['channel_affinity_setting.default_ttl_seconds'],
           'channel_affinity_setting.rules':
             settings['channel_affinity_setting.rules'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'override-templates',
+    titleKey: 'Override Templates',
+    build: (settings: ModelSettings) => (
+      <OverrideTemplatesSection
+        defaultValues={{
+          'override_template_setting.param_templates':
+            settings['override_template_setting.param_templates'],
+          'override_template_setting.retry_templates':
+            settings['override_template_setting.retry_templates'],
         }}
       />
     ),

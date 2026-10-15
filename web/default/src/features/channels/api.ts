@@ -73,6 +73,28 @@ export type CodexCredentialRefreshResponse = {
   }
 }
 
+export type OverrideTemplateOption = {
+  name: string
+  description?: string
+}
+
+export type OverrideTemplatesResponse = {
+  success: boolean
+  message?: string
+  data?: {
+    param: OverrideTemplateOption[]
+    retry: OverrideTemplateOption[]
+  }
+}
+
+/**
+ * Get available override template names (parameter and retry) for channels.
+ */
+export async function getOverrideTemplates(): Promise<OverrideTemplatesResponse> {
+  const res = await api.get('/api/channel/override_templates')
+  return res.data
+}
+
 // ============================================================================
 // Base Channel CRUD Operations
 // ============================================================================

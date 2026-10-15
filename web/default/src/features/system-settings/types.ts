@@ -241,6 +241,8 @@ export type ModelSettings = {
   'channel_affinity_setting.max_entries': number
   'channel_affinity_setting.default_ttl_seconds': number
   'channel_affinity_setting.rules': string
+  'override_template_setting.param_templates': string
+  'override_template_setting.retry_templates': string
   'model_deployment.ionet.api_key': string
   'model_deployment.ionet.enabled': boolean
 }

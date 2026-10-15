@@ -117,6 +117,39 @@ type OptionUpdateRequest struct {
 	Value any    `json:"value"`
 }
 
+// validateOverrideTemplatesJSON validates an override-template library blob
+// (override_template_setting.param_templates / .retry_templates) before it is
+// persisted: it must be a JSON array of entries, each with a non-empty unique
+// name and a content field. The content's semantic validity (operations /
+// retry-rule shape) is enforced leniently at request time, where a bad entry is
+// skipped rather than failing the whole channel.
+func validateOverrideTemplatesJSON(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || trimmed == "[]" {
+		return nil
+	}
+	var items []map[string]interface{}
+	if err := common.UnmarshalJsonStr(trimmed, &items); err != nil {
+		return fmt.Errorf("模板配置必须是合法的 JSON 数组")
+	}
+	seen := make(map[string]bool, len(items))
+	for i, item := range items {
+		name, _ := item["name"].(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("第 %d 个模板缺少名称", i+1)
+		}
+		if seen[name] {
+			return fmt.Errorf("模板名称重复：%s", name)
+		}
+		seen[name] = true
+		if _, ok := item["content"]; !ok {
+			return fmt.Errorf("模板 %s 缺少内容", name)
+		}
+	}
+	return nil
+}
+
 func UpdateOption(c *gin.Context) {
 	var option OptionUpdateRequest
 	err := common.DecodeJson(c.Request.Body, &option)
@@ -220,6 +253,14 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无效的主题值，可选值：default（新版前端）、classic（经典前端）",
+			})
+			return
+		}
+	case "override_template_setting.param_templates", "override_template_setting.retry_templates":
+		if err = validateOverrideTemplatesJSON(option.Value.(string)); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
 			})
 			return
 		}

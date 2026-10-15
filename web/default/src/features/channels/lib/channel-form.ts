@@ -195,6 +195,10 @@ export const channelFormSchema = z
     // Retry override (stored in setting JSON): {operations:[...]} JSON string,
     // edited with the param-override editor; conditions match the response.
     retry_override: z.string().optional(),
+    // Override template references (stored in setting JSON): names of root-level
+    // parameter / retry override templates to apply to this channel.
+    param_override_template_refs: z.array(z.string()).optional(),
+    retry_override_template_refs: z.array(z.string()).optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -337,6 +341,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   system_prompt_override: false,
   upstream_request_id_header: '',
   retry_override: '',
+  param_override_template_refs: [],
+  retry_override_template_refs: [],
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -377,6 +383,8 @@ export function transformChannelToFormDefaults(
     system_prompt_override: false,
     upstream_request_id_header: '',
     retry_override: '',
+    param_override_template_refs: [] as string[],
+    retry_override_template_refs: [] as string[],
   }
 
   if (channel.setting) {
@@ -393,6 +401,20 @@ export function transformChannelToFormDefaults(
         retry_override: Array.isArray(parsed.retry_override)
           ? JSON.stringify(parsed.retry_override, null, 2)
           : '',
+        param_override_template_refs: Array.isArray(
+          parsed.param_override_template_refs
+        )
+          ? parsed.param_override_template_refs.filter(
+              (ref: unknown): ref is string => typeof ref === 'string'
+            )
+          : [],
+        retry_override_template_refs: Array.isArray(
+          parsed.retry_override_template_refs
+        )
+          ? parsed.retry_override_template_refs.filter(
+              (ref: unknown): ref is string => typeof ref === 'string'
+            )
+          : [],
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -529,6 +551,18 @@ function buildSettingJSON(formData: ChannelFormValues): string {
   if (retryOverride.length > 0) {
     settingObj.retry_override = retryOverride
   }
+  const paramTemplateRefs = (formData.param_override_template_refs || [])
+    .map((ref) => ref.trim())
+    .filter((ref) => ref.length > 0)
+  if (paramTemplateRefs.length > 0) {
+    settingObj.param_override_template_refs = paramTemplateRefs
+  }
+  const retryTemplateRefs = (formData.retry_override_template_refs || [])
+    .map((ref) => ref.trim())
+    .filter((ref) => ref.length > 0)
+  if (retryTemplateRefs.length > 0) {
+    settingObj.retry_override_template_refs = retryTemplateRefs
+  }
   return JSON.stringify(settingObj)
 }
 
@@ -594,12 +628,15 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.allow_inference_geo = formData.allow_inference_geo === true
   } else {
     if ('disable_store' in settingsObj) delete settingsObj.disable_store
-    if ('allow_safety_identifier' in settingsObj)
+    if ('allow_safety_identifier' in settingsObj) {
       delete settingsObj.allow_safety_identifier
-    if ('allow_include_obfuscation' in settingsObj)
+    }
+    if ('allow_include_obfuscation' in settingsObj) {
       delete settingsObj.allow_include_obfuscation
-    if (formData.type !== 14 && 'allow_inference_geo' in settingsObj)
+    }
+    if (formData.type !== 14 && 'allow_inference_geo' in settingsObj) {
       delete settingsObj.allow_inference_geo
+    }
   }
 
   // Anthropic (type 14): claude_beta_query, allow_inference_geo, allow_speed
@@ -622,14 +659,14 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.upstream_model_update_auto_sync_enabled =
       settingsObj.upstream_model_update_check_enabled === true &&
       formData.upstream_model_update_auto_sync_enabled === true
-    settingsObj.upstream_model_update_ignored_models = Array.from(
-      new Set(
+    settingsObj.upstream_model_update_ignored_models = [
+      ...new Set(
         String(formData.upstream_model_update_ignored_models || '')
           .split(',')
           .map((model) => model.trim())
           .filter(Boolean)
-      )
-    )
+      ),
+    ]
     if (
       !Array.isArray(settingsObj.upstream_model_update_last_detected_models) ||
       settingsObj.upstream_model_update_check_enabled !== true
