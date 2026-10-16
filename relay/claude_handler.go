@@ -193,6 +193,11 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 		claudeModel := gjson.GetBytes(jsonData, "model").String()
 
+		// Remember whether the client supplied its own metadata.user_id, so the
+		// session-id source can be labelled client ("metadata.user_id") vs our
+		// synthesized fallback ("metadata.user_id (fallback)").
+		clientHadClaudeUserID := strings.TrimSpace(gjson.GetBytes(jsonData, "metadata.user_id").String()) != ""
+
 		// Metadata.user_id synthesis defaults ON for every (group, model); it is
 		// skipped only for (group, model) pairs listed in
 		// metadata_injection_disable_setting. Synthesizes a Claude Code-style
@@ -236,8 +241,16 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 
 		// Capture the resolved session_id (client-supplied or injected) from the
-		// final metadata.user_id blob for the consume/error log.
-		recordRequestSessionID(c, claudeSessionID(jsonData))
+		// final metadata.user_id blob, labelling its source for the log detail.
+		claudeSID := claudeSessionID(jsonData)
+		claudeSource := ""
+		if claudeSID != "" {
+			claudeSource = "metadata.user_id"
+			if !clientHadClaudeUserID {
+				claudeSource = "metadata.user_id (fallback)"
+			}
+		}
+		recordRequestSessionID(c, claudeSID, claudeSource)
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)

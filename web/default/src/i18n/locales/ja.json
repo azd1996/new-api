@@ -3881,6 +3881,8 @@
     "Retry override rules as a JSON array, e.g. [{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]. Leave empty to disable.": "リトライ上書きルールをJSON配列で指定します。例：[{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]。空にすると無効です。",
     "Retry override rules as a JSON array. Leave empty to disable.": "Retry override rules as a JSON array. Leave empty to disable.",
     "Retry Override Templates": "Retry Override Templates",
+    "Response Filter Rules": "レスポンスフィルタルール",
+    "Remove fields from the upstream response before returning to the client. One rule per line: a bare key name is removed at every nesting level, a path containing \".\" or \"#\" is treated as an exact gjson path. Example: content_filter_results": "クライアントに返す前に、アップストリームのレスポンスからフィールドを削除します。1行に1ルール：単なるキー名はすべてのネスト階層で削除され、\".\" または \"#\" を含むパスは正確な gjson パスとして扱われます。例：content_filter_results",
     "Retry Settings": "再試行設定",
     "Retry Suggestion": "リトライ提案",
     "Retry template content must be a JSON array": "Retry template content must be a JSON array",

@@ -3881,6 +3881,8 @@
     "Retry override rules as a JSON array, e.g. [{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]. Leave empty to disable.": "Règles de remplacement de réessai sous forme de tableau JSON, par ex. [{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]. Laisser vide pour désactiver.",
     "Retry override rules as a JSON array. Leave empty to disable.": "Retry override rules as a JSON array. Leave empty to disable.",
     "Retry Override Templates": "Retry Override Templates",
+    "Response Filter Rules": "Règles de filtrage des réponses",
+    "Remove fields from the upstream response before returning to the client. One rule per line: a bare key name is removed at every nesting level, a path containing \".\" or \"#\" is treated as an exact gjson path. Example: content_filter_results": "Supprime des champs de la réponse amont avant de la renvoyer au client. Une règle par ligne : un nom de clé seul est supprimé à tous les niveaux d'imbrication, un chemin contenant \".\" ou \"#\" est traité comme un chemin gjson exact. Exemple : content_filter_results",
     "Retry Settings": "Paramètres de relance",
     "Retry Suggestion": "Suggestion de relance",
     "Retry template content must be a JSON array": "Retry template content must be a JSON array",

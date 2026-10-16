@@ -45,6 +45,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 
 	// 写入新的 response body
+	responseBody = relaycommon.FilterResponseJSON(responseBody, info.ChannelSetting.ResponseFilter)
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	// compute usage
@@ -96,6 +97,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
 			return
+		}
+		// Strip configured fields (e.g. Azure content_filters) from the chunk
+		// before forwarding. The event type comes from streamResponse (already
+		// parsed), so usage accounting below is unaffected.
+		if info != nil && len(info.ChannelSetting.ResponseFilter) > 0 {
+			data = string(relaycommon.FilterResponseJSON([]byte(data), info.ChannelSetting.ResponseFilter))
 		}
 		sendResponsesStreamData(c, streamResponse, data)
 		switch streamResponse.Type {

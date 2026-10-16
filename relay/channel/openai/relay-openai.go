@@ -317,6 +317,8 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		responseBody = geminiRespStr
 	}
 
+	responseBody = relaycommon.FilterResponseJSON(responseBody, info.ChannelSetting.ResponseFilter)
+
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	return &simpleResponse.Usage, nil

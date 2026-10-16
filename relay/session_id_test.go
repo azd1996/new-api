@@ -33,42 +33,49 @@ func TestClaudeSessionID(t *testing.T) {
 
 func TestResponsesSessionID(t *testing.T) {
 	cases := []struct {
-		name string
-		req  *dto.OpenAIResponsesRequest
-		want string
+		name       string
+		req        *dto.OpenAIResponsesRequest
+		wantValue  string
+		wantSource string
 	}{
 		{"prompt_cache_key wins", &dto.OpenAIResponsesRequest{
 			PromptCacheKey: json.RawMessage(`"pck-1"`),
 			ClientMetadata: json.RawMessage(`{"session_id":"cm-1"}`),
-		}, "pck-1"},
+		}, "pck-1", "prompt_cache_key"},
 		{"client_metadata fallback", &dto.OpenAIResponsesRequest{
 			ClientMetadata: json.RawMessage(`{"session_id":"cm-1"}`),
-		}, "cm-1"},
-		{"none", &dto.OpenAIResponsesRequest{}, ""},
-		{"nil", nil, ""},
+		}, "cm-1", "client_metadata.session_id"},
+		{"none", &dto.OpenAIResponsesRequest{}, "", ""},
+		{"nil", nil, "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, responsesSessionID(tc.req))
+			value, source := responsesSessionID(tc.req)
+			assert.Equal(t, tc.wantValue, value)
+			assert.Equal(t, tc.wantSource, source)
 		})
 	}
 }
 
-func TestRecordRequestSessionIDFallsBackToNotFound(t *testing.T) {
+func TestRecordRequestSessionID(t *testing.T) {
 	cases := []struct {
-		name  string
-		input string
-		want  string
+		name       string
+		value      string
+		source     string
+		wantValue  string
+		wantSource string
 	}{
-		{"value kept", "sess-1", "sess-1"},
-		{"empty -> notfound", "", sessionIDNotFound},
-		{"blank -> notfound", "   ", sessionIDNotFound},
+		{"value with source", "sess-1", "prompt_cache_key", "sess-1", "prompt_cache_key"},
+		{"empty -> notfound, no source", "", "prompt_cache_key", sessionIDNotFound, ""},
+		{"blank -> notfound", "   ", "metadata.user_id", sessionIDNotFound, ""},
+		{"value without source", "sess-2", "", "sess-2", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			recordRequestSessionID(c, tc.input)
-			assert.Equal(t, tc.want, common.GetContextKeyString(c, constant.ContextKeySessionID))
+			recordRequestSessionID(c, tc.value, tc.source)
+			assert.Equal(t, tc.wantValue, common.GetContextKeyString(c, constant.ContextKeySessionID))
+			assert.Equal(t, tc.wantSource, common.GetContextKeyString(c, constant.ContextKeySessionIDSource))
 		})
 	}
 }

@@ -275,6 +275,7 @@ const SENSITIVE_FORM_FIELDS = [
   'key_mode',
   'param_override',
   'header_override',
+  'response_filter',
   'settings',
   'setting',
   'advanced_custom',
@@ -329,6 +330,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
   return Boolean(
     hasConfiguredOverrideValue(values.param_override) ||
     hasConfiguredOverrideValue(values.header_override) ||
+    hasConfiguredOverrideValue(values.response_filter) ||
     values.advanced_custom?.trim() ||
     hasConfiguredOverrideValue(values.status_code_mapping) ||
     values.tag?.trim() ||
@@ -1024,7 +1026,8 @@ export function ChannelMutateDrawer({
   const overrideRulesConfigured = Boolean(
     hasConfiguredOverrideValue(currentStatusCodeMapping) ||
     hasConfiguredOverrideValue(currentParamOverride) ||
-    hasConfiguredOverrideValue(currentHeaderOverride)
+    hasConfiguredOverrideValue(currentHeaderOverride) ||
+    hasConfiguredOverrideValue(form.watch('response_filter'))
   )
   const extraSettingsConfigured = Boolean(
     currentForceFormat ||
@@ -3999,6 +4002,38 @@ export function ChannelMutateDrawer({
                                         placeholder={t(
                                           'Select retry override templates'
                                         )}
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='response_filter'
+                                render={({ field }) => (
+                                  <FormItem className='space-y-3 border-t pt-4'>
+                                    <div className='space-y-1'>
+                                      <FormLabel>
+                                        {t('Response Filter Rules')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Remove fields from the upstream response before returning to the client. One rule per line: a bare key name is removed at every nesting level, a path containing "." or "#" is treated as an exact gjson path. Example: content_filter_results'
+                                        )}
+                                      </FormDescription>
+                                    </div>
+                                    <FormControl>
+                                      <Textarea
+                                        {...field}
+                                        value={field.value || ''}
+                                        rows={4}
+                                        disabled={sensitiveLocked}
+                                        placeholder={
+                                          'content_filter_results\nprompt_filter_results\ncontent_filters'
+                                        }
+                                        className='font-mono text-xs'
                                       />
                                     </FormControl>
                                     <FormMessage />

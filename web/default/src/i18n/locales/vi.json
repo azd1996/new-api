@@ -3881,6 +3881,8 @@
     "Retry override rules as a JSON array, e.g. [{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]. Leave empty to disable.": "Quy tắc ghi đè thử lại dưới dạng mảng JSON, ví dụ [{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]. Để trống để tắt.",
     "Retry override rules as a JSON array. Leave empty to disable.": "Retry override rules as a JSON array. Leave empty to disable.",
     "Retry Override Templates": "Retry Override Templates",
+    "Response Filter Rules": "Quy tắc lọc phản hồi",
+    "Remove fields from the upstream response before returning to the client. One rule per line: a bare key name is removed at every nesting level, a path containing \".\" or \"#\" is treated as an exact gjson path. Example: content_filter_results": "Xóa các trường khỏi phản hồi từ nhà cung cấp trước khi trả về cho client. Mỗi dòng một quy tắc: tên khóa đơn thuần sẽ bị xóa ở mọi cấp lồng nhau, đường dẫn chứa \".\" hoặc \"#\" được coi là đường dẫn gjson chính xác. Ví dụ: content_filter_results",
     "Retry Settings": "Cài đặt thử lại",
     "Retry Suggestion": "Gợi ý thử lại",
     "Retry template content must be a JSON array": "Retry template content must be a JSON array",

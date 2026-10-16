@@ -3881,6 +3881,8 @@
     "Retry override rules as a JSON array, e.g. [{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]. Leave empty to disable.": "Правила переопределения повторов в виде JSON-массива, напр. [{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]. Оставьте пустым, чтобы отключить.",
     "Retry override rules as a JSON array. Leave empty to disable.": "Retry override rules as a JSON array. Leave empty to disable.",
     "Retry Override Templates": "Retry Override Templates",
+    "Response Filter Rules": "Правила фильтрации ответов",
+    "Remove fields from the upstream response before returning to the client. One rule per line: a bare key name is removed at every nesting level, a path containing \".\" or \"#\" is treated as an exact gjson path. Example: content_filter_results": "Удаляет поля из ответа вышестоящего сервиса перед возвратом клиенту. Одно правило на строку: простое имя ключа удаляется на всех уровнях вложенности, путь, содержащий \".\" или \"#\", обрабатывается как точный путь gjson. Пример: content_filter_results",
     "Retry Settings": "Настройки повторов",
     "Retry Suggestion": "Рекомендация по повтору",
     "Retry template content must be a JSON array": "Retry template content must be a JSON array",

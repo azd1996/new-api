@@ -75,6 +75,12 @@ const (
 	// id stores the "notfound" sentinel so it stays searchable.
 	ContextKeySessionID ContextKey = "session_id"
 
+	// ContextKeySessionIDSource labels where the session id came from
+	// (e.g. "metadata.user_id", "prompt_cache_key", "client_metadata.session_id";
+	// a synthesized/fallback Claude value is suffixed with " (fallback)").
+	// Persisted into logs under other.session_id_source for display.
+	ContextKeySessionIDSource ContextKey = "session_id_source"
+
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit
 	// fallback in authHelper (finishAdminAudit) skips its record to avoid

@@ -195,6 +195,10 @@ export const channelFormSchema = z
     // Retry override (stored in setting JSON): {operations:[...]} JSON string,
     // edited with the param-override editor; conditions match the response.
     retry_override: z.string().optional(),
+    // Response filter (stored in setting JSON as string[]): one rule per line,
+    // edited as multiline text. Each rule is a bare key name (removed recursively)
+    // or an exact gjson/sjson path (containing "." or "#").
+    response_filter: z.string().optional(),
     // Override template references (stored in setting JSON): names of root-level
     // parameter / retry override templates to apply to this channel.
     param_override_template_refs: z.array(z.string()).optional(),
@@ -341,6 +345,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   system_prompt_override: false,
   upstream_request_id_header: '',
   retry_override: '',
+  response_filter: '',
   param_override_template_refs: [],
   retry_override_template_refs: [],
   // Type-specific settings
@@ -383,6 +388,7 @@ export function transformChannelToFormDefaults(
     system_prompt_override: false,
     upstream_request_id_header: '',
     retry_override: '',
+    response_filter: '',
     param_override_template_refs: [] as string[],
     retry_override_template_refs: [] as string[],
   }
@@ -400,6 +406,11 @@ export function transformChannelToFormDefaults(
         upstream_request_id_header: parsed.upstream_request_id_header || '',
         retry_override: Array.isArray(parsed.retry_override)
           ? JSON.stringify(parsed.retry_override, null, 2)
+          : '',
+        response_filter: Array.isArray(parsed.response_filter)
+          ? parsed.response_filter
+              .filter((rule: unknown): rule is string => typeof rule === 'string')
+              .join('\n')
           : '',
         param_override_template_refs: Array.isArray(
           parsed.param_override_template_refs
@@ -550,6 +561,13 @@ function buildSettingJSON(formData: ChannelFormValues): string {
   }
   if (retryOverride.length > 0) {
     settingObj.retry_override = retryOverride
+  }
+  const responseFilter = (formData.response_filter || '')
+    .split('\n')
+    .map((rule) => rule.trim())
+    .filter((rule) => rule.length > 0)
+  if (responseFilter.length > 0) {
+    settingObj.response_filter = responseFilter
   }
   const paramTemplateRefs = (formData.param_override_template_refs || [])
     .map((ref) => ref.trim())

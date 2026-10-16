@@ -96,6 +96,9 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	// top-level so it is visible in the log detail and searchable via LIKE.
 	if sessionID := common.GetContextKeyString(ctx, constant.ContextKeySessionID); sessionID != "" {
 		other["session_id"] = sessionID
+		if source := common.GetContextKeyString(ctx, constant.ContextKeySessionIDSource); source != "" {
+			other["session_id_source"] = source
+		}
 	}
 
 	adminInfo := make(map[string]interface{})

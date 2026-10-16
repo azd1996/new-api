@@ -88,6 +88,7 @@ export interface ChannelSettings {
   system_prompt_override?: boolean
   upstream_request_id_header?: string
   retry_override?: Array<Record<string, unknown>>
+  response_filter?: string[]
 }
 
 export interface ChannelOtherSettings {

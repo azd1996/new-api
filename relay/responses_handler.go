@@ -72,7 +72,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 	// Capture the request's session_id (prompt_cache_key, else
 	// client_metadata.session_id) for the consume/error log.
-	recordRequestSessionID(c, responsesSessionID(responsesReq))
+	responsesSID, responsesSIDSource := responsesSessionID(responsesReq)
+	recordRequestSessionID(c, responsesSID, responsesSIDSource)
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {

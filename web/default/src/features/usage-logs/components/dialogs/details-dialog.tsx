@@ -674,7 +674,17 @@ export function DetailsDialog(props: DetailsDialogProps) {
           {other?.session_id && (
             <DetailRow
               label={t('Session ID')}
-              value={other.session_id}
+              value={
+                <span>
+                  {other.session_id}
+                  {other.session_id_source && (
+                    <span className='text-muted-foreground'>
+                      {' '}
+                      ({other.session_id_source})
+                    </span>
+                  )}
+                </span>
+              }
               mono
             />
           )}

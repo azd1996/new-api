@@ -16,16 +16,21 @@ import (
 // of leaving the key absent) keeps "no session id" requests searchable.
 const sessionIDNotFound = "notfound"
 
-// recordRequestSessionID stashes the request's session identifier on the gin
-// context so the consume/error log can persist it under other.session_id.
-// Only session-capable relay paths (Claude native, OpenAI chat/responses)
-// call this; an empty value is normalized to the "notfound" sentinel.
-func recordRequestSessionID(c *gin.Context, sessionID string) {
+// recordRequestSessionID stashes the request's session identifier and its
+// source label on the gin context so the consume/error log can persist them
+// under other.session_id / other.session_id_source. Only session-capable relay
+// paths call this; an empty value is normalized to the "notfound" sentinel (and
+// no source is recorded).
+func recordRequestSessionID(c *gin.Context, sessionID, source string) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		sessionID = sessionIDNotFound
+		common.SetContextKey(c, constant.ContextKeySessionID, sessionIDNotFound)
+		return
 	}
 	common.SetContextKey(c, constant.ContextKeySessionID, sessionID)
+	if source = strings.TrimSpace(source); source != "" {
+		common.SetContextKey(c, constant.ContextKeySessionIDSource, source)
+	}
 }
 
 // claudeSessionID reads the session_id embedded in the final metadata.user_id
@@ -43,21 +48,22 @@ func claudeSessionID(jsonData []byte) string {
 	return strings.TrimSpace(blob.SessionID)
 }
 
-// responsesSessionID resolves the session identifier for an OpenAI Responses
-// request: prompt_cache_key first, then client_metadata.session_id.
-func responsesSessionID(req *dto.OpenAIResponsesRequest) string {
+// responsesSessionID resolves the session identifier and its source for an
+// OpenAI Responses request: prompt_cache_key first, then
+// client_metadata.session_id.
+func responsesSessionID(req *dto.OpenAIResponsesRequest) (string, string) {
 	if req == nil {
-		return ""
+		return "", ""
 	}
 	if len(req.PromptCacheKey) > 0 {
 		if v := strings.TrimSpace(gjson.ParseBytes(req.PromptCacheKey).String()); v != "" {
-			return v
+			return v, "prompt_cache_key"
 		}
 	}
 	if len(req.ClientMetadata) > 0 {
 		if v := strings.TrimSpace(gjson.GetBytes(req.ClientMetadata, "session_id").String()); v != "" {
-			return v
+			return v, "client_metadata.session_id"
 		}
 	}
-	return ""
+	return "", ""
 }

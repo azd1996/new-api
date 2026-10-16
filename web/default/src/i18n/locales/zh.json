@@ -3881,6 +3881,8 @@
     "Retry override rules as a JSON array, e.g. [{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]. Leave empty to disable.": "以 JSON 数组配置重试覆盖规则，例如 [{ \"phase2_response_conditions\": {...}, \"phase3_request_rewrite\": [...], \"phase4_retry_action\": \"retry_same_channel\" }]。留空则不启用。",
     "Retry override rules as a JSON array. Leave empty to disable.": "以 JSON 数组形式填写重试覆盖规则，留空则禁用。",
     "Retry Override Templates": "重试覆盖模板",
+    "Response Filter Rules": "响应过滤规则",
+    "Remove fields from the upstream response before returning to the client. One rule per line: a bare key name is removed at every nesting level, a path containing \".\" or \"#\" is treated as an exact gjson path. Example: content_filter_results": "在返回给客户端前，从上游响应体中删除字段。每行一条规则：纯键名会在所有嵌套层级删除；包含 \".\" 或 \"#\" 的路径按精确 gjson 路径处理。示例：content_filter_results",
     "Retry Settings": "重试设置",
     "Retry Suggestion": "重试建议",
     "Retry template content must be a JSON array": "重试模板内容必须是 JSON 数组",

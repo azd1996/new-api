@@ -165,6 +165,10 @@ export interface LogOtherData {
   // Resolved session identifier (Claude metadata session_id / OpenAI
   // prompt_cache_key). "notfound" when a session-capable request carried none.
   session_id?: string
+  // Where the session id came from, e.g. "metadata.user_id",
+  // "prompt_cache_key", "client_metadata.session_id"; a synthesized Claude
+  // value is suffixed with " (fallback)".
+  session_id_source?: string
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.
   op?: {
