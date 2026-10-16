@@ -122,6 +122,22 @@ flowchart TD
 - **兜底粒度较粗**:同一 `clientIP + UA + apiKey` 会被归为一个 session(多个真实会话合并);但保证稳定、不逐轮漂移。
 - 只在客户端缺 `user_id` 时合成 blob;客户端已有的 user_id 原样保留。
 
+## 多实例部署与缓存命中(NLB 轮询)
+
+**结论:NLB 把同一会话的多轮请求轮询到不同 newapi 实例,默认不影响缓存命中。** 缓存和黏滞都不依赖"请求落在哪个 newapi 实例":
+
+- **newapi 对 prompt 缓存无状态**:缓存在上游供应商节点本地,newapi 只转发,不持有缓存。换实例 ≠ 换缓存。
+- **缓存键是内容寻址**:键 = 渲染后前缀字节(`tools→system→messages`)+ `cache_control` 断点 + model。同一轮内容相同 → 任意实例出站 body 前缀一致 → 键一致。
+- **黏滞靠 body 的 `user_id`/`session_id`,与连接来源无关**:且两值跨实例确定性一致——Claude Code 自带 blob,newapi 不改;缺 user_id 时合成的 session_id 是纯函数 `xxhash64(model ␟ 稳定system前缀 ␟ 会话标识)`,输入对同一会话在任何实例上相同 → 派生结果相同。
+
+需要保证/确认的点(多与"多实例"本身无关):
+
+- **同组单上游账号**:组内若挂多个 channel,逐请求随机选 channel 会选到不同上游账号 → 冷缓存;这在单实例下同样发生。"部门→上游 1:1"映射已规避。
+- **各实例取 clientIP 配置一致**:仅当走 `clientIP+UA+apiKey` 兜底派生、且不同实例的 proxy-protocol / `X-Forwarded-For` 解析不一致导致 clientIP 取值不同时,兜底 session_id 才会分叉。各实例配置应统一。
+- **确认供应商黏滞只看 body 的 user_id/session_id,而非源连接 IP**:若供应商还掺入源 IP、而各 newapi 实例出口 IP 不同,多实例可能造成扇出。按当前设计黏滞是 user_id+session_id 驱动,但取决于供应商实现,建议确认一次。
+
+> 从机制看通常无需在 NLB 上做会话亲和(sticky):黏滞已下沉到 body 元数据,实例选择不参与。
+
 ## 测试
 
 `relay/claude_handler_metadata_test.go`(表驱动,`testify`):
