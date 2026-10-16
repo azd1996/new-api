@@ -167,7 +167,7 @@ export interface LogOtherData {
   session_id?: string
   // Where the session id came from, e.g. "metadata.user_id",
   // "prompt_cache_key", "client_metadata.session_id"; a synthesized Claude
-  // value is suffixed with " (fallback)".
+  // value is labelled "content-fallback".
   session_id_source?: string
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.

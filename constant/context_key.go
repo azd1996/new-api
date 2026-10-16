@@ -77,7 +77,7 @@ const (
 
 	// ContextKeySessionIDSource labels where the session id came from
 	// (e.g. "metadata.user_id", "prompt_cache_key", "client_metadata.session_id";
-	// a synthesized/fallback Claude value is suffixed with " (fallback)").
+	// a synthesized Claude value is labelled "content-fallback").
 	// Persisted into logs under other.session_id_source for display.
 	ContextKeySessionIDSource ContextKey = "session_id_source"
 

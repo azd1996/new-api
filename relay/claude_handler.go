@@ -195,7 +195,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 		// Remember whether the client supplied its own metadata.user_id, so the
 		// session-id source can be labelled client ("metadata.user_id") vs our
-		// synthesized fallback ("metadata.user_id (fallback)").
+		// synthesized value ("content-fallback").
 		clientHadClaudeUserID := strings.TrimSpace(gjson.GetBytes(jsonData, "metadata.user_id").String()) != ""
 
 		// Metadata.user_id synthesis defaults ON for every (group, model); it is
@@ -247,7 +247,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if claudeSID != "" {
 			claudeSource = "metadata.user_id"
 			if !clientHadClaudeUserID {
-				claudeSource = "metadata.user_id (fallback)"
+				claudeSource = "content-fallback"
 			}
 		}
 		recordRequestSessionID(c, claudeSID, claudeSource)
