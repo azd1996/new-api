@@ -32,6 +32,7 @@ import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
 import { Button } from '@/components/ui/button'
 import {
@@ -92,6 +93,7 @@ export function DataTableRowActions<TData>({
   const isEnabled = apiKey.status === API_KEY_STATUS.ENABLED
   const { chatPresets, serverAddress } = useChatPresets()
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
+  const [disableConfirmOpen, setDisableConfirmOpen] = useState(false)
   const resolvedRealKey = resolvedKeys[apiKey.id]
   const isRealKeyLoading = Boolean(loadingKeys[apiKey.id])
 
@@ -197,7 +199,14 @@ export function DataTableRowActions<TData>({
             <Button
               variant='ghost'
               size='icon-sm'
-              onClick={handleToggleStatus}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (isEnabled) {
+                  setDisableConfirmOpen(true)
+                } else {
+                  handleToggleStatus()
+                }
+              }}
               disabled={isTogglingStatus}
               aria-label={toggleLabel}
               className={
@@ -317,6 +326,22 @@ export function DataTableRowActions<TData>({
           </DropdownMenuShortcut>
         </DropdownMenuItem>
       </DataTableRowActionMenu>
+
+      <ConfirmDialog
+        open={disableConfirmOpen}
+        onOpenChange={setDisableConfirmOpen}
+        title={t('Disable API Key')}
+        desc={t('Are you sure you want to disable API key "{{name}}"?', {
+          name: apiKey.name,
+        })}
+        confirmText={t('Disable')}
+        destructive
+        isLoading={isTogglingStatus}
+        handleConfirm={async () => {
+          await handleToggleStatus()
+          setDisableConfirmOpen(false)
+        }}
+      />
     </div>
   )
 }
