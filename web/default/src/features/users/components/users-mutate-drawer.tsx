@@ -31,6 +31,8 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
+import { CopyButton } from '@/components/copy-button'
+import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -89,7 +91,7 @@ import {
   transformFormDataToPayload,
   transformUserToFormDefaults,
 } from '../lib'
-import { type User } from '../types'
+import { type User, type CreateUserResult } from '../types'
 import { UserQuotaDialog } from './user-quota-dialog'
 import { useUsers } from './users-provider'
 
@@ -110,6 +112,8 @@ export function UsersMutateDrawer({
   const currentUser = useAuthStore((s) => s.auth.user)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false)
+  const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
+  const [createdTokenKey, setCreatedTokenKey] = useState<string | null>(null)
 
   // Fetch groups
   const { data: groupsData } = useQuery({
@@ -156,7 +160,10 @@ export function UsersMutateDrawer({
   const canEditAdminPermissions = currentUser?.role === ROLE.SUPER_ADMIN
   const targetIsAdmin = (selectedRole ?? currentRow?.role ?? 0) >= ROLE.ADMIN
 
-  const onSubmit = async (data: UserFormValues) => {
+  const onSubmit = async (
+    data: UserFormValues,
+    createDefaultToken = false
+  ) => {
     if (!isUpdate) {
       const passwordLength = data.password?.length || 0
       if (passwordLength < 8 || passwordLength > 20) {
@@ -177,7 +184,7 @@ export function UsersMutateDrawer({
       )
       const result = isUpdate
         ? await updateUser(payload as typeof payload & { id: number })
-        : await createUser(payload)
+        : await createUser(payload, { createDefaultToken })
 
       if (result.success) {
         toast.success(
@@ -187,6 +194,17 @@ export function UsersMutateDrawer({
         )
         onOpenChange(false)
         triggerRefresh()
+
+        if (!isUpdate && createDefaultToken) {
+          const tokenKey = (result.data as CreateUserResult | undefined)
+            ?.default_token_key
+          if (tokenKey) {
+            setCreatedTokenKey(tokenKey)
+            setTokenDialogOpen(true)
+          } else {
+            toast.warning(t('User created, but the default key could not be created'))
+          }
+        }
       } else {
         toast.error(
           result.message ||
@@ -201,6 +219,9 @@ export function UsersMutateDrawer({
       setIsSubmitting(false)
     }
   }
+
+  const submitForm = (createDefaultToken: boolean) =>
+    form.handleSubmit((data) => onSubmit(data, createDefaultToken))()
 
   const refreshUserData = async () => {
     if (!currentRow) return
@@ -238,7 +259,7 @@ export function UsersMutateDrawer({
           <Form {...form}>
             <form
               id='user-form'
-              onSubmit={form.handleSubmit(onSubmit)}
+              onSubmit={form.handleSubmit((data) => onSubmit(data, false))}
               className={sideDrawerFormClassName()}
             >
               {/* Basic Information */}
@@ -577,6 +598,16 @@ export function UsersMutateDrawer({
             <SheetClose render={<Button variant='outline' />}>
               {t('Close')}
             </SheetClose>
+            {!isUpdate && (
+              <Button
+                type='button'
+                variant='secondary'
+                disabled={isSubmitting}
+                onClick={() => submitForm(true)}
+              >
+                {t('Create user and default key')}
+              </Button>
+            )}
             <Button form='user-form' type='submit' disabled={isSubmitting}>
               {isSubmitting ? t('Saving...') : t('Save changes')}
             </Button>
@@ -594,6 +625,37 @@ export function UsersMutateDrawer({
           onSuccess={refreshUserData}
         />
       )}
+
+      {/* Default Key Created Dialog (shown once after creating user + default key) */}
+      <Dialog
+        open={tokenDialogOpen}
+        onOpenChange={(v) => {
+          setTokenDialogOpen(v)
+          if (!v) setCreatedTokenKey(null)
+        }}
+        title={t('Default Key Created')}
+        description={t(
+          'This key is shown only once. Please copy and store it safely.'
+        )}
+        contentClassName='sm:max-w-md'
+        footer={
+          <Button onClick={() => setTokenDialogOpen(false)}>{t('Done')}</Button>
+        }
+      >
+        <div className='flex items-center gap-2'>
+          <Input
+            readOnly
+            value={createdTokenKey ?? ''}
+            className='font-mono'
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <CopyButton
+            value={createdTokenKey ?? ''}
+            tooltip={t('Copy to clipboard')}
+            successTooltip={t('Copied!')}
+          />
+        </div>
+      </Dialog>
     </>
   )
 }

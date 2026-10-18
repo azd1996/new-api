@@ -25,6 +25,7 @@ import type {
   GetUsersResponse,
   SearchUsersParams,
   UserFormData,
+  CreateUserResult,
   ManageUserAction,
   ManageUserQuotaPayload,
   ApiResponse,
@@ -80,11 +81,18 @@ export async function getUser(id: number): Promise<ApiResponse<User>> {
 
 /**
  * Create a new user
+ *
+ * When options.createDefaultToken is set, the backend also creates a "default"
+ * key for the user and returns it once in data.default_token_key.
  */
 export async function createUser(
-  data: UserFormData
-): Promise<ApiResponse<User>> {
-  const res = await api.post('/api/user/', data)
+  data: UserFormData,
+  options?: { createDefaultToken?: boolean }
+): Promise<ApiResponse<CreateUserResult>> {
+  const url = options?.createDefaultToken
+    ? '/api/user/?default_token=true'
+    : '/api/user/'
+  const res = await api.post(url, data)
   return res.data
 }
 

@@ -1005,6 +1005,36 @@ func CreateUser(c *gin.Context) {
 	}
 	cleanUser.FinishInsert(0)
 
+	// 当请求带 default_token=true 时，超管代为创建一个名为 default 的密钥并回传给前端一次性展示。
+	// Group 留空，运行时自动回落到用户当前分组，使密钥分组始终与用户保持一致。
+	// 密钥为尽力而为：生成或落库失败不影响用户创建成功，仅在返回体中附带错误信息供前端提示。
+	responseData := gin.H{}
+	if c.Query("default_token") == "true" {
+		if key, genErr := common.GenerateKey(); genErr != nil {
+			common.SysLog(fmt.Sprintf("failed to generate default token key for user %s: %s", cleanUser.Username, genErr.Error()))
+			responseData["default_token_error"] = genErr.Error()
+		} else {
+			defaultToken := model.Token{
+				UserId:         cleanUser.Id,
+				Name:           "default",
+				Key:            key,
+				CreatedTime:    common.GetTimestamp(),
+				AccessedTime:   common.GetTimestamp(),
+				ExpiredTime:    -1,
+				RemainQuota:    0,
+				UnlimitedQuota: true,
+				Status:         common.TokenStatusEnabled,
+				Group:          "",
+			}
+			if insErr := defaultToken.Insert(); insErr != nil {
+				common.SysLog(fmt.Sprintf("failed to create default token for user %s: %s", cleanUser.Username, insErr.Error()))
+				responseData["default_token_error"] = insErr.Error()
+			} else {
+				responseData["default_token_key"] = "sk-" + key
+			}
+		}
+	}
+
 	recordManageAuditFor(c, cleanUser.Id, "user.create", map[string]interface{}{
 		"username": cleanUser.Username,
 		"role":     cleanUser.Role,
@@ -1012,6 +1042,7 @@ func CreateUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+		"data":    responseData,
 	})
 	return
 }
