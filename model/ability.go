@@ -44,14 +44,15 @@ func GetGroupEnabledModels(group string) []string {
 	var models []string
 	// Find distinct models
 	DB.Table("abilities").Where(commonGroupCol+" = ? and enabled = ?", group, true).Distinct("model").Pluck("model", &models)
-	return models
+	// 隐藏「客户批量模型映射」别名，避免对外模型列表泄露其它客户后缀。
+	return FilterCustomerAliasModels(models)
 }
 
 func GetEnabledModels() []string {
 	var models []string
 	// Find distinct models
 	DB.Table("abilities").Where("enabled = ?", true).Distinct("model").Pluck("model", &models)
-	return models
+	return FilterCustomerAliasModels(models)
 }
 
 func GetAllEnableAbilities() []Ability {

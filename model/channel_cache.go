@@ -23,6 +23,11 @@ var channelsIDM map[int]*Channel                     // all channels include dis
 var channel2advancedCustomConfig map[int]*dto.AdvancedCustomConfig
 var channelSyncLock sync.RWMutex
 
+// customerAliasModels 缓存所有渠道「客户批量模型映射」生成的别名模型名集合，
+// 用于在对外的模型列表（/v1/models 等）中隐藏，避免客户看到其它客户的后缀。
+// 依赖内存缓存（InitChannelCache）刷新。
+var customerAliasModels = make(map[string]struct{})
+
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
 		InvalidatePricingCache()
@@ -76,8 +81,34 @@ func InitChannelCache() {
 		}
 	}
 
+	// 收集所有渠道的客户别名模型，供对外模型列表隐藏使用（不区分渠道状态）。
+	newCustomerAliasModels := make(map[string]struct{})
+	for _, channel := range channels {
+		customers := channel.ChannelInfo.Customers
+		if len(customers) == 0 {
+			continue
+		}
+		models := channel.GetModels()
+		baseSet := make(map[string]struct{}, len(models))
+		for _, m := range models {
+			if m = strings.TrimSpace(m); m != "" {
+				baseSet[m] = struct{}{}
+			}
+		}
+		for _, m := range models {
+			m = strings.TrimSpace(m)
+			if m == "" {
+				continue
+			}
+			if _, isAlias := customerAliasBaseModel(m, customers, baseSet); isAlias {
+				newCustomerAliasModels[m] = struct{}{}
+			}
+		}
+	}
+
 	channelSyncLock.Lock()
 	group2model2channels = newGroup2model2channels
+	customerAliasModels = newCustomerAliasModels
 	//channelsIDM = newChannelId2channel
 	for i, channel := range newChannelId2channel {
 		if channel.ChannelInfo.IsMultiKey {
@@ -101,6 +132,24 @@ func InitChannelCache() {
 	// invalidating the pricing cache, otherwise the reversed order deadlocks.
 	InvalidatePricingCache()
 	common.SysLog("channels synced from database")
+}
+
+// FilterCustomerAliasModels 从模型名列表中剔除「客户批量模型映射」生成的别名，
+// 用于对外模型列表隐藏。空集合时原样返回，保持零开销。
+func FilterCustomerAliasModels(models []string) []string {
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	if len(customerAliasModels) == 0 {
+		return models
+	}
+	result := make([]string, 0, len(models))
+	for _, m := range models {
+		if _, ok := customerAliasModels[m]; ok {
+			continue
+		}
+		result = append(result, m)
+	}
+	return result
 }
 
 func SyncChannelCache(frequency int) {

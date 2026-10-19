@@ -613,6 +613,15 @@ func AddChannel(c *gin.Context) {
 		return
 	}
 
+	// 根据客户列表展开「客户批量模型映射」别名（写入 Models 与 ModelMapping）。
+	if err := addChannelRequest.Channel.ApplyCustomerModelExpansion(nil); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
 	addChannelRequest.Channel.CreatedTime = common.GetTimestamp()
 	keys := make([]string, 0)
 	switch addChannelRequest.Mode {
@@ -955,7 +964,14 @@ func UpdateChannel(c *gin.Context) {
 	}
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
+	// 客户列表随请求更新（仅当请求显式携带 channel_info 时），其余 ChannelInfo 字段沿用原值。
+	requestedCustomers := channel.ChannelInfo.Customers
+	_, channelInfoProvided := requestData["channel_info"]
+	previousCustomers := originChannel.ChannelInfo.Customers
 	channel.ChannelInfo = originChannel.ChannelInfo
+	if channelInfoProvided {
+		channel.ChannelInfo.Customers = requestedCustomers
+	}
 
 	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
@@ -1047,6 +1063,14 @@ func UpdateChannel(c *gin.Context) {
 		case "replace":
 			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
 		}
+	}
+	// 根据客户列表展开/清理「客户批量模型映射」别名（传入历史客户以清理被移除客户的遗留别名）。
+	if err := channel.ApplyCustomerModelExpansion(previousCustomers); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
 	}
 	err = channel.Update()
 	if err != nil {

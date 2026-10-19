@@ -67,6 +67,7 @@ type ChannelInfo struct {
 	MultiKeyDisabledTime   map[int]int64         `json:"multi_key_disabled_time,omitempty"`   // key禁用时间列表，key index -> time
 	MultiKeyPollingIndex   int                   `json:"multi_key_polling_index"`             // 多Key模式下轮询的key索引
 	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
+	Customers              []string              `json:"customers,omitempty"` // 客户批量模型映射：为每个(模型 × 客户)生成别名 model_customer
 }
 
 type ChannelSortOptions struct {
@@ -504,6 +505,136 @@ func (channel *Channel) GetModelMapping() string {
 		return ""
 	}
 	return *channel.ModelMapping
+}
+
+// customerModelDelimiter 客户别名分隔符，别名形如 <model><delimiter><customer>。
+const customerModelDelimiter = "_"
+
+// sanitizeCustomerList 规整客户列表：去空白、丢空值、去重，并丢弃含逗号的非法项（逗号会破坏 Models 的 CSV 存储）。
+func sanitizeCustomerList(customers []string) []string {
+	seen := make(map[string]struct{}, len(customers))
+	result := make([]string, 0, len(customers))
+	for _, c := range customers {
+		c = strings.TrimSpace(c)
+		if c == "" || strings.Contains(c, ",") {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		result = append(result, c)
+	}
+	return result
+}
+
+// customerAliasBaseModel 若 model 是某个客户的别名（形如 base_customer，且 base 存在于 baseModelSet），
+// 返回其对应的基础模型名与 true；否则返回空串与 false。
+func customerAliasBaseModel(model string, customers []string, baseModelSet map[string]struct{}) (string, bool) {
+	for _, c := range customers {
+		suffix := customerModelDelimiter + c
+		if !strings.HasSuffix(model, suffix) {
+			continue
+		}
+		base := model[:len(model)-len(suffix)]
+		if base == "" {
+			continue
+		}
+		if _, ok := baseModelSet[base]; ok {
+			return base, true
+		}
+	}
+	return "", false
+}
+
+// ApplyCustomerModelExpansion 依据 ChannelInfo.Customers，为每个 (基础模型 × 客户) 生成别名
+// <model>_<customer>，并同时写入 Models（保证可路由）和 ModelMapping（别名 -> 真实模型，供上游改名）。
+// previousCustomers 为本次保存前的客户列表，用于清理被移除客户遗留的别名，使该方法可重复执行且幂等。
+// 当本次与历史客户都为空时不触碰 Models / ModelMapping，保持未使用该功能的渠道行为不变。
+func (channel *Channel) ApplyCustomerModelExpansion(previousCustomers []string) error {
+	customers := sanitizeCustomerList(channel.ChannelInfo.Customers)
+	channel.ChannelInfo.Customers = customers
+
+	prev := sanitizeCustomerList(previousCustomers)
+	if len(customers) == 0 && len(prev) == 0 {
+		return nil
+	}
+
+	// 识别旧别名需覆盖「历史 ∪ 当前」客户，才能清理被移除客户的遗留别名。
+	stripCustomers := sanitizeCustomerList(append(append([]string{}, prev...), customers...))
+
+	rawModels := channel.GetModels()
+	rawModelSet := make(map[string]struct{}, len(rawModels))
+	for _, m := range rawModels {
+		if m = strings.TrimSpace(m); m != "" {
+			rawModelSet[m] = struct{}{}
+		}
+	}
+
+	// 基础模型集 = 现有模型去掉已生成的客户别名（保序）。
+	baseModels := make([]string, 0, len(rawModels))
+	for _, m := range rawModels {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			continue
+		}
+		if _, isAlias := customerAliasBaseModel(m, stripCustomers, rawModelSet); isAlias {
+			continue
+		}
+		baseModels = append(baseModels, m)
+	}
+
+	// 解析现有映射并剔除已生成的客户别名条目。
+	mapping := map[string]string{}
+	if raw := channel.GetModelMapping(); raw != "" && raw != "{}" {
+		if err := common.UnmarshalJsonStr(raw, &mapping); err != nil {
+			return fmt.Errorf("model mapping 格式错误: %w", err)
+		}
+	}
+	for key := range mapping {
+		if _, isAlias := customerAliasBaseModel(key, stripCustomers, rawModelSet); isAlias {
+			delete(mapping, key)
+		}
+	}
+
+	// 重新生成别名：写入 Models（保序去重）与 ModelMapping。
+	modelSet := make(map[string]struct{}, len(baseModels))
+	finalModels := make([]string, 0, len(baseModels)*(1+len(customers)))
+	for _, m := range baseModels {
+		if _, ok := modelSet[m]; ok {
+			continue
+		}
+		modelSet[m] = struct{}{}
+		finalModels = append(finalModels, m)
+	}
+	for _, m := range baseModels {
+		for _, c := range customers {
+			alias := m + customerModelDelimiter + c
+			if len(alias) > 255 {
+				return fmt.Errorf("客户别名模型名称过长: %s", alias)
+			}
+			if _, ok := modelSet[alias]; !ok {
+				modelSet[alias] = struct{}{}
+				finalModels = append(finalModels, alias)
+			}
+			mapping[alias] = m
+		}
+	}
+
+	channel.Models = strings.Join(finalModels, ",")
+	if len(mapping) == 0 {
+		// 置为非 nil 空串而非 nil，确保 GORM Updates 能把已有映射清空（nil 指针会被当作零值跳过）。
+		empty := ""
+		channel.ModelMapping = &empty
+		return nil
+	}
+	encoded, err := common.Marshal(mapping)
+	if err != nil {
+		return fmt.Errorf("model mapping 序列化失败: %w", err)
+	}
+	mappingStr := string(encoded)
+	channel.ModelMapping = &mappingStr
+	return nil
 }
 
 func (channel *Channel) GetStatusCodeMapping() string {

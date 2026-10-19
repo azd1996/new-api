@@ -36,7 +36,7 @@ export function parseModelsString(modelsStr: string): string[] {
  * Format models array to string
  */
 export function formatModelsArray(models: string[]): string {
-  return Array.from(new Set(models)).join(',')
+  return [...new Set(models)].join(',')
 }
 
 /**
@@ -65,7 +65,7 @@ export function extractMappingSourceModels(modelMapping: string): string[] {
       .map((key) => key.trim())
       .filter(Boolean)
 
-    return Array.from(new Set(keys))
+    return [...new Set(keys)]
   } catch {
     return []
   }
@@ -90,7 +90,7 @@ export function extractRedirectModels(modelMapping: string): string[] {
       .map((value) => (typeof value === 'string' ? value.trim() : undefined))
       .filter((value): value is string => Boolean(value))
 
-    return Array.from(new Set(values))
+    return [...new Set(values)]
   } catch {
     return []
   }
@@ -157,7 +157,7 @@ export function findMissingModelsInMapping(
     .map((key) => normalizeModelName(key))
     .filter((key) => key && !modelSet.has(key))
 
-  return Array.from(new Set(missingModels))
+  return [...new Set(missingModels)]
 }
 
 /**
@@ -214,6 +214,81 @@ export function findExposedTargetModels(
 }
 
 /**
+ * Determine whether a model name is a generated customer alias.
+ *
+ * A model `m` is a generated customer alias iff there exists a customer `c`
+ * (after trimming) such that `m` ends with `"_" + c` AND the prefix
+ * `m[:len(m) - len("_" + c)]` is itself present in `baseModelSet`. This mirrors
+ * the backend alias-expansion rule (`<baseModel>_<customer>` with a single
+ * underscore delimiter). Empty customers are ignored.
+ */
+export function isCustomerAliasModel(
+  model: string,
+  customers: string[],
+  baseModelSet: Set<string>
+): boolean {
+  const normalizedModel = normalizeModelName(model)
+  if (!normalizedModel) return false
+
+  for (const rawCustomer of customers) {
+    const customer = normalizeModelName(rawCustomer)
+    if (!customer) continue
+
+    const suffix = `_${customer}`
+    if (!normalizedModel.endsWith(suffix)) continue
+
+    const prefix = normalizedModel.slice(0, normalizedModel.length - suffix.length)
+    if (prefix.length === 0) continue
+    if (baseModelSet.has(prefix)) return true
+  }
+
+  return false
+}
+
+/**
+ * Strip generated customer alias models from a model list, returning the base
+ * models only. Alias detection uses the full `models` array as the membership
+ * set so that `<baseModel>_<customer>` aliases whose base is present are
+ * removed. Empty customers are ignored; inputs are trimmed.
+ */
+export function stripCustomerAliasModels(
+  models: string[],
+  customers: string[]
+): string[] {
+  const normalizedModels = models
+    .map((model) => normalizeModelName(model))
+    .filter(Boolean)
+  const baseModelSet = new Set(normalizedModels)
+
+  return normalizedModels.filter(
+    (model) => !isCustomerAliasModel(model, customers, baseModelSet)
+  )
+}
+
+/**
+ * Strip generated customer alias entries from a model_mapping object, returning
+ * the manual-only mappings. A mapping entry `key -> value` is considered a
+ * generated alias entry iff `key` is a detected customer alias relative to
+ * `modelSet`. Empty customers are ignored; keys are trimmed.
+ */
+export function stripCustomerAliasMappings(
+  mapping: Record<string, string>,
+  modelSet: Set<string>,
+  customers: string[]
+): Record<string, string> {
+  const result: Record<string, string> = {}
+
+  for (const [rawKey, value] of Object.entries(mapping)) {
+    const key = normalizeModelName(rawKey)
+    if (!key) continue
+    if (isCustomerAliasModel(key, customers, modelSet)) continue
+    result[rawKey] = value
+  }
+
+  return result
+}
+
+/**
  * Categorize models into different sets for UI display
  */
 export function categorizeModelsWithRedirect(
@@ -239,7 +314,7 @@ export function categorizeModelsWithRedirect(
   ])
 
   const redirectOnlySet = new Set(
-    Array.from(normalizedRedirectModels).filter(
+    [...normalizedRedirectModels].filter(
       (m) => !normalizedCurrentModels.has(m)
     )
   )

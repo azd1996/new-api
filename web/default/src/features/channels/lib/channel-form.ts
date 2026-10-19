@@ -31,6 +31,10 @@ import {
   stringifyAdvancedCustomConfig,
   validateAdvancedCustomConfig,
 } from './advanced-custom'
+import {
+  stripCustomerAliasMappings,
+  stripCustomerAliasModels,
+} from './model-mapping-validation'
 
 // ============================================================================
 // Form Validation Schema
@@ -137,6 +141,7 @@ export const channelFormSchema = z
     openai_organization: z.string().optional(),
     models: z.string().min(1, ERROR_MESSAGES.REQUIRED_MODELS),
     group: z.array(z.string()).min(1, ERROR_MESSAGES.REQUIRED_GROUP),
+    customers: z.array(z.string()).optional(),
     model_mapping: z
       .string()
       .optional()
@@ -318,6 +323,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   openai_organization: '',
   models: '',
   group: ['default'],
+  customers: [],
   model_mapping: '',
   priority: 0,
   weight: 0,
@@ -484,15 +490,48 @@ export function transformChannelToFormDefaults(
     }
   }
 
+  // Customer batch model mapping: the stored channel.models / channel.model_mapping
+  // are the EXPANDED versions (they already contain the generated
+  // `<baseModel>_<customer>` aliases). Re-derive the base models and manual
+  // mappings so the form only shows/sends the pre-expansion values.
+  const customers = channel.channel_info?.customers ?? []
+  const fullModels = parseModels(channel.models || '')
+  const baseModels = stripCustomerAliasModels(fullModels, customers)
+
+  let manualModelMapping = channel.model_mapping || ''
+  const rawModelMapping = (channel.model_mapping || '').trim()
+  if (rawModelMapping) {
+    try {
+      const parsedMapping = JSON.parse(rawModelMapping)
+      if (
+        parsedMapping &&
+        typeof parsedMapping === 'object' &&
+        !Array.isArray(parsedMapping)
+      ) {
+        const stripped = stripCustomerAliasMappings(
+          parsedMapping as Record<string, string>,
+          new Set(fullModels),
+          customers
+        )
+        manualModelMapping =
+          Object.keys(stripped).length > 0 ? JSON.stringify(stripped) : ''
+      }
+    } catch {
+      // Fallback to the original mapping string on parse failure.
+      manualModelMapping = channel.model_mapping || ''
+    }
+  }
+
   return {
     name: channel.name || '',
     type: channel.type,
     base_url: channel.base_url || '',
     key: '', // Never populate key from backend for security
     openai_organization: channel.openai_organization || '',
-    models: channel.models || '',
+    models: formatModels(baseModels),
     group: parseGroups(channel.group || 'default'),
-    model_mapping: channel.model_mapping || '',
+    customers,
+    model_mapping: manualModelMapping,
     priority: channel.priority || 0,
     weight: channel.weight || 0,
     test_model: channel.test_model || '',
@@ -727,6 +766,12 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
 } {
   const mode = formData.multi_key_mode || 'single'
 
+  // Send only `customers`; the backend preserves other channel_info fields
+  // (multi-key state) and re-derives the alias models/mappings on save.
+  const channelInfoPayload: Partial<Channel['channel_info']> = {
+    customers: formData.customers ?? [],
+  }
+
   const channel: Partial<Channel> = {
     name: formData.name,
     type: formData.type,
@@ -749,6 +794,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     header_override: formData.header_override || null,
     settings: buildSettingsJSON(formData),
     other: formData.other || '',
+    channel_info: channelInfoPayload as Channel['channel_info'],
   }
 
   // Clean up empty strings to null for optional fields
@@ -775,6 +821,12 @@ export function transformFormDataToUpdatePayload(
   formData: ChannelFormValues,
   channelId: number
 ): Partial<Channel> {
+  // Send only `customers`; the backend preserves other channel_info fields
+  // (multi-key state) and re-derives the alias models/mappings on save.
+  const channelInfoPayload: Partial<Channel['channel_info']> = {
+    customers: formData.customers ?? [],
+  }
+
   const payload: Partial<Channel> = {
     id: channelId,
     name: formData.name,
@@ -796,6 +848,7 @@ export function transformFormDataToUpdatePayload(
     header_override: formData.header_override || null,
     settings: buildSettingsJSON(formData),
     other: formData.other || '',
+    channel_info: channelInfoPayload as Channel['channel_info'],
   }
 
   // Only include key if it was changed (not empty)

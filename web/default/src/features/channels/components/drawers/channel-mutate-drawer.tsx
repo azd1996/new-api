@@ -3576,6 +3576,45 @@ export function ChannelMutateDrawer({
                           <div className='border-border/60 rounded-lg border p-4'>
                             <FormField
                               control={form.control}
+                              name='customers'
+                              render={({ field }) => (
+                                <FormItem className='space-y-3'>
+                                  <div className='space-y-1'>
+                                    <FormLabel>
+                                      {t('Customer Batch Model Mapping')}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        'Each customer generates alias models named model_customer mapped back to the base model. These aliases are hidden from the public model lists.'
+                                      )}
+                                    </FormDescription>
+                                  </div>
+                                  <FormControl>
+                                    <MultiSelect
+                                      options={(field.value || []).map(
+                                        (customer) => ({
+                                          value: customer,
+                                          label: customer,
+                                        })
+                                      )}
+                                      selected={field.value || []}
+                                      onChange={field.onChange}
+                                      placeholder={t(
+                                        'Add customers to batch-generate alias models'
+                                      )}
+                                      allowCreate
+                                      createLabel='Add customer "{{value}}"'
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+
+                          <div className='border-border/60 rounded-lg border p-4'>
+                            <FormField
+                              control={form.control}
                               name='group'
                               render={({ field }) => (
                                 <FormItem className='space-y-3'>
