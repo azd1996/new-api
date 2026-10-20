@@ -245,6 +245,7 @@ export type ModelSettings = {
   'override_template_setting.retry_templates': string
   'model_deployment.ionet.api_key': string
   'model_deployment.ionet.enabled': boolean
+  'proxy_setting.proxies': ProxyPoolEntry[]
 }
 
 export type BillingSettings = {
@@ -330,6 +331,29 @@ export type BillingSettings = {
   'checkin_setting.enabled': boolean
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number
+}
+
+export type ProxyPoolEntry = {
+  alias: string
+  url: string
+}
+
+export type ProxyHealthStatus = 'healthy' | 'unknown' | 'unhealthy'
+
+export type ProxyHealthEntry = {
+  alias: string
+  status: ProxyHealthStatus
+  p50_ms: number
+  p90_ms: number
+  p99_ms: number
+  samples: number
+  last_checked_unix: number
+}
+
+export type ProxyHealthResponse = {
+  success: boolean
+  message: string
+  data: ProxyHealthEntry[]
 }
 
 export type OperationsSettings = {

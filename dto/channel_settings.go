@@ -11,12 +11,18 @@ import (
 )
 
 type ChannelSettings struct {
-	ForceFormat            bool   `json:"force_format,omitempty"`
-	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
-	Proxy                  string `json:"proxy"`
-	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
-	SystemPrompt           string `json:"system_prompt,omitempty"`
-	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	ForceFormat       bool   `json:"force_format,omitempty"`
+	ThinkingToContent bool   `json:"thinking_to_content,omitempty"`
+	Proxy             string `json:"proxy"`
+	// ProxyAliases references named proxies from the global proxy table
+	// (system_setting.ProxySetting). At request time the first alias whose
+	// proxy is currently eligible (not in failure cooldown) is used; if the
+	// list is empty or none is eligible, it falls back to Proxy. See
+	// service.ResolveChannelProxy.
+	ProxyAliases           []string `json:"proxy_aliases,omitempty"`
+	PassThroughBodyEnabled bool     `json:"pass_through_body_enabled,omitempty"`
+	SystemPrompt           string   `json:"system_prompt,omitempty"`
+	SystemPromptOverride   bool     `json:"system_prompt_override,omitempty"`
 	// UpstreamRequestIdHeader is the upstream response header to read as the
 	// upstream request ID for logging. Empty falls back to common.RequestIdKey
 	// (X-Oneapi-Request-Id). Matched case-insensitively via http.Header.Get.

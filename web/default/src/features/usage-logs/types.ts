@@ -124,6 +124,12 @@ export interface LogOtherData {
     server_ip?: string
     version?: string
     node_name?: string
+    // Proxy actually used for the upstream request (admin-only; url may contain
+    // credentials). Set for consume/error logs when a proxy was used.
+    proxy?: {
+      alias?: string
+      url?: string
+    }
     // Operator identity for audit logs (type=3, admin only)
     admin_username?: string
     admin_id?: number | string

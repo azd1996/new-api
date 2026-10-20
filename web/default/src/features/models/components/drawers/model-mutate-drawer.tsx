@@ -223,6 +223,7 @@ export function ModelMutateDrawer({
       'override_template_setting.retry_templates': '[]',
       'model_deployment.ionet.api_key': '',
       'model_deployment.ionet.enabled': false,
+      'proxy_setting.proxies': [],
     }
     return getOptionValue(systemOptionsData.data, defaultModelSettings)
   }, [systemOptionsData])

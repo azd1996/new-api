@@ -588,6 +588,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
   // consume/error logs; topup logs show it in their own audit section.
   const nodeName =
     props.isAdmin && !isTopup ? adminInfo?.node_name : undefined
+  // Proxy actually used (admin-only). Show "alias (url)" or just the url.
+  const usedProxy = props.isAdmin && !isTopup ? adminInfo?.proxy : undefined
+  let usedProxyLabel: string | undefined
+  if (usedProxy?.url) {
+    usedProxyLabel = usedProxy.alias
+      ? `${usedProxy.alias} (${usedProxy.url})`
+      : usedProxy.url
+  }
   // Override-audit detail (admin-only): which rule (by index) fired and how.
   const retryOverride =
     props.isAdmin && props.log.type === 8
@@ -669,6 +677,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
 
           {nodeName && (
             <DetailRow label={t('Node Name')} value={nodeName} mono />
+          )}
+
+          {usedProxyLabel && (
+            <DetailRow label={t('Proxy Used')} value={usedProxyLabel} mono />
           )}
 
           {other?.session_id && (

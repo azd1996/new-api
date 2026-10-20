@@ -65,6 +65,8 @@ import {
 } from '@/components/drawer-layout'
 import { JsonEditor } from '@/components/json-editor'
 import { MultiSelect } from '@/components/multi-select'
+
+import { getProxyHealth } from '@/features/system-settings/api'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -769,6 +771,19 @@ export function ChannelMutateDrawer({
     'disable_task_polling_sleep'
   )
   const currentProxy = form.watch('proxy')
+  const proxyHealthQuery = useQuery({
+    queryKey: ['proxy-health'],
+    queryFn: getProxyHealth,
+    staleTime: 30000,
+  })
+  const proxyAliasOptions = useMemo(
+    () =>
+      (proxyHealthQuery.data?.data ?? []).map((entry) => ({
+        label: entry.alias,
+        value: entry.alias,
+      })),
+    [proxyHealthQuery.data]
+  )
   const currentSystemPrompt = form.watch('system_prompt')
   const currentSystemPromptOverride = form.watch('system_prompt_override')
   const currentAllowServiceTier = form.watch('allow_service_tier')
@@ -4325,6 +4340,34 @@ export function ChannelMutateDrawer({
                                 )}
                               />
                             </div>
+
+                            <FormField
+                              control={form.control}
+                              name='proxy_aliases'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>{t('Proxy Pool Aliases')}</FormLabel>
+                                  <FormControl>
+                                    <MultiSelect
+                                      options={proxyAliasOptions}
+                                      selected={field.value || []}
+                                      onChange={field.onChange}
+                                      allowCreate
+                                      createLabel='Add alias "{{value}}"'
+                                      placeholder={t(
+                                        'Select proxies from the proxy pool'
+                                      )}
+                                    />
+                                  </FormControl>
+                                  <FormDescription>
+                                    {t(
+                                      'References named proxies from the proxy pool (System Settings - Models). The first healthy proxy in order is used; if none is healthy or the list is empty, it falls back to the proxy address below.'
+                                    )}
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
 
                             <FormField
                               control={form.control}

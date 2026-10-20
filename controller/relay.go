@@ -405,6 +405,13 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
+		if usedProxyURL := c.GetString("used_proxy_url"); usedProxyURL != "" {
+			proxyInfo := map[string]interface{}{"url": usedProxyURL}
+			if alias := c.GetString("used_proxy_alias"); alias != "" {
+				proxyInfo["alias"] = alias
+			}
+			adminInfo["proxy"] = proxyInfo
+		}
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {

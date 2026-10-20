@@ -117,6 +117,8 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
 
+	appendUsedProxyAdminInfo(relayInfo, adminInfo)
+
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
@@ -132,6 +134,20 @@ func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]
 		return
 	}
 	other["po"] = relayInfo.ParamOverrideAudit
+}
+
+// appendUsedProxyAdminInfo records the proxy actually used for the upstream
+// request under admin_info. It is nested under admin_info (admin-only) because
+// the proxy URL may contain credentials. No-op when no proxy was used.
+func appendUsedProxyAdminInfo(relayInfo *relaycommon.RelayInfo, adminInfo map[string]interface{}) {
+	if relayInfo == nil || adminInfo == nil || relayInfo.UsedProxyURL == "" {
+		return
+	}
+	proxyInfo := map[string]interface{}{"url": relayInfo.UsedProxyURL}
+	if relayInfo.UsedProxyAlias != "" {
+		proxyInfo["alias"] = relayInfo.UsedProxyAlias
+	}
+	adminInfo["proxy"] = proxyInfo
 }
 
 func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {

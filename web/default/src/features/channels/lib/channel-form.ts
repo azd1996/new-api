@@ -193,6 +193,7 @@ export const channelFormSchema = z
     force_format: z.boolean().optional(),
     thinking_to_content: z.boolean().optional(),
     proxy: z.string().optional(),
+    proxy_aliases: z.array(z.string()).optional(),
     pass_through_body_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
@@ -346,6 +347,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   force_format: false,
   thinking_to_content: false,
   proxy: '',
+  proxy_aliases: [],
   pass_through_body_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
@@ -389,6 +391,7 @@ export function transformChannelToFormDefaults(
     force_format: false,
     thinking_to_content: false,
     proxy: '',
+    proxy_aliases: [] as string[],
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
@@ -406,6 +409,11 @@ export function transformChannelToFormDefaults(
         force_format: parsed.force_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
+        proxy_aliases: Array.isArray(parsed.proxy_aliases)
+          ? parsed.proxy_aliases.filter(
+              (alias: unknown): alias is string => typeof alias === 'string'
+            )
+          : [],
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
@@ -619,6 +627,12 @@ function buildSettingJSON(formData: ChannelFormValues): string {
     .filter((ref) => ref.length > 0)
   if (retryTemplateRefs.length > 0) {
     settingObj.retry_override_template_refs = retryTemplateRefs
+  }
+  const proxyAliases = (formData.proxy_aliases || [])
+    .map((alias) => alias.trim())
+    .filter((alias) => alias.length > 0)
+  if (proxyAliases.length > 0) {
+    settingObj.proxy_aliases = proxyAliases
   }
   return JSON.stringify(settingObj)
 }

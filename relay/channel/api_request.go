@@ -2,10 +2,12 @@ package channel
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strings"
 	"sync"
@@ -477,13 +479,49 @@ func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var client *http.Client
 	var err error
-	if info.ChannelSetting.Proxy != "" {
-		client, err = service.NewProxyHttpClient(info.ChannelSetting.Proxy)
+	proxyURL, proxyAlias := service.ResolveChannelProxy(info.ChannelId, info.ChannelSetting.ProxyAliases, info.ChannelSetting.Proxy)
+	if proxyURL != "" {
+		client, err = service.NewProxyHttpClient(proxyURL)
 		if err != nil {
 			return nil, fmt.Errorf("new proxy http client failed: %w", err)
 		}
+		info.UsedProxyURL = proxyURL
+		info.UsedProxyAlias = proxyAlias
+		// Also expose on the gin context so the generic error-log path (which has
+		// no relayInfo in scope) can record the proxy actually used.
+		c.Set("used_proxy_url", proxyURL)
+		if proxyAlias != "" {
+			c.Set("used_proxy_alias", proxyAlias)
+		}
 	} else {
 		client = service.GetHttpClient()
+	}
+
+	// Passive proxy health: when a named proxy (alias) is used, trace connection
+	// establishment so we can sample connect latency (dial + TLS) and detect
+	// connection-level failures. proxyAlias == "" means the direct fallback proxy
+	// (or no proxy) was used, which is not tracked.
+	var (
+		proxyConnectStart time.Time
+		proxyConnectDur   time.Duration
+		proxyGotConn      bool
+	)
+	if proxyAlias != "" {
+		trace := &httptrace.ClientTrace{
+			ConnectStart: func(_, _ string) { proxyConnectStart = time.Now() },
+			TLSHandshakeDone: func(tls.ConnectionState, error) {
+				if !proxyConnectStart.IsZero() {
+					proxyConnectDur = time.Since(proxyConnectStart)
+				}
+			},
+			GotConn: func(gci httptrace.GotConnInfo) {
+				proxyGotConn = true
+				if !gci.Reused && proxyConnectDur == 0 && !proxyConnectStart.IsZero() {
+					proxyConnectDur = time.Since(proxyConnectStart)
+				}
+			},
+		}
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	}
 
 	var stopPinger context.CancelFunc
@@ -508,11 +546,22 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if proxyAlias != "" {
+			// Connection-level failure only when no usable connection was obtained;
+			// an error after GotConn is an upstream/transport read issue, not the proxy.
+			service.RecordProxyConnectResult(info.ChannelId, proxyAlias, 0, !proxyGotConn)
+		}
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
+		if proxyAlias != "" {
+			service.RecordProxyConnectResult(info.ChannelId, proxyAlias, 0, !proxyGotConn)
+		}
 		return nil, errors.New("resp is nil")
+	}
+	if proxyAlias != "" {
+		service.RecordProxyConnectResult(info.ChannelId, proxyAlias, proxyConnectDur, false)
 	}
 
 	upstreamRequestIdHeader := common2.RequestIdKey
