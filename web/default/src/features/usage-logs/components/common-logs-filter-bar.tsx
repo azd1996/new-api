@@ -40,7 +40,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { getAllModels } from '@/features/channels/api'
+import { getEnabledModels } from '@/features/channels/api'
 import { getGroups } from '@/features/users/api'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
@@ -128,12 +128,14 @@ export function CommonLogsFilterBar<TData>(
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
 
-  // Site-wide candidates for the model/group filters. Both source endpoints are
-  // admin-only, so the queries only run for users who can manage scope; everyone
-  // else still gets a free-text combobox (manual input is always allowed).
+  // Site-wide candidates for the model/group filters. Models come from enabled
+  // channel abilities (only models actually configured/usable), not the full
+  // built-in catalog. Both source endpoints are admin-only, so the queries only
+  // run for users who can manage scope; everyone else still gets a free-text
+  // combobox (manual input is always allowed).
   const modelCandidatesQuery = useQuery({
     queryKey: ['log-filter-models'],
-    queryFn: getAllModels,
+    queryFn: getEnabledModels,
     enabled: canManageScope,
     staleTime: 5 * 60 * 1000,
   })
@@ -146,8 +148,8 @@ export function CommonLogsFilterBar<TData>(
   const modelOptions = useMemo<ComboboxInputOption[]>(
     () =>
       (modelCandidatesQuery.data?.data ?? []).map((model) => ({
-        value: model.id,
-        label: model.id,
+        value: model,
+        label: model,
       })),
     [modelCandidatesQuery.data]
   )

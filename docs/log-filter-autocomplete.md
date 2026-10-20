@@ -11,7 +11,7 @@
 ## 关键决策
 
 - **保留手动输入**：使用 combobox 的 `allowCustomValue`，而非纯 `Select`。候选只是提示，输入框仍可输入任意字符串，避免把"查历史值"的能力堵死。
-- **候选取全站**：模型用 `getAllModels`（`GET /api/channel/models`），分组用 `getGroups`（`GET /api/group/`），都是全站列表，而非"当前用户可用"。
+- **候选取全站已启用模型/分组**：模型用 `getEnabledModels`（`GET /api/channel/models_enabled`，即 `abilities` 表 `enabled=true` 的去重模型，仅"已配置且可用"的模型，不含内置全量目录），分组用 `getGroups`（`GET /api/group/`）。两者都是全站列表，而非"当前用户可用"。
 - **候选查询按管理员开关**：上述两个接口均为 `AdminAuth()` 管理员专用。因此候选查询用 `canManageScope`（`useIsAdmin()`）做 `useQuery` 的 `enabled`：管理员能拿到全站候选；非管理员不发这两个请求（避免 403），combobox 退化为纯手输框，功能不受影响。
 - **不改提交契约**：选中/输入写回的仍是字符串，前端 `filters.model` / `filters.group` 与最终发给后端的 `model_name` / `group` 参数、URL search 同步逻辑全部保持原样。
 
@@ -20,9 +20,9 @@
 仅前端改动，无后端改动。
 
 - `web/default/src/features/usage-logs/components/common-logs-filter-bar.tsx`
-  - 新增两个 `useQuery`（`['log-filter-models']` / `['log-filter-groups']`，`staleTime` 5 分钟，`enabled: canManageScope`），分别调用 `getAllModels` / `getGroups`，映射为 `ComboboxInputOption[]`。
+  - 新增两个 `useQuery`（`['log-filter-models']` / `['log-filter-groups']`，`staleTime` 5 分钟，`enabled: canManageScope`），分别调用 `getEnabledModels` / `getGroups`，映射为 `ComboboxInputOption[]`。
   - `modelFilter` / `groupFilter` 由 `LogsFilterInput` 改为 `Combobox`（`allowCustomValue`，`placeholder`/`searchPlaceholder` 用 `t('Model Name')` / `t('Group')`，空态 `emptyText={t('No option found.')}`）。
-  - 数据源复用现成 API：`getAllModels` 自 `@/features/channels/api`，`getGroups` 自 `@/features/users/api`。
+  - 数据源复用现成 API：`getEnabledModels` 自 `@/features/channels/api`，`getGroups` 自 `@/features/users/api`。
 - i18n：新增 1 条文案 `No option found.`（空候选提示），en/zh/zh-TW/fr/ja/ru/vi 均已补齐并经 `bun run i18n:sync`；`Model Name` / `Group` 为既有键。
 
 ## 行为变化（注意）
