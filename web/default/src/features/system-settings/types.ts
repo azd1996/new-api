@@ -336,6 +336,7 @@ export type BillingSettings = {
 export type ProxyPoolEntry = {
   alias: string
   url: string
+  description?: string
 }
 
 export type ProxyHealthStatus = 'healthy' | 'unknown' | 'unhealthy'

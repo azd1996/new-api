@@ -57,6 +57,7 @@ const proxyPoolSchema = z.object({
             PROXY_SCHEME_REGEX,
             'Must start with http://, https://, socks5:// or socks5h://'
           ),
+        description: z.string(),
       })
     )
     .superRefine((proxies, ctx) => {
@@ -86,9 +87,26 @@ type ProxyPoolSectionProps = {
 }
 
 const normalizeProxies = (proxies: ProxyPoolEntry[]): ProxyPoolEntry[] =>
+  proxies.map((proxy) => {
+    const description = (proxy.description ?? '').trim()
+    const entry: ProxyPoolEntry = {
+      alias: proxy.alias.trim(),
+      url: proxy.url.trim(),
+    }
+    if (description) {
+      entry.description = description
+    }
+    return entry
+  })
+
+// seedProxies ensures every form field is a defined string so the controlled
+// inputs never flip between controlled/uncontrolled (description may be absent
+// on entries saved before this column existed).
+const seedProxies = (proxies: ProxyPoolEntry[]) =>
   proxies.map((proxy) => ({
-    alias: proxy.alias.trim(),
-    url: proxy.url.trim(),
+    alias: proxy.alias ?? '',
+    url: proxy.url ?? '',
+    description: proxy.description ?? '',
   }))
 
 export function ProxyPoolSection(props: ProxyPoolSectionProps) {
@@ -113,7 +131,7 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
 
   const form = useForm<ProxyPoolFormValues>({
     resolver: zodResolver(proxyPoolSchema),
-    defaultValues: { proxies: props.defaultValues.proxies },
+    defaultValues: { proxies: seedProxies(props.defaultValues.proxies) },
   })
 
   const proxiesWatch = form.watch('proxies')
@@ -121,7 +139,7 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
 
   useEffect(() => {
     baselineRef.current = normalizeProxies(props.defaultValues.proxies)
-    form.reset({ proxies: props.defaultValues.proxies })
+    form.reset({ proxies: seedProxies(props.defaultValues.proxies) })
   }, [props.defaultValues, form])
 
   const onSubmit = async (data: ProxyPoolFormValues) => {
@@ -161,82 +179,101 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
               {fieldArray.fields.map((field, index) => (
                 <div
                   key={field.id}
-                  className='flex flex-col gap-2 sm:flex-row sm:items-start'
+                  className='space-y-2 rounded-md border p-3'
                 >
+                  <div className='flex flex-col gap-2 sm:flex-row sm:items-start'>
+                    <FormField
+                      control={form.control}
+                      name={`proxies.${index}.alias`}
+                      render={({ field: aliasField }) => (
+                        <FormItem className='sm:w-48'>
+                          <FormControl>
+                            <Input
+                              placeholder={t('Alias (e.g. hk-1)')}
+                              {...aliasField}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name={`proxies.${index}.url`}
+                      render={({ field: urlField }) => (
+                        <FormItem className='flex-1'>
+                          <FormControl>
+                            <Input
+                              placeholder={t(
+                                'http://user:pass@host:port or socks5://host:port'
+                              )}
+                              {...urlField}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <div className='flex flex-col gap-0.5 text-xs sm:w-56 sm:pt-2'>
+                      {(() => {
+                        const rowAlias = proxiesWatch?.[index]?.alias?.trim()
+                        const health = rowAlias
+                          ? healthByAlias[rowAlias]
+                          : undefined
+                        const status = health?.status ?? 'unknown'
+                        return (
+                          <>
+                            {status === 'healthy' && (
+                              <span className='font-medium text-green-600'>
+                                {t('Healthy')}
+                              </span>
+                            )}
+                            {status === 'unhealthy' && (
+                              <span className='text-destructive font-medium'>
+                                {t('Unhealthy')}
+                              </span>
+                            )}
+                            {status === 'unknown' && (
+                              <span className='text-muted-foreground font-medium'>
+                                {t('Unknown')}
+                              </span>
+                            )}
+                            <span className='text-muted-foreground'>
+                              {health && health.samples > 0
+                                ? `P50/P90/P99: ${Math.round(health.p50_ms)}/${Math.round(health.p90_ms)}/${Math.round(health.p99_ms)} ms`
+                                : t('No samples yet')}
+                            </span>
+                          </>
+                        )
+                      })()}
+                    </div>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      aria-label={t('Remove proxy')}
+                      onClick={() => fieldArray.remove(index)}
+                    >
+                      <Trash2 className='h-4 w-4' />
+                    </Button>
+                  </div>
                   <FormField
                     control={form.control}
-                    name={`proxies.${index}.alias`}
-                    render={({ field: aliasField }) => (
-                      <FormItem className='sm:w-48'>
-                        <FormControl>
-                          <Input
-                            placeholder={t('Alias (e.g. hk-1)')}
-                            {...aliasField}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name={`proxies.${index}.url`}
-                    render={({ field: urlField }) => (
-                      <FormItem className='flex-1'>
+                    name={`proxies.${index}.description`}
+                    render={({ field: descField }) => (
+                      <FormItem>
                         <FormControl>
                           <Input
                             placeholder={t(
-                              'http://user:pass@host:port or socks5://host:port'
+                              'Description (optional, shown only here)'
                             )}
-                            {...urlField}
+                            {...descField}
                           />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  <div className='flex flex-col gap-0.5 text-xs sm:w-56 sm:pt-2'>
-                    {(() => {
-                      const rowAlias = proxiesWatch?.[index]?.alias?.trim()
-                      const health = rowAlias
-                        ? healthByAlias[rowAlias]
-                        : undefined
-                      const status = health?.status ?? 'unknown'
-                      return (
-                        <>
-                          {status === 'healthy' && (
-                            <span className='font-medium text-green-600'>
-                              {t('Healthy')}
-                            </span>
-                          )}
-                          {status === 'unhealthy' && (
-                            <span className='text-destructive font-medium'>
-                              {t('Unhealthy')}
-                            </span>
-                          )}
-                          {status === 'unknown' && (
-                            <span className='text-muted-foreground font-medium'>
-                              {t('Unknown')}
-                            </span>
-                          )}
-                          <span className='text-muted-foreground'>
-                            {health && health.samples > 0
-                              ? `P50/P90/P99: ${Math.round(health.p50_ms)}/${Math.round(health.p90_ms)}/${Math.round(health.p99_ms)} ms`
-                              : t('No samples yet')}
-                          </span>
-                        </>
-                      )
-                    })()}
-                  </div>
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='icon'
-                    aria-label={t('Remove proxy')}
-                    onClick={() => fieldArray.remove(index)}
-                  >
-                    <Trash2 className='h-4 w-4' />
-                  </Button>
                 </div>
               ))}
             </div>
@@ -246,7 +283,9 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
             <Button
               type='button'
               variant='outline'
-              onClick={() => fieldArray.append({ alias: '', url: '' })}
+              onClick={() =>
+                fieldArray.append({ alias: '', url: '', description: '' })
+              }
             >
               <Plus className='mr-2 h-4 w-4' />
               {t('Add proxy')}
