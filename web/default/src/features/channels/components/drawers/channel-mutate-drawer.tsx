@@ -729,6 +729,10 @@ export function ChannelMutateDrawer({
   const isMultiKeyChannel =
     isEditing && channelData?.data?.channel_info?.is_multi_key === true
 
+  // Masked key (head/tail visible, middle starred) returned by GetChannel so
+  // admins can verify the stored key without revealing the full secret.
+  const maskedChannelKey = channelData?.data?.key_masked ?? ''
+
   // Form setup
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelFormSchema),
@@ -3024,7 +3028,7 @@ export function ChannelMutateDrawer({
                                           )}
                                         </div>
                                       </FormDescription>
-                                      {isEditing && canRevealChannelKey && (
+                                      {isEditing && (
                                         <div className='border-border/60 mt-4 flex flex-col gap-3 border-y border-dashed py-4'>
                                           <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
                                             <div>
@@ -3032,11 +3036,16 @@ export function ChannelMutateDrawer({
                                                 {t('Current key')}
                                               </p>
                                               <p className='text-muted-foreground text-xs'>
-                                                {t(
-                                                  'Verification required to reveal the saved key.'
-                                                )}
+                                                {canRevealChannelKey
+                                                  ? t(
+                                                      'Showing a masked key. Reveal to view the full key.'
+                                                    )
+                                                  : t(
+                                                      'Showing a masked key for verification.'
+                                                    )}
                                               </p>
                                             </div>
+                                            {canRevealChannelKey && (
                                             <div className='flex items-center gap-2'>
                                               <Button
                                                 type='button'
@@ -3073,13 +3082,14 @@ export function ChannelMutateDrawer({
                                                 {t('Copy')}
                                               </Button>
                                             </div>
+                                            )}
                                           </div>
                                           <Input
                                             readOnly
-                                            value={channelKey ?? ''}
-                                            placeholder={t(
-                                              'Hidden — verify to reveal'
-                                            )}
+                                            value={
+                                              channelKey ?? maskedChannelKey
+                                            }
+                                            placeholder={t('No key saved yet')}
                                             className='font-mono'
                                           />
                                         </div>

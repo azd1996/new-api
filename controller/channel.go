@@ -395,12 +395,17 @@ func GetChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := model.GetChannelById(id, false)
+	channel, err := model.GetChannelById(id, true)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	if channel != nil {
+		// Return a masked key (head/tail visible, middle starred) so admins can
+		// verify the stored key without exposing the full secret. The full key
+		// is only available via GetChannelKey behind secure verification.
+		channel.KeyMasked = model.MaskKey(channel.Key)
+		channel.Key = ""
 		clearChannelInfo(channel)
 	}
 	c.JSON(http.StatusOK, gin.H{

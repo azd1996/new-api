@@ -57,6 +57,12 @@ type Channel struct {
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
+
+	// KeyMasked is a display-only, masked representation of Key. It is populated
+	// on single-channel reads (see controller.GetChannel) so an admin can
+	// eyeball whether the stored key is correct without exposing the full
+	// secret. It is never persisted.
+	KeyMasked string `json:"key_masked,omitempty" gorm:"-"`
 }
 
 type ChannelInfo struct {
@@ -352,6 +358,38 @@ func (channel *Channel) SaveWithoutKey() error {
 		return errors.New("channel ID is 0")
 	}
 	return DB.Omit("key").Save(channel).Error
+}
+
+const (
+	maskKeyRevealPrefix = 10
+	maskKeyRevealSuffix = 6
+)
+
+// MaskKey returns a display-safe form of a channel key: it reveals the first
+// maskKeyRevealPrefix and last maskKeyRevealSuffix characters and masks the
+// middle with asterisks, so an admin can verify a stored key by its head and
+// tail without exposing the full secret. Multi-key values (one key per line)
+// are masked line by line; keys too short to keep a hidden middle are fully
+// masked.
+func MaskKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	lines := strings.Split(key, "\n")
+	for i, line := range lines {
+		runes := []rune(line)
+		n := len(runes)
+		if n == 0 {
+			continue
+		}
+		if n <= maskKeyRevealPrefix+maskKeyRevealSuffix {
+			lines[i] = strings.Repeat("*", n)
+			continue
+		}
+		middle := strings.Repeat("*", n-maskKeyRevealPrefix-maskKeyRevealSuffix)
+		lines[i] = string(runes[:maskKeyRevealPrefix]) + middle + string(runes[n-maskKeyRevealSuffix:])
+	}
+	return strings.Join(lines, "\n")
 }
 
 func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
