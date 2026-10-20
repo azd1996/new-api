@@ -27,6 +27,7 @@ import { Markdown } from '@/components/ui/markdown'
 import { formatTimestamp, formatTimestampToDate } from '@/lib/format'
 
 import { SettingsSection } from '../components/settings-section'
+import { ChangelogDialog } from './changelog-dialog'
 
 type ReleaseInfo = {
   tag_name: string
@@ -113,6 +114,9 @@ export function UpdateCheckerSection({
                 {t('Current version')}
               </div>
               <div className='text-lg font-semibold'>{version}</div>
+              <div className='mt-3'>
+                <ChangelogDialog />
+              </div>
             </div>
             <div className='rounded-lg border p-4'>
               <div className='text-muted-foreground text-sm'>

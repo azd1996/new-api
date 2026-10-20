@@ -88,6 +88,16 @@ export default defineConfig(({ envMode }) => {
     },
     tools: {
       rspack: {
+        module: {
+          rules: [
+            // Import raw file contents as a string via the `?raw` query
+            // (e.g. the repo-root CHANGELOG.md bundled into the maintenance page).
+            {
+              resourceQuery: /raw/,
+              type: 'asset/source',
+            },
+          ],
+        },
         plugins: [
           tanstackRouter({
             target: 'react',
