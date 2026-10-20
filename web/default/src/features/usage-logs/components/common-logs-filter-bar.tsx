@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQueryClient, useIsFetching } from '@tanstack/react-query'
+import { useQueryClient, useIsFetching, useQuery } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
@@ -25,6 +25,8 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
+import type { ComboboxInputOption } from '@/components/ui/combobox-input'
 import {
   Select,
   SelectContent,
@@ -38,6 +40,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { getAllModels } from '@/features/channels/api'
+import { getGroups } from '@/features/users/api'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { startSessionLogSearch } from '../api'
@@ -120,9 +124,41 @@ export function CommonLogsFilterBar<TData>(
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const searchParams = route.useSearch()
-  const { isAdminView: isAdmin } = useLogsViewScope()
+  const { isAdminView: isAdmin, canManageScope } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
+
+  // Site-wide candidates for the model/group filters. Both source endpoints are
+  // admin-only, so the queries only run for users who can manage scope; everyone
+  // else still gets a free-text combobox (manual input is always allowed).
+  const modelCandidatesQuery = useQuery({
+    queryKey: ['log-filter-models'],
+    queryFn: getAllModels,
+    enabled: canManageScope,
+    staleTime: 5 * 60 * 1000,
+  })
+  const groupCandidatesQuery = useQuery({
+    queryKey: ['log-filter-groups'],
+    queryFn: getGroups,
+    enabled: canManageScope,
+    staleTime: 5 * 60 * 1000,
+  })
+  const modelOptions = useMemo<ComboboxInputOption[]>(
+    () =>
+      (modelCandidatesQuery.data?.data ?? []).map((model) => ({
+        value: model.id,
+        label: model.id,
+      })),
+    [modelCandidatesQuery.data]
+  )
+  const groupOptions = useMemo<ComboboxInputOption[]>(
+    () =>
+      (groupCandidatesQuery.data?.data ?? []).map((group) => ({
+        value: group,
+        label: group,
+      })),
+    [groupCandidatesQuery.data]
+  )
 
   const searchState = useMemo<CommonLogDraft>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -360,22 +396,29 @@ export function CommonLogsFilterBar<TData>(
   )
   const modelFilter = (
     <LogsFilterField>
-      <LogsFilterInput
-        placeholder={t('Model Name')}
+      <Combobox
+        options={modelOptions}
         value={filters.model || ''}
-        onChange={(e) => handleChange('model', e.target.value)}
-        onKeyDown={handleKeyDown}
+        onValueChange={(value) => handleChange('model', value || undefined)}
+        placeholder={t('Model Name')}
+        searchPlaceholder={t('Model Name')}
+        emptyText={t('No option found.')}
+        allowCustomValue
+        className='h-8 min-w-0 text-sm leading-5'
       />
     </LogsFilterField>
   )
   const groupFilter = (
     <LogsFilterField>
-      <LogsFilterInput
-        placeholder={t('Group')}
-        type={sensitiveType}
+      <Combobox
+        options={groupOptions}
         value={filters.group || ''}
-        onChange={(e) => handleChange('group', e.target.value)}
-        onKeyDown={handleKeyDown}
+        onValueChange={(value) => handleChange('group', value || undefined)}
+        placeholder={t('Group')}
+        searchPlaceholder={t('Group')}
+        emptyText={t('No option found.')}
+        allowCustomValue
+        className='h-8 min-w-0 text-sm leading-5'
       />
     </LogsFilterField>
   )
