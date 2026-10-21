@@ -27,6 +27,7 @@ import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
 import { ProxyPoolSection } from './proxy-pool-section'
 import { RoutingReliabilitySection } from './routing-reliability-section'
+import { SchedulingSection } from './scheduling'
 
 function formatJsonForEditor(value: string, fallback: string) {
   const raw = (value ?? '').toString().trim()
@@ -203,6 +204,11 @@ const MODELS_SECTIONS = [
         defaultValues={{ proxies: settings['proxy_setting.proxies'] }}
       />
     ),
+  },
+  {
+    id: 'scheduling',
+    titleKey: 'Auto Scheduling',
+    build: () => <SchedulingSection />,
   },
 ] as const
 

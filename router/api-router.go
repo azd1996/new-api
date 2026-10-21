@@ -213,6 +213,29 @@ func SetApiRouter(router *gin.Engine) {
 			customOAuthRoute.PUT("/:id", controller.UpdateCustomOAuthProvider)
 			customOAuthRoute.DELETE("/:id", controller.DeleteCustomOAuthProvider)
 		}
+
+		// Auto-scheduling management (admin only)
+		scheduleRoute := apiRouter.Group("/schedule")
+		scheduleRoute.Use(middleware.AdminAuth())
+		{
+			scheduleRoute.GET("/datasource", controller.GetScheduleDatasources)
+			scheduleRoute.POST("/datasource", controller.CreateScheduleDatasource)
+			scheduleRoute.PUT("/datasource/:id", controller.UpdateScheduleDatasource)
+			scheduleRoute.DELETE("/datasource/:id", controller.DeleteScheduleDatasource)
+
+			scheduleRoute.GET("/template", controller.GetScheduleRuleTemplates)
+			scheduleRoute.POST("/template", controller.CreateScheduleRuleTemplate)
+			scheduleRoute.PUT("/template/:id", controller.UpdateScheduleRuleTemplate)
+			scheduleRoute.DELETE("/template/:id", controller.DeleteScheduleRuleTemplate)
+
+			scheduleRoute.GET("/rule", controller.GetScheduleRules)
+			scheduleRoute.POST("/rule", controller.CreateScheduleRule)
+			scheduleRoute.PUT("/rule/:id", controller.UpdateScheduleRule)
+			scheduleRoute.DELETE("/rule/:id", controller.DeleteScheduleRule)
+
+			scheduleRoute.POST("/datasource/test", controller.TestScheduleDatasource)
+			scheduleRoute.POST("/preview", controller.PreviewSchedule)
+		}
 		performanceRoute := apiRouter.Group("/performance")
 		performanceRoute.Use(middleware.RootAuth())
 		{
