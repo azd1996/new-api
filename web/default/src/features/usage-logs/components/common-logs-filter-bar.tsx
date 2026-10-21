@@ -93,6 +93,7 @@ function buildSearchSourceKey(values: {
   username?: unknown
   requestId?: unknown
   upstreamRequestId?: unknown
+  statusCode?: unknown
   sessionId?: unknown
   type?: unknown
 }) {
@@ -106,6 +107,7 @@ function buildSearchSourceKey(values: {
     values.username,
     values.requestId,
     values.upstreamRequestId,
+    values.statusCode,
     values.sessionId,
     Array.isArray(values.type) ? values.type.join(',') : values.type,
   ]
@@ -174,6 +176,7 @@ export function CommonLogsFilterBar<TData>(
       username: searchParams.username,
       requestId: searchParams.requestId,
       upstreamRequestId: searchParams.upstreamRequestId,
+      statusCode: searchParams.statusCode,
       sessionId: searchParams.sessionId,
       type: searchParams.type,
     }
@@ -189,6 +192,7 @@ export function CommonLogsFilterBar<TData>(
       username: searchParams.username || undefined,
       requestId: searchParams.requestId || undefined,
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
+      statusCode: searchParams.statusCode || undefined,
       sessionId: searchParams.sessionId || undefined,
     }
     return {
@@ -206,6 +210,7 @@ export function CommonLogsFilterBar<TData>(
     searchParams.username,
     searchParams.requestId,
     searchParams.upstreamRequestId,
+    searchParams.statusCode,
     searchParams.sessionId,
     searchParams.type,
   ])
@@ -332,6 +337,7 @@ export function CommonLogsFilterBar<TData>(
     !!filters.channel ||
     !!filters.requestId ||
     !!filters.upstreamRequestId ||
+    !!filters.statusCode ||
     !!filters.sessionId
 
   const hasTypeFilter = logType !== LOG_TYPE_ALL_VALUE
@@ -344,6 +350,7 @@ export function CommonLogsFilterBar<TData>(
     isAdmin ? filters.channel : undefined,
     filters.requestId,
     filters.upstreamRequestId,
+    filters.statusCode,
     isAdmin ? filters.sessionId : undefined,
   ].filter(Boolean).length
   const sensitiveType = sensitiveVisible ? 'text' : 'password'
@@ -505,6 +512,17 @@ export function CommonLogsFilterBar<TData>(
           placeholder={t('Upstream Request ID')}
           value={filters.upstreamRequestId || ''}
           onChange={(e) => handleChange('upstreamRequestId', e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </LogsFilterField>
+      <LogsFilterField>
+        <LogsFilterInput
+          placeholder={t('Status Code')}
+          inputMode='numeric'
+          value={filters.statusCode || ''}
+          onChange={(e) =>
+            handleChange('statusCode', e.target.value.replaceAll(/\D/g, ''))
+          }
           onKeyDown={handleKeyDown}
         />
       </LogsFilterField>

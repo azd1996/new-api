@@ -70,6 +70,19 @@ func sessionOtherLikeCondition(literal string) (string, string) {
 	return "other LIKE ? ESCAPE '!'", "%" + esc + "%"
 }
 
+// statusCodeOtherCondition builds a cross-dialect condition matching logs whose
+// Other JSON carries the given HTTP status_code. The code is recorded only on
+// error logs (controller/relay.go writes other["status_code"]), marshaled as a
+// compact JSON int (`"status_code":400`), so we match the value bounded by the
+// trailing `,` or `}` to keep 400 from also matching 4000. Digits carry no LIKE
+// metacharacters, so no escaping is needed. `other` is an unindexed TEXT blob,
+// so this scans; it is meant for targeted error triage, not broad queries.
+func statusCodeOtherCondition(column string, statusCode int) (string, []interface{}) {
+	prefix := fmt.Sprintf(`"status_code":%d`, statusCode)
+	return "(" + column + " LIKE ? OR " + column + " LIKE ?)",
+		[]interface{}{"%" + prefix + ",%", "%" + prefix + "}%"}
+}
+
 // SearchLogsBySessionWindow returns the logs for a user within the half-open
 // window [startSec, endSec) whose other JSON carries the given session_id. It
 // powers the async session-search engine one time window at a time; limit caps
@@ -599,7 +612,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB
@@ -633,6 +646,10 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	}
 	if group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	}
+	if statusCode != 0 {
+		condition, args := statusCodeOtherCondition("logs.other", statusCode)
+		tx = tx.Where(condition, args...)
 	}
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
@@ -695,7 +712,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 
 const logSearchCountLimit = 10000
 
-func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
+func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, statusCode int) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB.Where("logs.user_id = ?", userId)
@@ -725,6 +742,10 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	}
 	if group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	}
+	if statusCode != 0 {
+		condition, args := statusCodeOtherCondition("logs.other", statusCode)
+		tx = tx.Where(condition, args...)
 	}
 	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
 	if err != nil {

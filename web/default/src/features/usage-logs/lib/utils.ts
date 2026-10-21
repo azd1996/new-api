@@ -215,6 +215,10 @@ export function buildApiParams(config: {
     ...(searchParams.upstreamRequestId
       ? { upstream_request_id: String(searchParams.upstreamRequestId) }
       : {}),
+    ...(Number.isFinite(Number(searchParams.statusCode)) &&
+    Number(searchParams.statusCode) > 0
+      ? { status_code: Number(searchParams.statusCode) }
+      : {}),
     ...buildTimeRangeParams(searchParams, false),
   }
 

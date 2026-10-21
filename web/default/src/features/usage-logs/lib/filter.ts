@@ -58,6 +58,9 @@ export function buildSearchParams(
         ...(commonFilters.upstreamRequestId && {
           upstreamRequestId: commonFilters.upstreamRequestId,
         }),
+        ...(commonFilters.statusCode && {
+          statusCode: commonFilters.statusCode,
+        }),
         ...(commonFilters.sessionId && { sessionId: commonFilters.sessionId }),
       }
     }

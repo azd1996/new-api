@@ -53,6 +53,9 @@ export interface CommonLogFilters extends CommonFilters {
   username?: string
   requestId?: string
   upstreamRequestId?: string
+  // HTTP status code to match. Recorded only on error logs (stored in the log's
+  // `other` JSON), so this filters out successful requests entirely.
+  statusCode?: string
   // Async session-id search (admin). Enter "notfound" to find logs with no
   // session id. Requires username + time range.
   sessionId?: string
@@ -352,6 +355,7 @@ export interface GetLogsParams {
   group?: string
   request_id?: string
   upstream_request_id?: string
+  status_code?: number
 }
 
 export interface GetLogsResponse {
