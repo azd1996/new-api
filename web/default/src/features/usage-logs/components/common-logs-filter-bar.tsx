@@ -539,10 +539,10 @@ export function CommonLogsFilterBar<TData>(
       actionStart={sensitiveToggle}
       primaryFilters={
         <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-12'>
-          <div className='min-w-0 sm:col-span-3'>{dateRangeFilter}</div>
+          <div className='min-w-0 sm:col-span-4'>{dateRangeFilter}</div>
           <div className='min-w-0 sm:col-span-3'>{modelFilter}</div>
           <div className='min-w-0 sm:col-span-4'>{groupFilter}</div>
-          <div className='min-w-0 sm:col-span-2'>{typeFilter}</div>
+          <div className='min-w-0 sm:col-span-1'>{typeFilter}</div>
         </div>
       }
       advancedFilters={advancedFilters}
