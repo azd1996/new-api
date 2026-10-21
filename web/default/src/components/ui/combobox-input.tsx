@@ -171,6 +171,7 @@ export function ComboboxInput({
         autoComplete='off'
         placeholder={placeholder}
         value={displayValue}
+        title={displayValue || undefined}
         onChange={(e) => {
           const nextValue = e.target.value
           setSearchValue(nextValue)
@@ -209,6 +210,7 @@ export function ComboboxInput({
                 <li
                   key={option.value}
                   role='option'
+                  title={option.label}
                   aria-selected={value === option.value}
                   data-highlighted={index === highlightedIndex}
                   className={cn(
