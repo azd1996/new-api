@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const maxCslHourlySpanSeconds = int64(7 * 24 * 3600)
+const maxCslHourlySpanSeconds = int64(60 * 24 * 3600)
 
 // cslHourlyLastSecondOffset turns an hour-aligned timestamp into the last second
 // of that same hour (mm:59:59), so an `end` hour is queried inclusively.
@@ -37,7 +37,7 @@ func parseCslHourlyTimeRange(c *gin.Context) (int64, int64, bool) {
 
 // parseCslHourlyHourRange converts an hour-granularity range into Unix seconds
 // spanning the whole `start` hour through the whole `end` hour, then applies the
-// same 7-day span limit as the timestamp form.
+// same 60-day span limit as the timestamp form.
 func parseCslHourlyHourRange(c *gin.Context, start, end string) (int64, int64, bool) {
 	startTimestamp, ok := parseCslHourlyHour(start)
 	if !ok {
@@ -57,7 +57,7 @@ func parseCslHourlyHourRange(c *gin.Context, start, end string) (int64, int64, b
 		return 0, 0, false
 	}
 	if endTimestamp-startTimestamp > maxCslHourlySpanSeconds {
-		common.ApiErrorMsg(c, "time range must not exceed 7 days")
+		common.ApiErrorMsg(c, "time range must not exceed 60 days")
 		return 0, 0, false
 	}
 	return startTimestamp, endTimestamp + cslHourlyLastSecondOffset, true
@@ -77,7 +77,7 @@ func parseCslHourlyHour(value string) (int64, bool) {
 
 // parseCslHourlyTimestampRange parses and validates start_timestamp and
 // end_timestamp query parameters. Both are required, must be positive, and the
-// span must not exceed 7 days. Each value is floored to the nearest hour boundary.
+// span must not exceed 60 days. Each value is floored to the nearest hour boundary.
 func parseCslHourlyTimestampRange(c *gin.Context) (int64, int64, bool) {
 	startTimestamp, err := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	if err != nil || startTimestamp <= 0 {
@@ -96,7 +96,7 @@ func parseCslHourlyTimestampRange(c *gin.Context) (int64, int64, bool) {
 	startTimestamp = startTimestamp - startTimestamp%3600
 	endTimestamp = endTimestamp - endTimestamp%3600
 	if endTimestamp-startTimestamp > maxCslHourlySpanSeconds {
-		common.ApiErrorMsg(c, "time range must not exceed 7 days")
+		common.ApiErrorMsg(c, "time range must not exceed 60 days")
 		return 0, 0, false
 	}
 	return startTimestamp, endTimestamp, true
@@ -148,4 +148,89 @@ func GetAllCslHourly(c *gin.Context) {
 // GetUserCslHourly returns csl_hourly rows for the authenticated user only.
 func GetUserCslHourly(c *gin.Context) {
 	handleCslHourly(c, false)
+}
+
+// cslMonthlyMonthLayouts are the accepted layouts for the `month` parameter,
+// e.g. "2026-09" or "2026-9".
+var cslMonthlyMonthLayouts = []string{"2006-01", "2006-1"}
+
+const cslMonthlyMonthFormatHint = `must be a month like "2026-09" (YYYY-MM in server local time)`
+
+// parseCslMonthlyRange resolves the month to aggregate into a [start, end]
+// Unix-second range. `month` (YYYY-MM) selects a specific month; when omitted
+// the current month is used. The end is the last second of the month, capped at
+// "now" so the current (incomplete) month only covers elapsed time.
+// Returns (start, end, ok); writes an error response and returns ok=false on failure.
+func parseCslMonthlyRange(c *gin.Context) (int64, int64, bool) {
+	month := strings.TrimSpace(c.Query("month"))
+	var first time.Time
+	if month == "" {
+		now := time.Now()
+		first = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	} else {
+		parsed, ok := parseCslMonth(month)
+		if !ok {
+			common.ApiErrorMsg(c, "invalid month, it "+cslMonthlyMonthFormatHint)
+			return 0, 0, false
+		}
+		first = parsed
+	}
+
+	startTimestamp := first.Unix()
+	now := time.Now().Unix()
+	if startTimestamp > now {
+		common.ApiErrorMsg(c, "month is in the future")
+		return 0, 0, false
+	}
+	endTimestamp := first.AddDate(0, 1, 0).Unix() - 1
+	if endTimestamp > now {
+		endTimestamp = now
+	}
+	return startTimestamp, endTimestamp, true
+}
+
+// parseCslMonth parses a month string such as "2026-09" into the first second
+// of that month in server local time.
+func parseCslMonth(value string) (time.Time, bool) {
+	for _, layout := range cslMonthlyMonthLayouts {
+		parsed, err := time.ParseInLocation(layout, value, time.Local)
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// GetCslMonthlyUserTotals returns each user's total settlement spend for a month
+// within the caller's group. `month` (YYYY-MM) picks a month; omitting it uses
+// the current month. Requires role >= RoleAdminUser.
+func GetCslMonthlyUserTotals(c *gin.Context) {
+	if c.GetInt("role") < common.RoleAdminUser {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "insufficient privilege",
+		})
+		return
+	}
+	startTimestamp, endTimestamp, ok := parseCslMonthlyRange(c)
+	if !ok {
+		return
+	}
+	totals, err := model.GetCslMonthlyUserTotals(model.CslMonthlyQuery{
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		GroupName:      c.GetString("group_name"),
+		ModelName:      c.Query("model_name"),
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"message":     "",
+		"data":        totals,
+		"query_start": startTimestamp,
+		"query_end":   endTimestamp,
+	})
 }

@@ -309,6 +309,7 @@ func SetApiRouter(router *gin.Engine) {
 		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) || common.CslHourlyReaderEnabled {
 			logRoute.GET("/hourly", middleware.CslHourlyAuth(), controller.GetAllCslHourly)
 			logRoute.GET("/self/hourly", middleware.CslHourlyAuth(), controller.GetUserCslHourly)
+			logRoute.GET("/monthly", middleware.CslHourlyAuth(), controller.GetCslMonthlyUserTotals)
 		}
 
 		systemTaskRoute := apiRouter.Group("/system-task")

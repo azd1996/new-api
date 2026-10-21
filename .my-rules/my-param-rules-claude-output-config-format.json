@@ -1,0 +1,41 @@
+{
+    "operations": [
+        {
+            "description": "claude-opus-5: output_config.format不被Bedrock支持，改用强制tool use规避——先追加一个承载schema的占位tool（置于delete之前，确保能先读到schema）",
+            "mode": "set",
+            "path": "tools.-1",
+            "value": {
+                "name": "structured_output",
+                "description": "Return the result strictly conforming to the required JSON schema.",
+                "input_schema": { "type": "object" }
+            },
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
+                { "path": "output_config.format", "mode": "contains", "value": "" }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 把output_config.format.schema搬到刚追加的tool.input_schema",
+            "mode": "copy",
+            "from": "output_config.format.schema",
+            "to": "tools.-1.input_schema",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
+                { "path": "output_config.format.schema", "mode": "contains", "value": "" }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 强制模型调用structured_output工具，等价于结构化输出约束",
+            "mode": "set",
+            "path": "tool_choice",
+            "value": { "type": "tool", "name": "structured_output" },
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
+                { "path": "output_config.format", "mode": "contains", "value": "" }
+            ],
+            "logic": "AND"
+        }
+    ]
+}

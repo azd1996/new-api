@@ -152,6 +152,18 @@
             ]
         },
         {
+            "description": "claude-opus-5: 工具定义里的strict不被Bedrock支持(400 strict: Extra inputs are not permitted)，逐个剥掉；工具与input_schema保留，响应仍是tool_use，对客户端无感",
+            "mode": "delete",
+            "path": "tools.*.strict",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                }
+            ]
+        },
+        {
             "description": "claude-opus-5: thinking.display仅非法值(非summarized/omitted)兜底改为summarized，合法值保留，避免Bedrock 400",
             "mode": "set",
             "path": "thinking.display",

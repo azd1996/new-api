@@ -113,13 +113,13 @@ func TestGetUserCslHourlyRejectsTooWideTimeRange(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Set("username", "alice")
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/self/hourly?start_timestamp=3600&end_timestamp=612001", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/self/hourly?start_timestamp=3600&end_timestamp=5191201", nil)
 
 	GetUserCslHourly(ctx)
 
 	payload := decodeCslHourlyResponse(t, recorder)
 	assert.False(t, payload.Success)
-	assert.Equal(t, "time range must not exceed 7 days", payload.Message)
+	assert.Equal(t, "time range must not exceed 60 days", payload.Message)
 }
 
 func TestParseCslHourlyHourRange(t *testing.T) {
@@ -182,15 +182,15 @@ func TestParseCslHourlyHourRange(t *testing.T) {
 			expectErrMsg: "invalid time range",
 		},
 		{
-			name:         "hour range wider than 7 days is rejected",
-			query:        "start=2026-08-20-17&end=2026-08-27-18",
-			expectErrMsg: "time range must not exceed 7 days",
+			name:         "hour range wider than 60 days is rejected",
+			query:        "start=2026-06-01-00&end=2026-07-31-01",
+			expectErrMsg: "time range must not exceed 60 days",
 		},
 		{
-			name:        "hour range of exactly 7 days is accepted",
-			query:       "start=2026-08-20-17&end=2026-08-27-17",
-			expectStart: hourStart(t, "2026-08-20-17"),
-			expectEnd:   hourStart(t, "2026-08-27-17") + 3599,
+			name:        "hour range of exactly 60 days is accepted",
+			query:       "start=2026-06-01-00&end=2026-07-31-00",
+			expectStart: hourStart(t, "2026-06-01-00"),
+			expectEnd:   hourStart(t, "2026-07-31-00") + 3599,
 		},
 	}
 
@@ -301,4 +301,141 @@ func TestGetUserCslHourlyRestrictsToAuthenticatedUsernameAndToken(t *testing.T) 
 	assert.Equal(t, int64(3600), payload.Data[0].StartTime)
 	assert.Equal(t, 17, payload.Data[0].ChannelId)
 	assert.InDelta(t, 0.85, payload.Data[0].ChannelDiscount, 0.000001)
+}
+
+func TestParseCslMonthlyRange(t *testing.T) {
+	monthStart := func(t *testing.T, value string) int64 {
+		t.Helper()
+		parsed, err := time.ParseInLocation("2006-01", value, time.Local)
+		require.NoError(t, err)
+		return parsed.Unix()
+	}
+
+	t.Run("explicit past month covers the whole month", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/monthly?month=2020-02", nil)
+
+		start, end, ok := parseCslMonthlyRange(ctx)
+
+		require.True(t, ok, recorder.Body.String())
+		assert.Equal(t, monthStart(t, "2020-02"), start)
+		// 2020 is a leap year: February ends at 2020-03-01 00:00:00 minus one second.
+		assert.Equal(t, monthStart(t, "2020-03")-1, end)
+	})
+
+	t.Run("compact layout is accepted", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/monthly?month=2020-2", nil)
+
+		start, _, ok := parseCslMonthlyRange(ctx)
+
+		require.True(t, ok, recorder.Body.String())
+		assert.Equal(t, monthStart(t, "2020-02"), start)
+	})
+
+	t.Run("current month defaults and end is capped at now", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/monthly", nil)
+
+		before := time.Now().Unix()
+		start, end, ok := parseCslMonthlyRange(ctx)
+		after := time.Now().Unix()
+
+		require.True(t, ok, recorder.Body.String())
+		now := time.Now()
+		assert.Equal(t, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local).Unix(), start)
+		assert.GreaterOrEqual(t, end, before)
+		assert.LessOrEqual(t, end, after)
+	})
+
+	t.Run("malformed month reports the expected format", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/monthly?month=2026-13", nil)
+
+		_, _, ok := parseCslMonthlyRange(ctx)
+
+		require.False(t, ok)
+		var payload cslHourlyResponse
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+		assert.False(t, payload.Success)
+		assert.Equal(t, `invalid month, it must be a month like "2026-09" (YYYY-MM in server local time)`, payload.Message)
+	})
+
+	t.Run("future month is rejected", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/monthly?month=2999-01", nil)
+
+		_, _, ok := parseCslMonthlyRange(ctx)
+
+		require.False(t, ok)
+		var payload cslHourlyResponse
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+		assert.False(t, payload.Success)
+		assert.Equal(t, "month is in the future", payload.Message)
+	})
+}
+
+func TestGetCslMonthlyUserTotalsRejectsNonAdminRole(t *testing.T) {
+	setupCslHourlyControllerTestDB(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("role", common.RoleCommonUser)
+	ctx.Set("group_name", "vip")
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/monthly?month=2026-09", nil)
+
+	GetCslMonthlyUserTotals(ctx)
+
+	assert.Equal(t, http.StatusForbidden, recorder.Code)
+}
+
+func TestGetCslMonthlyUserTotalsSumsPerUserWithinGroup(t *testing.T) {
+	setupCslHourlyControllerTestDB(t)
+
+	// Two hours in September 2026 for alice (same group), plus a carol row in a
+	// different group that must be excluded.
+	hourOne := time.Date(2026, 9, 1, 0, 0, 0, 0, time.Local)
+	hourTwo := time.Date(2026, 9, 1, 1, 0, 0, 0, time.Local)
+	require.NoError(t, model.LOG_DB.Create(&model.CslHourly{
+		StartTime: hourOne.Unix(), EndTime: hourOne.Unix() + 3600,
+		UserId: 1, Username: "alice", GroupName: "vip",
+		SettlementPriceCny: 12.5, SettlementPriceUsd: 1.75,
+	}).Error)
+	require.NoError(t, model.LOG_DB.Create(&model.CslHourly{
+		StartTime: hourTwo.Unix(), EndTime: hourTwo.Unix() + 3600,
+		UserId: 1, Username: "alice", GroupName: "vip",
+		SettlementPriceCny: 7.5, SettlementPriceUsd: 1.05,
+	}).Error)
+	require.NoError(t, model.LOG_DB.Create(&model.CslHourly{
+		StartTime: hourOne.Unix(), EndTime: hourOne.Unix() + 3600,
+		UserId: 9, Username: "carol", GroupName: "default",
+		SettlementPriceCny: 99, SettlementPriceUsd: 13,
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("role", common.RoleAdminUser)
+	ctx.Set("group_name", "vip")
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/log/monthly?month=2026-09", nil)
+
+	GetCslMonthlyUserTotals(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload struct {
+		Success bool                        `json:"success"`
+		Message string                      `json:"message"`
+		Data    []model.CslMonthlyUserTotal `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.True(t, payload.Success, payload.Message)
+	require.Len(t, payload.Data, 1)
+	assert.Equal(t, 1, payload.Data[0].UserId)
+	assert.Equal(t, "alice", payload.Data[0].Username)
+	assert.InDelta(t, 20.0, payload.Data[0].SettlementPriceCny, 0.000001)
+	assert.InDelta(t, 2.8, payload.Data[0].SettlementPriceUsd, 0.000001)
 }
