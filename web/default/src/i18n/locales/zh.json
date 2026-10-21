@@ -4201,6 +4201,8 @@
     "Selected nodes": "已选节点",
     "Selected when creating a token and used as the default billing group for API calls.": "创建令牌时选择，用作 API 调用的默认计费分组。",
     "Self-Use Mode": "自用模式",
+    "Allow Models Without Configured Price": "允许未配置价格的模型",
+    "When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected": "开启后，未配置价格的模型请求将被放行，并按兜底倍率计费，而不是被拒绝",
     "Send": "发送",
     "Send a request": "发送请求",
     "Send code": "发送验证码",

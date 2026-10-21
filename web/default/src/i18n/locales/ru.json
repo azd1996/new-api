@@ -4201,6 +4201,8 @@
     "Selected nodes": "Выбранные узлы",
     "Selected when creating a token and used as the default billing group for API calls.": "Выбирается при создании токена и используется как группа тарификации по умолчанию для вызовов API.",
     "Self-Use Mode": "Режим самоиспользования",
+    "Allow Models Without Configured Price": "Разрешить модели без настроенной цены",
+    "When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected": "Если включено, запросы к моделям без настроенной цены разрешаются и тарифицируются по резервному коэффициенту вместо отклонения",
     "Send": "Отправить",
     "Send a request": "Отправить запрос",
     "Send code": "Отправить код",

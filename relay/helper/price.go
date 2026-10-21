@@ -101,7 +101,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		modelRatio, success, matchName = ratio_setting.GetModelRatio(pricingModelName)
 		if !success {
 			acceptUnsetRatio := false
-			if info.UserSetting.AcceptUnsetRatioModel {
+			if info.UserSetting.AcceptUnsetRatioModel || operation_setting.AllowUnsetModelRatio {
 				acceptUnsetRatio = true
 			}
 			if !acceptUnsetRatio {
@@ -202,7 +202,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 			var matchName string
 			modelRatio, ratioSuccess, matchName = ratio_setting.GetModelRatio(pricingModelName)
 			acceptUnsetRatio := false
-			if info.UserSetting.AcceptUnsetRatioModel {
+			if info.UserSetting.AcceptUnsetRatioModel || operation_setting.AllowUnsetModelRatio {
 				acceptUnsetRatio = true
 			}
 			if !ratioSuccess && !acceptUnsetRatio {

@@ -4201,6 +4201,8 @@
     "Selected nodes": "Nút đã chọn",
     "Selected when creating a token and used as the default billing group for API calls.": "Được chọn khi tạo token và dùng làm nhóm tính phí mặc định cho các lệnh gọi API.",
     "Self-Use Mode": "Chế độ tự sử dụng",
+    "Allow Models Without Configured Price": "Cho phép mô hình chưa cấu hình giá",
+    "When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected": "Khi bật, các yêu cầu tới mô hình chưa cấu hình giá sẽ được cho phép và tính phí theo tỷ lệ dự phòng thay vì bị từ chối",
     "Send": "Gửi",
     "Send a request": "Gửi yêu cầu",
     "Send code": "Gửi mã",

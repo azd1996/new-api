@@ -4201,6 +4201,8 @@
     "Selected nodes": "Nœuds sélectionnés",
     "Selected when creating a token and used as the default billing group for API calls.": "Sélectionné lors de la création d’un jeton et utilisé comme groupe de facturation par défaut pour les appels API.",
     "Self-Use Mode": "Mode d'utilisation personnelle",
+    "Allow Models Without Configured Price": "Autoriser les modèles sans prix configuré",
+    "When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected": "Lorsque activé, les requêtes vers des modèles sans prix configuré sont autorisées et facturées au taux de repli au lieu d'être rejetées",
     "Send": "Envoyer",
     "Send a request": "Envoyer une requête",
     "Send code": "Envoyer le code",

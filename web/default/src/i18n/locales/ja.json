@@ -4201,6 +4201,8 @@
     "Selected nodes": "選択したノード",
     "Selected when creating a token and used as the default billing group for API calls.": "トークン作成時に選択され、API 呼び出しのデフォルト課金グループとして使われます。",
     "Self-Use Mode": "セルフユースモード",
+    "Allow Models Without Configured Price": "価格未設定のモデルを許可",
+    "When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected": "有効にすると、価格が未設定のモデルへのリクエストが拒否されず、フォールバック倍率で課金されます",
     "Send": "送信",
     "Send a request": "リクエストを送信",
     "Send code": "コードを送信",

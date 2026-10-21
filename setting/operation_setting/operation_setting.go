@@ -5,6 +5,11 @@ import "strings"
 var DemoSiteEnabled = false
 var SelfUseModeEnabled = false
 
+// AllowUnsetModelRatio, when enabled, lets requests to models without a
+// configured price/ratio go through using the fallback ratio instead of
+// failing with "price not configured".
+var AllowUnsetModelRatio = false
+
 var AutomaticDisableKeywords = []string{
 	"Your credit balance is too low",
 	"This organization has been disabled.",

@@ -44,6 +44,7 @@ const behaviorSchema = z.object({
   DefaultCollapseSidebar: z.boolean(),
   DemoSiteEnabled: z.boolean(),
   SelfUseModeEnabled: z.boolean(),
+  AllowUnsetModelRatio: z.boolean(),
 })
 
 type BehaviorFormValues = z.infer<typeof behaviorSchema>
@@ -134,6 +135,29 @@ export function SystemBehaviorSection({
                   <FormLabel>{t('Self-Use Mode')}</FormLabel>
                   <FormDescription>
                     {t('Optimize system for self-hosted single-user usage')}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='AllowUnsetModelRatio'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Allow Models Without Configured Price')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected'
+                    )}
                   </FormDescription>
                 </SettingsSwitchContent>
                 <FormControl>

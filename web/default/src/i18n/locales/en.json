@@ -4201,6 +4201,8 @@
     "Selected nodes": "Selected nodes",
     "Selected when creating a token and used as the default billing group for API calls.": "Selected when creating a token and used as the default billing group for API calls.",
     "Self-Use Mode": "Self-Use Mode",
+    "Allow Models Without Configured Price": "Allow Models Without Configured Price",
+    "When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected": "When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected",
     "Send": "Send",
     "Send a request": "Send a request",
     "Send code": "Send code",
