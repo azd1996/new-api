@@ -83,6 +83,20 @@ func statusCodeOtherCondition(column string, statusCode int) (string, []interfac
 		[]interface{}{"%" + prefix + ",%", "%" + prefix + "}%"}
 }
 
+// errorContentLikeCondition builds a cross-dialect `content LIKE` condition that
+// matches the keyword as a substring anywhere in the log content. The keyword's
+// LIKE metacharacters are escaped so %, _, or the escape char cannot alter the
+// pattern. `content` is an unindexed TEXT column, so this scans; it is meant to
+// be combined with the error-log type filter and a time range to stay targeted.
+func errorContentLikeCondition(column string, keyword string) (string, string) {
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(keyword)
+		return column + " LIKE ?", "%" + esc + "%"
+	}
+	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(keyword)
+	return column + " LIKE ? ESCAPE '!'", "%" + esc + "%"
+}
+
 // SearchLogsBySessionWindow returns the logs for a user within the half-open
 // window [startSec, endSec) whose other JSON carries the given session_id. It
 // powers the async session-search engine one time window at a time; limit caps
@@ -612,7 +626,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB
@@ -650,6 +664,12 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if statusCode != 0 {
 		condition, args := statusCodeOtherCondition("logs.other", statusCode)
 		tx = tx.Where(condition, args...)
+	}
+	// Error keyword is a substring match on the content column and only applies
+	// to error logs, whose message text lives in content (see RecordErrorLog).
+	if logType == LogTypeError && errorKeyword != "" {
+		condition, pattern := errorContentLikeCondition("logs.content", errorKeyword)
+		tx = tx.Where(condition, pattern)
 	}
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {

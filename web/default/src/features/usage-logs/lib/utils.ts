@@ -219,6 +219,9 @@ export function buildApiParams(config: {
     Number(searchParams.statusCode) > 0
       ? { status_code: Number(searchParams.statusCode) }
       : {}),
+    ...(searchParams.errorKeyword
+      ? { error_keyword: String(searchParams.errorKeyword) }
+      : {}),
     ...buildTimeRangeParams(searchParams, false),
   }
 

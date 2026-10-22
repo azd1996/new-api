@@ -61,6 +61,9 @@ export function buildSearchParams(
         ...(commonFilters.statusCode && {
           statusCode: commonFilters.statusCode,
         }),
+        ...(commonFilters.errorKeyword && {
+          errorKeyword: commonFilters.errorKeyword,
+        }),
         ...(commonFilters.sessionId && { sessionId: commonFilters.sessionId }),
       }
     }

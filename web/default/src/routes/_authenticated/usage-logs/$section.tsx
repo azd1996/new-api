@@ -46,6 +46,7 @@ const usageLogsSearchSchema = z.object({
   requestId: z.string().optional().catch(''),
   upstreamRequestId: z.string().optional().catch(''),
   statusCode: z.string().optional().catch(''),
+  errorKeyword: z.string().optional().catch(''),
   sessionId: z.string().optional().catch(''),
   startTime: z.number().optional(),
   endTime: z.number().optional(),

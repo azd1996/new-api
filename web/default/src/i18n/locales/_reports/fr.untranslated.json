@@ -1,8 +1,8 @@
 {
   "Configure VM data sources, rule templates and rules. Preview only; routing is not affected yet.": "Configure VM data sources, rule templates and rules. Preview only; routing is not affected yet.",
-  "Leave blank to keep the stored password": "Leave blank to keep the stored password",
-  "Please select a template": "Please select a template",
   "Define reusable parameter override and retry override templates. Channels can reference these templates by name.": "Define reusable parameter override and retry override templates. Channels can reference these templates by name.",
+  "Leave blank to keep the stored password": "Leave blank to keep the stored password",
   "Parameter template content must be a JSON object or array": "Parameter template content must be a JSON object or array",
+  "Please select a template": "Please select a template",
   "Retry override rules as a JSON array. Leave empty to disable.": "Retry override rules as a JSON array. Leave empty to disable."
 }

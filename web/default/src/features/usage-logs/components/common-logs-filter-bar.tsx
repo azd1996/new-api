@@ -43,7 +43,7 @@ import {
 import { getEnabledModels } from '@/features/channels/api'
 import { getGroups } from '@/features/users/api'
 
-import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import { LOG_TYPE_ALL_VALUE, LOG_TYPE_ENUM, LOG_TYPE_FILTERS } from '../constants'
 import { startSessionLogSearch } from '../api'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
@@ -58,6 +58,10 @@ import {
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
+
+// Error-keyword filter only applies to error logs (backend LIKE-matches the
+// content column gated on type=error), so the input is shown only for this type.
+const LOG_TYPE_ERROR_VALUE = String(LOG_TYPE_ENUM.ERROR)
 
 type LogTypeValue = (typeof LOG_TYPE_FILTERS)[number]['value']
 const logTypeValueSet = new Set<string>(
@@ -94,6 +98,7 @@ function buildSearchSourceKey(values: {
   requestId?: unknown
   upstreamRequestId?: unknown
   statusCode?: unknown
+  errorKeyword?: unknown
   sessionId?: unknown
   type?: unknown
 }) {
@@ -108,6 +113,7 @@ function buildSearchSourceKey(values: {
     values.requestId,
     values.upstreamRequestId,
     values.statusCode,
+    values.errorKeyword,
     values.sessionId,
     Array.isArray(values.type) ? values.type.join(',') : values.type,
   ]
@@ -177,6 +183,7 @@ export function CommonLogsFilterBar<TData>(
       requestId: searchParams.requestId,
       upstreamRequestId: searchParams.upstreamRequestId,
       statusCode: searchParams.statusCode,
+      errorKeyword: searchParams.errorKeyword,
       sessionId: searchParams.sessionId,
       type: searchParams.type,
     }
@@ -193,6 +200,7 @@ export function CommonLogsFilterBar<TData>(
       requestId: searchParams.requestId || undefined,
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
       statusCode: searchParams.statusCode || undefined,
+      errorKeyword: searchParams.errorKeyword || undefined,
       sessionId: searchParams.sessionId || undefined,
     }
     return {
@@ -211,6 +219,7 @@ export function CommonLogsFilterBar<TData>(
     searchParams.requestId,
     searchParams.upstreamRequestId,
     searchParams.statusCode,
+    searchParams.errorKeyword,
     searchParams.sessionId,
     searchParams.type,
   ])
@@ -338,12 +347,14 @@ export function CommonLogsFilterBar<TData>(
     !!filters.requestId ||
     !!filters.upstreamRequestId ||
     !!filters.statusCode ||
+    !!filters.errorKeyword ||
     !!filters.sessionId
 
   const hasTypeFilter = logType !== LOG_TYPE_ALL_VALUE
   const hasAdditionalFilters =
     !!filters.model || !!filters.group || hasTypeFilter || hasExpandedFilters
 
+  const isErrorLogType = logType === LOG_TYPE_ERROR_VALUE
   const expandedFilterCount = [
     filters.token,
     isAdmin ? filters.username : undefined,
@@ -351,6 +362,7 @@ export function CommonLogsFilterBar<TData>(
     filters.requestId,
     filters.upstreamRequestId,
     filters.statusCode,
+    isErrorLogType ? filters.errorKeyword : undefined,
     isAdmin ? filters.sessionId : undefined,
   ].filter(Boolean).length
   const sensitiveType = sensitiveVisible ? 'text' : 'password'
@@ -444,9 +456,15 @@ export function CommonLogsFilterBar<TData>(
               current.sourceKey === searchState.sourceKey
                 ? current
                 : searchState
+            // The error-keyword filter only applies to error logs; drop it when
+            // switching to any other type so it is not sent with the next query.
+            const nextFilters =
+              nextLogType === LOG_TYPE_ERROR_VALUE
+                ? base.filters
+                : { ...base.filters, errorKeyword: undefined }
             return {
               sourceKey: searchState.sourceKey,
-              filters: base.filters,
+              filters: nextFilters,
               logType: nextLogType,
             }
           })
@@ -526,6 +544,16 @@ export function CommonLogsFilterBar<TData>(
           onKeyDown={handleKeyDown}
         />
       </LogsFilterField>
+      {isErrorLogType && (
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Error Keyword')}
+            value={filters.errorKeyword || ''}
+            onChange={(e) => handleChange('errorKeyword', e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </LogsFilterField>
+      )}
       {isAdmin && (
         <LogsFilterField>
           <LogsFilterInput
