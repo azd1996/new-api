@@ -83,6 +83,41 @@ func statusCodeOtherCondition(column string, statusCode int) (string, []interfac
 		[]interface{}{"%" + prefix + ",%", "%" + prefix + "}%"}
 }
 
+// otherFieldLikeCondition builds a cross-dialect condition matching logs whose
+// Other JSON carries the given string field as `"key":"value"`. It powers the
+// downstream trace-tag filters (downstream_trace_tag / customer_id /
+// downstream_request_id), which live in the unindexed Other TEXT blob, so this
+// scans — callers should pair it with a time range or other narrowing filter.
+// The value's LIKE metacharacters are escaped so it cannot alter the pattern.
+func otherFieldLikeCondition(column, key, value string) (string, string) {
+	literal := fmt.Sprintf(`"%s":"%s"`, key, value)
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(literal)
+		return column + " LIKE ?", "%" + esc + "%"
+	}
+	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(literal)
+	return column + " LIKE ? ESCAPE '!'", "%" + esc + "%"
+}
+
+// applyTraceTagFilters narrows a log query by the downstream trace-tag fields
+// stored in the Other JSON. Empty values are ignored. Shared by the admin and
+// user log queries so both search the same way.
+func applyTraceTagFilters(tx *gorm.DB, column, customerId, downstreamRequestId, downstreamTraceTag string) *gorm.DB {
+	if customerId != "" {
+		cond, pat := otherFieldLikeCondition(column, "customer_id", customerId)
+		tx = tx.Where(cond, pat)
+	}
+	if downstreamRequestId != "" {
+		cond, pat := otherFieldLikeCondition(column, "downstream_request_id", downstreamRequestId)
+		tx = tx.Where(cond, pat)
+	}
+	if downstreamTraceTag != "" {
+		cond, pat := otherFieldLikeCondition(column, "downstream_trace_tag", downstreamTraceTag)
+		tx = tx.Where(cond, pat)
+	}
+	return tx
+}
+
 // errorContentLikeCondition builds a cross-dialect `content LIKE` condition that
 // matches the keyword as a substring anywhere in the log content. The keyword's
 // LIKE metacharacters are escaped so %, _, or the escape char cannot alter the
@@ -167,6 +202,37 @@ func ensureLogRequestId(log *Log) {
 	if log != nil && log.RequestId == "" {
 		log.RequestId = common.NewRequestId()
 	}
+}
+
+// attachDownstreamTraceTag parses the inbound trace-tag header (set by the
+// downstream gateway) and records the raw value plus the decoded downstream
+// request id and customer id into the log's other map, so model-access
+// consume/error logs can surface and search them. The raw value is always
+// recorded when the header is present; the decoded ids are added only when
+// decryption + authentication succeed (a decode failure or missing key leaves
+// just the raw value). Returns the map, allocating one if a header is present
+// but other was nil.
+func attachDownstreamTraceTag(c *gin.Context, other map[string]interface{}) map[string]interface{} {
+	if c == nil || c.Request == nil {
+		return other
+	}
+	headerVal := strings.TrimSpace(c.GetHeader(common.TraceTagHeader))
+	if headerVal == "" {
+		return other
+	}
+	if other == nil {
+		other = make(map[string]interface{})
+	}
+	other["downstream_trace_tag"] = headerVal
+	if keys := common.GetTraceTagKeys(); keys != nil {
+		if requestID, customerID, err := keys.Decode(headerVal); err == nil {
+			other["downstream_request_id"] = requestID
+			other["customer_id"] = customerID
+		} else {
+			logger.LogWarn(c, "failed to decode "+common.TraceTagHeader+": "+err.Error())
+		}
+	}
+	return other
 }
 
 func createLog(log *Log) error {
@@ -446,6 +512,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
+	other = attachDownstreamTraceTag(c, other)
 	otherStr := common.MapToJsonStr(other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -510,6 +577,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
+	params.Other = attachDownstreamTraceTag(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -626,7 +694,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, downstreamRequestId string, downstreamTraceTag string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB
@@ -671,6 +739,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		condition, pattern := errorContentLikeCondition("logs.content", errorKeyword)
 		tx = tx.Where(condition, pattern)
 	}
+	tx = applyTraceTagFilters(tx, "logs.other", customerId, downstreamRequestId, downstreamTraceTag)
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
 		return nil, 0, err
@@ -732,7 +801,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 
 const logSearchCountLimit = 10000
 
-func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, statusCode int) (logs []*Log, total int64, err error) {
+func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, statusCode int, customerId string, downstreamRequestId string, downstreamTraceTag string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB.Where("logs.user_id = ?", userId)
@@ -767,6 +836,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 		condition, args := statusCodeOtherCondition("logs.other", statusCode)
 		tx = tx.Where(condition, args...)
 	}
+	tx = applyTraceTagFilters(tx, "logs.other", customerId, downstreamRequestId, downstreamTraceTag)
 	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
 	if err != nil {
 		common.SysError("failed to count user logs: " + err.Error())

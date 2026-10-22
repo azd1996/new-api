@@ -222,6 +222,15 @@ export function buildApiParams(config: {
     ...(searchParams.errorKeyword
       ? { error_keyword: String(searchParams.errorKeyword) }
       : {}),
+    ...(searchParams.customerId
+      ? { customer_id: String(searchParams.customerId) }
+      : {}),
+    ...(searchParams.downstreamRequestId
+      ? { downstream_request_id: String(searchParams.downstreamRequestId) }
+      : {}),
+    ...(searchParams.downstreamTraceTag
+      ? { downstream_trace_tag: String(searchParams.downstreamTraceTag) }
+      : {}),
     ...buildTimeRangeParams(searchParams, false),
   }
 

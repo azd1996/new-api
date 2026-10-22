@@ -25,7 +25,10 @@ func GetAllLogs(c *gin.Context) {
 	upstreamRequestId := c.Query("upstream_request_id")
 	statusCode, _ := strconv.Atoi(c.Query("status_code"))
 	errorKeyword := c.Query("error_keyword")
-	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, upstreamRequestId, statusCode, errorKeyword)
+	customerId := c.Query("customer_id")
+	downstreamRequestId := c.Query("downstream_request_id")
+	downstreamTraceTag := c.Query("downstream_trace_tag")
+	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, downstreamRequestId, downstreamTraceTag)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -48,7 +51,10 @@ func GetUserLogs(c *gin.Context) {
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
 	statusCode, _ := strconv.Atoi(c.Query("status_code"))
-	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId, statusCode)
+	customerId := c.Query("customer_id")
+	downstreamRequestId := c.Query("downstream_request_id")
+	downstreamTraceTag := c.Query("downstream_trace_tag")
+	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId, statusCode, customerId, downstreamRequestId, downstreamTraceTag)
 	if err != nil {
 		common.ApiError(c, err)
 		return

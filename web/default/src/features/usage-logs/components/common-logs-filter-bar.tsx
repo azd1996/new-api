@@ -100,6 +100,9 @@ function buildSearchSourceKey(values: {
   statusCode?: unknown
   errorKeyword?: unknown
   sessionId?: unknown
+  customerId?: unknown
+  downstreamRequestId?: unknown
+  downstreamTraceTag?: unknown
   type?: unknown
 }) {
   return [
@@ -115,6 +118,9 @@ function buildSearchSourceKey(values: {
     values.statusCode,
     values.errorKeyword,
     values.sessionId,
+    values.customerId,
+    values.downstreamRequestId,
+    values.downstreamTraceTag,
     Array.isArray(values.type) ? values.type.join(',') : values.type,
   ]
     .map((value) => String(value ?? ''))
@@ -185,6 +191,9 @@ export function CommonLogsFilterBar<TData>(
       statusCode: searchParams.statusCode,
       errorKeyword: searchParams.errorKeyword,
       sessionId: searchParams.sessionId,
+      customerId: searchParams.customerId,
+      downstreamRequestId: searchParams.downstreamRequestId,
+      downstreamTraceTag: searchParams.downstreamTraceTag,
       type: searchParams.type,
     }
     const filters: CommonLogFilters = {
@@ -202,6 +211,9 @@ export function CommonLogsFilterBar<TData>(
       statusCode: searchParams.statusCode || undefined,
       errorKeyword: searchParams.errorKeyword || undefined,
       sessionId: searchParams.sessionId || undefined,
+      customerId: searchParams.customerId || undefined,
+      downstreamRequestId: searchParams.downstreamRequestId || undefined,
+      downstreamTraceTag: searchParams.downstreamTraceTag || undefined,
     }
     return {
       sourceKey: buildSearchSourceKey(sourceValues),
@@ -221,6 +233,9 @@ export function CommonLogsFilterBar<TData>(
     searchParams.statusCode,
     searchParams.errorKeyword,
     searchParams.sessionId,
+    searchParams.customerId,
+    searchParams.downstreamRequestId,
+    searchParams.downstreamTraceTag,
     searchParams.type,
   ])
   const [draft, setDraft] = useState<CommonLogDraft>(() => searchState)
@@ -348,7 +363,10 @@ export function CommonLogsFilterBar<TData>(
     !!filters.upstreamRequestId ||
     !!filters.statusCode ||
     !!filters.errorKeyword ||
-    !!filters.sessionId
+    !!filters.sessionId ||
+    !!filters.customerId ||
+    !!filters.downstreamRequestId ||
+    !!filters.downstreamTraceTag
 
   const hasTypeFilter = logType !== LOG_TYPE_ALL_VALUE
   const hasAdditionalFilters =
@@ -364,6 +382,9 @@ export function CommonLogsFilterBar<TData>(
     filters.statusCode,
     isErrorLogType ? filters.errorKeyword : undefined,
     isAdmin ? filters.sessionId : undefined,
+    isAdmin ? filters.customerId : undefined,
+    isAdmin ? filters.downstreamRequestId : undefined,
+    isAdmin ? filters.downstreamTraceTag : undefined,
   ].filter(Boolean).length
   const sensitiveType = sensitiveVisible ? 'text' : 'password'
   const logTypeItems = useMemo(
@@ -573,6 +594,40 @@ export function CommonLogsFilterBar<TData>(
           >
             {t('Force Search')}
           </Button>
+        </LogsFilterField>
+      )}
+      {isAdmin && (
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Customer ID')}
+            value={filters.customerId || ''}
+            onChange={(e) => handleChange('customerId', e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </LogsFilterField>
+      )}
+      {isAdmin && (
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Downstream Request ID')}
+            value={filters.downstreamRequestId || ''}
+            onChange={(e) =>
+              handleChange('downstreamRequestId', e.target.value)
+            }
+            onKeyDown={handleKeyDown}
+          />
+        </LogsFilterField>
+      )}
+      {isAdmin && (
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Downstream Trace Tag')}
+            value={filters.downstreamTraceTag || ''}
+            onChange={(e) =>
+              handleChange('downstreamTraceTag', e.target.value)
+            }
+            onKeyDown={handleKeyDown}
+          />
         </LogsFilterField>
       )}
     </>

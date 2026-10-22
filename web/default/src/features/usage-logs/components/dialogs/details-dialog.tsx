@@ -719,6 +719,30 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
 
+          {props.isAdmin && other?.customer_id && (
+            <DetailRow
+              label={t('Customer ID')}
+              value={other.customer_id}
+              mono
+            />
+          )}
+
+          {props.isAdmin && other?.downstream_request_id && (
+            <DetailRow
+              label={t('Downstream Request ID')}
+              value={other.downstream_request_id}
+              mono
+            />
+          )}
+
+          {props.isAdmin && other?.downstream_trace_tag && (
+            <DetailRow
+              label={t('Downstream Trace Tag')}
+              value={other.downstream_trace_tag}
+              mono
+            />
+          )}
+
           {props.log.token_name && (
             <DetailRow label={t('Token')} value={props.log.token_name} mono />
           )}

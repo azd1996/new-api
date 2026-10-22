@@ -8,6 +8,7 @@
 ## [2026-10-22]
 
 ### 新增 Added
+- **下游网关 Trace-Tag 日志记录与检索（Downstream Trace-Tag Logging）**：链路为「客户 → 下游网关 → 本层 new-api → 上游网关」，下游网关在请求头 `x-bce-aigw-trace-tag` 带一个确定性认证加密（SIV：`HMAC-SHA256(macKey, 明文)[:16]` 作 IV + `AES-256-CTR`，base32 无填充）的值，本层解密还原出「下游 request_id」与「客户 ID（下游 `api_key_id`，可空＝公开模式）」，连同原始 tag 一并写入**消耗日志(type=2)与错误日志(type=5)** 的 `other` JSON（`downstream_trace_tag`/`customer_id`/`downstream_request_id`，零迁移、不加列），在日志详情**管理员可见**，并支持按这三者检索（`GetAllLogs`/`GetUserLogs` 新增 query 参数，`other` 做跨方言 `LIKE`，元字符转义）。子密钥由 `AIGW_TRACE_TAG_KEY`（64 位 hex 主密钥）经 HKDF-SHA256 派生（`sync.Once` 缓存）；密钥未配置/非法时打一次 `SysError` 并禁用解码、**不影响启动**；认证失败只保留原始 tag、绝不静默解成错误 ID；解码在热路径仅微秒级、且全程不影响日志写入。注意：`other` 无索引为全表扫描，检索需配合时间范围收窄。详见 `docs/downstream-trace-tag-logging.md`。
 - **日志按错误关键字筛选（Log Filter by Error Keyword）**：通用日志筛选栏「高级筛选」区新增「错误关键字」输入框，对日志 `content` 列做包含（LIKE）匹配，**仅在日志类型选为「错误」时才展示、才生效**。错误文本由 `RecordErrorLog` 写入 `content`，故按关键字排障等价于 `content LIKE %关键字%`；用户输入的 LIKE 元字符会被转义后再包裹 `%...%`。前后端双保险——前端仅在类型=错误时渲染并在切换类型时清空，后端 `GetAllLogs` 仅当 `logType == LogTypeError` 且关键字非空时才追加条件，避免误触发全表扫描。跨方言 LIKE 由 `model/log.go` 的 `errorContentLikeCondition` 统一构造（SQLite/MySQL/PostgreSQL 用 `ESCAPE '!'`，ClickHouse 用反斜杠转义）。按范围仅管理端 `GetAllLogs` 支持；零迁移、不加列。注意：只命中错误日志、`content` 无索引为全表扫描（已被类型+时间范围收窄）、不影响顶部用量/RPM/TPM 统计。详见 `docs/log-filter-error-keyword.md`。
 
 ## [2026-10-21]

@@ -62,6 +62,11 @@ export interface CommonLogFilters extends CommonFilters {
   // Async session-id search (admin). Enter "notfound" to find logs with no
   // session id. Requires username + time range.
   sessionId?: string
+  // Downstream trace-tag search (admin). Substring (LIKE) match on the matching
+  // field stored in the log's `other` JSON; pair with a time range to narrow.
+  customerId?: string
+  downstreamRequestId?: string
+  downstreamTraceTag?: string
 }
 
 /**
@@ -181,6 +186,12 @@ export interface LogOtherData {
   // "prompt_cache_key", "client_metadata.session_id"; a synthesized Claude
   // value is labelled "content-fallback".
   session_id_source?: string
+  // Downstream trace-tag fields decoded from the x-bce-aigw-trace-tag header set
+  // by the downstream gateway. The raw value is always present when the header
+  // was sent; the decoded ids require a valid key and successful authentication.
+  downstream_trace_tag?: string
+  customer_id?: string
+  downstream_request_id?: string
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.
   op?: {
@@ -366,6 +377,9 @@ export interface GetLogsParams {
   upstream_request_id?: string
   status_code?: number
   error_keyword?: string
+  customer_id?: string
+  downstream_request_id?: string
+  downstream_trace_tag?: string
 }
 
 export interface GetLogsResponse {

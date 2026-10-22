@@ -65,6 +65,15 @@ export function buildSearchParams(
           errorKeyword: commonFilters.errorKeyword,
         }),
         ...(commonFilters.sessionId && { sessionId: commonFilters.sessionId }),
+        ...(commonFilters.customerId && {
+          customerId: commonFilters.customerId,
+        }),
+        ...(commonFilters.downstreamRequestId && {
+          downstreamRequestId: commonFilters.downstreamRequestId,
+        }),
+        ...(commonFilters.downstreamTraceTag && {
+          downstreamTraceTag: commonFilters.downstreamTraceTag,
+        }),
       }
     }
     case 'drawing': {
