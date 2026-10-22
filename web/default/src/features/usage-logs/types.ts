@@ -214,6 +214,12 @@ export interface LogOtherData {
   model_price?: number
   group_ratio?: number
   user_group_ratio?: number
+  // Reporting-only statistics fields (never affect billing). raw_quota is the
+  // undiscounted amount (group ratio 1), stat_quota is the discounted amount at
+  // stat_group_ratio, and stat_group_ratio is the ratio that was applied.
+  raw_quota?: number
+  stat_quota?: number
+  stat_group_ratio?: number
   cache_ratio?: number
   cache_creation_ratio?: number
   cache_creation_ratio_5m?: number

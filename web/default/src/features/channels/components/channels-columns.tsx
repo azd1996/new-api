@@ -623,6 +623,11 @@ export function useChannelsColumns(
           const settings = parseChannelSettings(channel.setting)
           const isPassThrough = settings.pass_through_body_enabled === true
           const hasParamOverride = Boolean(channel.param_override?.trim())
+          const statGroupRatio =
+            typeof settings.stat_group_ratio === 'number' &&
+            settings.stat_group_ratio > 0
+              ? settings.stat_group_ratio
+              : null
 
           return (
             <div className='flex max-w-full min-w-0 items-center gap-2'>
@@ -665,6 +670,11 @@ export function useChannelsColumns(
                   )}
                   <UpstreamUpdateTags channel={channel} />
                 </div>
+                {statGroupRatio !== null && (
+                  <span className='text-muted-foreground text-xs'>
+                    {t('Stat Ratio')}: ×{statGroupRatio}
+                  </span>
+                )}
                 {channel.remark && (
                   <TooltipProvider delay={200}>
                     <Tooltip>

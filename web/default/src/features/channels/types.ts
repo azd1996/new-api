@@ -93,6 +93,7 @@ export interface ChannelSettings {
   upstream_request_id_header?: string
   retry_override?: Array<Record<string, unknown>>
   response_filter?: string[]
+  stat_group_ratio?: number
 }
 
 export interface ChannelOtherSettings {

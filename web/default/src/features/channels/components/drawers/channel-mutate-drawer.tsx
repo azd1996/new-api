@@ -1055,7 +1055,8 @@ export function ChannelMutateDrawer({
     currentDisableTaskPollingSleep ||
     currentProxy?.trim() ||
     currentSystemPrompt?.trim() ||
-    currentSystemPromptOverride
+    currentSystemPromptOverride ||
+    form.watch('stat_group_ratio')?.trim()
   )
   let fieldPassthroughConfigured = false
   if (currentType === 1 || currentType === 57) {
@@ -4470,6 +4471,34 @@ export function ChannelMutateDrawer({
                                   <FormDescription>
                                     {t(
                                       'Upstream response header to record as the upstream request ID in logs. Leave empty to use the default.'
+                                    )}
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name='stat_group_ratio'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('Statistics Group Ratio')}
+                                  </FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      {...field}
+                                      value={field.value || ''}
+                                      type='number'
+                                      step='any'
+                                      min={0}
+                                      placeholder='1'
+                                    />
+                                  </FormControl>
+                                  <FormDescription>
+                                    {t(
+                                      'Reporting-only ratio for the discounted amount in statistics. Does not affect billing. Leave empty to use 1 (discounted equals original).'
                                     )}
                                   </FormDescription>
                                   <FormMessage />

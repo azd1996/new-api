@@ -740,3 +740,85 @@ func TestCalculateTextQuotaSummaryFixedPriceAppliesImageCountOnceAndAllowsOverri
 	summary = calculateTextQuotaSummary(ctx, relayInfo, usage)
 	require.Equal(t, 120000, summary.Quota)
 }
+
+func float64Ptr(v float64) *float64 { return &v }
+
+// TestCalculateTextQuotaSummaryReportingQuotas pins the reporting-only RawQuota
+// and StatQuota. RawQuota is always the undiscounted amount (group ratio 1) and
+// StatQuota applies the channel StatGroupRatio, regardless of the billing group
+// ratio. The group-ratio-0 case is the motivating scenario: billed Quota is 0
+// (free pass-through) yet the per-channel consumption stays visible.
+func TestCalculateTextQuotaSummaryReportingQuotas(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Ratio branch: prompt 1000 + completion 200*2 => combinedUnit = 1400.
+	usage := &dto.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}
+
+	newRatioRelayInfo := func(groupRatio float64, statRatio *float64) *relaycommon.RelayInfo {
+		info := &relaycommon.RelayInfo{
+			OriginModelName: "gpt-4o",
+			PriceData: types.PriceData{
+				ModelRatio:      1,
+				CompletionRatio: 2,
+				GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: groupRatio},
+			},
+			StartTime: time.Now(),
+		}
+		if statRatio != nil {
+			info.ChannelMeta = &relaycommon.ChannelMeta{
+				ChannelSetting: dto.ChannelSettings{StatGroupRatio: statRatio},
+			}
+		}
+		return info
+	}
+
+	t.Run("billing group ratio 0 keeps raw and stat visible", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		summary := calculateTextQuotaSummary(ctx, newRatioRelayInfo(0, float64Ptr(0.8)), usage)
+		require.Equal(t, 0, summary.Quota)
+		require.Equal(t, 1400, summary.RawQuota)
+		require.Equal(t, 1120, summary.StatQuota) // 1400 * 0.8
+		require.Equal(t, 0.8, summary.StatGroupRatio)
+	})
+
+	t.Run("unset stat ratio falls back to raw", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		summary := calculateTextQuotaSummary(ctx, newRatioRelayInfo(0, nil), usage)
+		require.Equal(t, 0, summary.Quota)
+		require.Equal(t, 1400, summary.RawQuota)
+		require.Equal(t, 1400, summary.StatQuota)
+		require.Equal(t, float64(1), summary.StatGroupRatio)
+	})
+
+	t.Run("non-zero billing ratio bills while raw stays undiscounted", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		summary := calculateTextQuotaSummary(ctx, newRatioRelayInfo(0.5, nil), usage)
+		require.Equal(t, 700, summary.Quota) // 1400 * 0.5
+		require.Equal(t, 1400, summary.RawQuota)
+		require.Equal(t, 1400, summary.StatQuota)
+	})
+
+	t.Run("invalid stat ratio falls back to raw", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		summary := calculateTextQuotaSummary(ctx, newRatioRelayInfo(0, float64Ptr(0)), usage)
+		require.Equal(t, 1400, summary.StatQuota)
+		require.Equal(t, float64(1), summary.StatGroupRatio)
+	})
+
+	t.Run("fixed price branch group ratio 0", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		info := &relaycommon.RelayInfo{
+			OriginModelName: "dall-e-3",
+			PriceData: types.PriceData{
+				ModelPrice:     0.12,
+				UsePrice:       true,
+				GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0},
+			},
+			StartTime: time.Now(),
+		}
+		summary := calculateTextQuotaSummary(ctx, info, &dto.Usage{PromptTokens: 1, TotalTokens: 1})
+		require.Equal(t, 0, summary.Quota)
+		require.Equal(t, 60000, summary.RawQuota) // 0.12 * 500000 * 1
+		require.Equal(t, 60000, summary.StatQuota)
+	})
+}

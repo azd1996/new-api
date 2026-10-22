@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -24,28 +25,37 @@ import (
 )
 
 type textQuotaSummary struct {
-	PromptTokens             int
-	CompletionTokens         int
-	TotalTokens              int
-	CacheTokens              int
-	CacheCreationTokens      int
-	CacheCreationTokens5m    int
-	CacheCreationTokens1h    int
-	ImageTokens              int
-	AudioTokens              int
-	ModelName                string
-	TokenName                string
-	UseTimeSeconds           int64
-	CompletionRatio          float64
-	CacheRatio               float64
-	ImageRatio               float64
-	ModelRatio               float64
-	GroupRatio               float64
-	ModelPrice               float64
-	CacheCreationRatio       float64
-	CacheCreationRatio5m     float64
-	CacheCreationRatio1h     float64
-	Quota                    int
+	PromptTokens          int
+	CompletionTokens      int
+	TotalTokens           int
+	CacheTokens           int
+	CacheCreationTokens   int
+	CacheCreationTokens5m int
+	CacheCreationTokens1h int
+	ImageTokens           int
+	AudioTokens           int
+	ModelName             string
+	TokenName             string
+	UseTimeSeconds        int64
+	CompletionRatio       float64
+	CacheRatio            float64
+	ImageRatio            float64
+	ModelRatio            float64
+	GroupRatio            float64
+	ModelPrice            float64
+	CacheCreationRatio    float64
+	CacheCreationRatio5m  float64
+	CacheCreationRatio1h  float64
+	Quota                 int
+	// RawQuota and StatQuota are reporting-only charges derived from the same
+	// base as Quota but at a different group ratio: RawQuota uses group ratio 1
+	// (the undiscounted "list" amount) and StatQuota uses StatGroupRatio (the
+	// channel's statistics/discount ratio). They never affect actual billing;
+	// they exist so consumption stays visible even when the billing group ratio
+	// is 0 (free pass-through channels). See finalizeTextQuotaForGroupRatio.
+	RawQuota                 int
+	StatQuota                int
+	StatGroupRatio           float64
 	IsClaudeUsageSemantic    bool
 	UsageSemantic            string
 	WebSearchPrice           float64
@@ -83,8 +93,11 @@ func isLegacyClaudeDerivedOpenAIUsage(relayInfo *relaycommon.RelayInfo, usage *d
 	return usage.ClaudeCacheCreation5mTokens > 0 || usage.ClaudeCacheCreation1hTokens > 0
 }
 
+// calculateTextToolCallSurcharge returns the tool-call surcharge BEFORE the
+// group ratio is applied (i.e. evaluated at group ratio = 1). Callers scale it
+// by the group ratio themselves, which lets the same base feed the billed quota
+// and the reporting quotas computed at other group ratios.
 func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, summary *textQuotaSummary) decimal.Decimal {
-	dGroupRatio := decimal.NewFromFloat(summary.GroupRatio)
 	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 
 	var surcharge decimal.Decimal
@@ -96,7 +109,6 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 			surcharge = surcharge.Add(decimal.NewFromFloat(summary.WebSearchPrice).
 				Mul(decimal.NewFromInt(int64(webSearchTool.CallCount))).
 				Div(decimal.NewFromInt(1000)).
-				Mul(dGroupRatio).
 				Mul(dQuotaPerUnit))
 		}
 	} else if strings.HasSuffix(summary.ModelName, "search-preview") {
@@ -104,7 +116,6 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 		summary.WebSearchPrice = operation_setting.GetToolPriceForModel("web_search_preview", summary.ModelName)
 		surcharge = surcharge.Add(decimal.NewFromFloat(summary.WebSearchPrice).
 			Div(decimal.NewFromInt(1000)).
-			Mul(dGroupRatio).
 			Mul(dQuotaPerUnit))
 	}
 
@@ -113,7 +124,6 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 		summary.ClaudeWebSearchPrice = operation_setting.GetToolPrice("web_search")
 		surcharge = surcharge.Add(decimal.NewFromFloat(summary.ClaudeWebSearchPrice).
 			Div(decimal.NewFromInt(1000)).
-			Mul(dGroupRatio).
 			Mul(dQuotaPerUnit).
 			Mul(decimal.NewFromInt(int64(summary.ClaudeWebSearchCallCount))))
 	}
@@ -125,7 +135,6 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 			surcharge = surcharge.Add(decimal.NewFromFloat(summary.FileSearchPrice).
 				Mul(decimal.NewFromInt(int64(fileSearchTool.CallCount))).
 				Div(decimal.NewFromInt(1000)).
-				Mul(dGroupRatio).
 				Mul(dQuotaPerUnit))
 		}
 	}
@@ -133,11 +142,34 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 	if ctx.GetBool("image_generation_call") {
 		summary.ImageGenerationCallPrice = operation_setting.GetGPTImage1PriceOnceCall(ctx.GetString("image_generation_call_quality"), ctx.GetString("image_generation_call_size"))
 		surcharge = surcharge.Add(decimal.NewFromFloat(summary.ImageGenerationCallPrice).
-			Mul(dGroupRatio).
 			Mul(dQuotaPerUnit))
 	}
 
 	return surcharge
+}
+
+// finalizeTextQuotaForGroupRatio turns the pre-group-ratio charge base
+// (combinedUnit, evaluated at group ratio = 1 and before the configured
+// other-ratios) into a concrete quota for a specific group ratio. It reproduces
+// the billing rounding, the ratio-branch minimum-one-point clamp, and the
+// zero-token / minimum-one guards, so calling it with the actual group ratio
+// yields exactly the billed quota. It is called three times per request: the
+// billed quota (actual group ratio), the raw reporting quota (group ratio 1)
+// and the discounted reporting quota (the channel statistics ratio).
+func finalizeTextQuotaForGroupRatio(priceData *types.PriceData, combinedUnit decimal.Decimal, modelRatio, groupRatio float64, isRatioBranch bool, totalTokens int) (int, *common.QuotaClamp) {
+	dGroupRatio := decimal.NewFromFloat(groupRatio)
+	calc := priceData.ApplyOtherRatiosToDecimal(combinedUnit.Mul(dGroupRatio))
+	ratio := decimal.NewFromFloat(modelRatio).Mul(dGroupRatio)
+	if isRatioBranch && !ratio.IsZero() && calc.LessThanOrEqual(decimal.Zero) {
+		calc = decimal.NewFromInt(1)
+	}
+	quota, clamp := common.QuotaFromDecimalChecked(calc)
+	if totalTokens == 0 {
+		quota = 0
+	} else if !ratio.IsZero() && quota == 0 {
+		quota = 1
+	}
+	return quota, clamp
 }
 
 // noteQuotaClamp records the first quota saturation event onto relayInfo so it
@@ -198,6 +230,16 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	}
 	summary.IsClaudeUsageSemantic = summary.UsageSemantic == "anthropic"
 
+	// StatGroupRatio is the channel-level statistics/discount ratio used only for
+	// the reporting StatQuota. Unset or invalid falls back to 1 (StatQuota equals
+	// the undiscounted RawQuota).
+	summary.StatGroupRatio = 1
+	if relayInfo.ChannelMeta != nil {
+		if r := relayInfo.ChannelSetting.StatGroupRatio; r != nil && *r > 0 && !math.IsInf(*r, 1) && !math.IsNaN(*r) {
+			summary.StatGroupRatio = *r
+		}
+	}
+
 	if usage == nil {
 		usage = &dto.Usage{
 			PromptTokens:     relayInfo.GetEstimatePromptTokens(),
@@ -249,11 +291,17 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	dCacheCreationRatio1h := decimal.NewFromFloat(summary.CacheCreationRatio1h)
 	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 
-	ratio := dModelRatio.Mul(dGroupRatio)
-	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
+	surchargeUnit := calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
+	summary.ToolCallSurchargeQuota = surchargeUnit.Mul(dGroupRatio)
 
-	var audioInputQuota decimal.Decimal
-	if !relayInfo.PriceData.UsePrice {
+	// combinedUnit is the request charge evaluated at group ratio = 1 and before
+	// the configured other-ratios. The final charge is linear in the group
+	// ratio, so the billed quota and the two reporting quotas (raw at group
+	// ratio 1, stat at the channel statistics ratio) are all derived from this
+	// single base via finalizeTextQuotaForGroupRatio.
+	isRatioBranch := !relayInfo.PriceData.UsePrice
+	var combinedUnit decimal.Decimal
+	if isRatioBranch {
 		baseTokens := dPromptTokens
 
 		var cachedTokensWithRatio decimal.Decimal
@@ -287,12 +335,13 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			imageTokensWithRatio = dImageTokens.Mul(dImageRatio)
 		}
 
+		var audioInputUnit decimal.Decimal
 		if !dAudioTokens.IsZero() {
 			summary.AudioInputPrice = operation_setting.GetGeminiInputAudioPricePerMillionTokens(summary.ModelName)
 			if summary.AudioInputPrice > 0 {
 				baseTokens = baseTokens.Sub(dAudioTokens)
-				audioInputQuota = decimal.NewFromFloat(summary.AudioInputPrice).
-					Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dGroupRatio).Mul(dQuotaPerUnit)
+				audioInputUnit = decimal.NewFromFloat(summary.AudioInputPrice).
+					Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dQuotaPerUnit)
 			}
 		}
 
@@ -306,32 +355,16 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 
 		promptQuota := baseTokens.Add(cachedTokensWithRatio).Add(imageTokensWithRatio).Add(cachedCreationTokensWithRatio)
 		completionQuota := dCompletionTokens.Mul(dCompletionRatio)
-		quotaCalculateDecimal := promptQuota.Add(completionQuota).Mul(ratio)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
-
-		if !ratio.IsZero() && quotaCalculateDecimal.LessThanOrEqual(decimal.Zero) {
-			quotaCalculateDecimal = decimal.NewFromInt(1)
-		}
-		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
-		summary.Quota = quota
-		noteQuotaClamp(relayInfo, clamp)
+		combinedUnit = promptQuota.Add(completionQuota).Mul(dModelRatio).Add(surchargeUnit).Add(audioInputUnit)
 	} else {
-		quotaCalculateDecimal := dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
-		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
-		summary.Quota = quota
-		noteQuotaClamp(relayInfo, clamp)
+		combinedUnit = dModelPrice.Mul(dQuotaPerUnit).Add(surchargeUnit)
 	}
 
-	if summary.TotalTokens == 0 {
-		summary.Quota = 0
-	} else if !ratio.IsZero() && summary.Quota == 0 {
-		summary.Quota = 1
-	}
+	var billingClamp *common.QuotaClamp
+	summary.Quota, billingClamp = finalizeTextQuotaForGroupRatio(&relayInfo.PriceData, combinedUnit, summary.ModelRatio, summary.GroupRatio, isRatioBranch, summary.TotalTokens)
+	noteQuotaClamp(relayInfo, billingClamp)
+	summary.RawQuota, _ = finalizeTextQuotaForGroupRatio(&relayInfo.PriceData, combinedUnit, summary.ModelRatio, 1, isRatioBranch, summary.TotalTokens)
+	summary.StatQuota, _ = finalizeTextQuotaForGroupRatio(&relayInfo.PriceData, combinedUnit, summary.ModelRatio, summary.StatGroupRatio, isRatioBranch, summary.TotalTokens)
 
 	return summary
 }
@@ -426,6 +459,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	} else {
 		other = GenerateTextOtherInfo(ctx, relayInfo, summary.ModelRatio, summary.GroupRatio, summary.CompletionRatio, summary.CacheTokens, summary.CacheRatio, summary.ModelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	}
+	// Reporting-only charges: raw_quota is the undiscounted amount (group ratio 1)
+	// and stat_quota applies the channel statistics ratio. They keep per-channel
+	// consumption visible even when the billing group ratio is 0.
+	other["raw_quota"] = summary.RawQuota
+	other["stat_quota"] = summary.StatQuota
+	other["stat_group_ratio"] = summary.StatGroupRatio
 	appendUsageBillingPathForLog(other, common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), originUsage)
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason

@@ -62,6 +62,13 @@ type ChannelSettings struct {
 	// responses). Example for Azure content-filter leakage: content_filter_results,
 	// prompt_filter_results, content_filters.
 	ResponseFilter []string `json:"response_filter,omitempty"`
+	// StatGroupRatio is a reporting-only group ratio used to compute the
+	// statistics "discounted amount" (stat_quota) written to each consume log.
+	// It never affects actual billing. It exists for channels whose billing
+	// group ratio is set to 0 (free pass-through) but whose real consumption
+	// should still be visible per channel. nil or non-positive means "treat as
+	// 1", i.e. the discounted amount equals the undiscounted raw amount.
+	StatGroupRatio *float64 `json:"stat_group_ratio,omitempty"`
 }
 
 // RetryRulePhaseCondition is a phase's condition block. Conditions are raw JSON

@@ -367,6 +367,24 @@ function BillingBreakdown(props: {
     })
   }
 
+  if (typeof other.raw_quota === 'number') {
+    rows.push({
+      label: t('Original Amount'),
+      value: formatLogQuota(other.raw_quota),
+    })
+  }
+
+  if (typeof other.stat_quota === 'number') {
+    const hasStatRatio =
+      typeof other.stat_group_ratio === 'number' && other.stat_group_ratio !== 1
+    rows.push({
+      label: hasStatRatio
+        ? `${t('Discounted Amount')} (x${other.stat_group_ratio})`
+        : t('Discounted Amount'),
+      value: formatLogQuota(other.stat_quota),
+    })
+  }
+
   rows.push({
     label: t('Total Cost'),
     value: formatLogQuota(log.quota),

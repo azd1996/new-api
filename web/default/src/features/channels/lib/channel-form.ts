@@ -205,6 +205,10 @@ export const channelFormSchema = z
     // edited as multiline text. Each rule is a bare key name (removed recursively)
     // or an exact gjson/sjson path (containing "." or "#").
     response_filter: z.string().optional(),
+    // Statistics group ratio (stored in setting JSON): reporting-only ratio used
+    // to compute a "discounted amount". Kept as a string in the form; serialized
+    // to a number only when it parses to a finite value > 0.
+    stat_group_ratio: z.string().optional(),
     // Override template references (stored in setting JSON): names of root-level
     // parameter / retry override templates to apply to this channel.
     param_override_template_refs: z.array(z.string()).optional(),
@@ -354,6 +358,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_request_id_header: '',
   retry_override: '',
   response_filter: '',
+  stat_group_ratio: '',
   param_override_template_refs: [],
   retry_override_template_refs: [],
   // Type-specific settings
@@ -398,6 +403,7 @@ export function transformChannelToFormDefaults(
     upstream_request_id_header: '',
     retry_override: '',
     response_filter: '',
+    stat_group_ratio: '',
     param_override_template_refs: [] as string[],
     retry_override_template_refs: [] as string[],
   }
@@ -426,6 +432,10 @@ export function transformChannelToFormDefaults(
               .filter((rule: unknown): rule is string => typeof rule === 'string')
               .join('\n')
           : '',
+        stat_group_ratio:
+          typeof parsed.stat_group_ratio === 'number'
+            ? String(parsed.stat_group_ratio)
+            : '',
         param_override_template_refs: Array.isArray(
           parsed.param_override_template_refs
         )
@@ -615,6 +625,14 @@ function buildSettingJSON(formData: ChannelFormValues): string {
     .filter((rule) => rule.length > 0)
   if (responseFilter.length > 0) {
     settingObj.response_filter = responseFilter
+  }
+  const statGroupRatio = Number(formData.stat_group_ratio)
+  if (
+    formData.stat_group_ratio?.trim() &&
+    Number.isFinite(statGroupRatio) &&
+    statGroupRatio > 0
+  ) {
+    settingObj.stat_group_ratio = statGroupRatio
   }
   const paramTemplateRefs = (formData.param_override_template_refs || [])
     .map((ref) => ref.trim())
