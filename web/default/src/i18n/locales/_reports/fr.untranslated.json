@@ -1,4 +1,5 @@
 {
+  "This page is only available to administrators.": "This page is only available to administrators.",
   "Configure VM data sources, rule templates and rules. Preview only; routing is not affected yet.": "Configure VM data sources, rule templates and rules. Preview only; routing is not affected yet.",
   "Define reusable parameter override and retry override templates. Channels can reference these templates by name.": "Define reusable parameter override and retry override templates. Channels can reference these templates by name.",
   "Leave blank to keep the stored password": "Leave blank to keep the stored password",

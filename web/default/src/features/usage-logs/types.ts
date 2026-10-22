@@ -377,6 +377,7 @@ export interface GetLogsParams {
   upstream_request_id?: string
   status_code?: number
   error_keyword?: string
+  error_signature_hash?: string
   customer_id?: string
   downstream_request_id?: string
   downstream_trace_tag?: string

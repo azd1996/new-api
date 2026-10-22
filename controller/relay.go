@@ -235,7 +235,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayFormat)
 
 		// Error-triggered fallback (e.g. thinking-family 400): rewrite the request
 		// once and retry it on the same channel, bypassing the normal retry gate.
@@ -368,7 +368,7 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
+func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayFormat types.RelayFormat) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
@@ -418,7 +418,31 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		// Store the raw (unmasked) upstream error in the log for internal ops
+		// triage; the response returned to the caller is masked separately. The
+		// signature is the normalized "detailed error" used for grouping/metrics.
+		rawError := err.ErrorWithStatusCode()
+		signature := service.NormalizeErrorSignature(rawError)
+		signatureHash := service.ErrorSignatureHash(signature)
+		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, rawError, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other, signature, signatureHash)
+
+		// Export one error metric sample labeled by the admin-configured short
+		// name (bounded) plus request dimensions, for Prometheus/VM dashboards.
+		if prommetrics.Enabled() {
+			stream := "false"
+			if common.GetContextKeyBool(c, constant.ContextKeyIsStream) {
+				stream = "true"
+			}
+			prommetrics.RecordError(
+				model.ResolveErrorShortName(signatureHash),
+				modelName,
+				c.GetString("channel_name"),
+				strconv.Itoa(err.StatusCode),
+				string(relayFormat),
+				stream,
+				c.GetString("username"),
+			)
+		}
 	}
 
 }
@@ -579,7 +603,7 @@ func RelayTask(c *gin.Context) {
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
+				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode), relayInfo.RelayFormat)
 		}
 
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {

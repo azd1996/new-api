@@ -175,6 +175,10 @@ func main() {
 	if metricsEnabled {
 		prommetrics.Init()
 		prommetrics.SetQuotaPerUnit(common.QuotaPerUnit)
+		// High-cardinality error labels (model, customer) are on by default; set
+		// ERROR_METRIC_HIGH_CARD_LABELS=false to blank them if the model/customer
+		// space is large enough to risk a Prometheus series blow-up.
+		prommetrics.SetErrorHighCardLabels(common.GetEnvOrDefaultBool("ERROR_METRIC_HIGH_CARD_LABELS", true))
 		metricsPort := os.Getenv("METRICS_PORT")
 		if metricsPort == "" {
 			metricsPort = "9090"
@@ -368,6 +372,19 @@ func InitResources() error {
 
 	// Initialize options, should after model.InitDB()
 	model.InitOptionMap()
+
+	// Load the error-signature → short-name alias cache (used by error stats and
+	// the error metric label); safe no-op when the table is empty.
+	model.InitErrorAliasCache()
+
+	// Apply any admin-persisted error-signature normalization rules (option row
+	// loaded by InitOptionMap above); empty keeps the built-in defaults.
+	common.OptionMapRWMutex.RLock()
+	errorSignatureRulesJSON := common.OptionMap["ErrorSignatureRules"]
+	common.OptionMapRWMutex.RUnlock()
+	if err := service.ApplyErrorSignatureRulesJSON(errorSignatureRulesJSON); err != nil {
+		common.SysError("failed to apply persisted error signature rules: " + err.Error())
+	}
 
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()

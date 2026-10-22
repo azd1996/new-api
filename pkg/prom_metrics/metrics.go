@@ -12,14 +12,20 @@ var (
 	once     sync.Once
 	registry *prometheus.Registry
 
-	httpRequests  *prometheus.CounterVec
-	httpDuration  *prometheus.HistogramVec
-	relayRequests *prometheus.CounterVec
-	promptTokens  *prometheus.CounterVec
+	httpRequests     *prometheus.CounterVec
+	httpDuration     *prometheus.HistogramVec
+	relayRequests    *prometheus.CounterVec
+	promptTokens     *prometheus.CounterVec
 	completionTokens *prometheus.CounterVec
-	relayDuration *prometheus.HistogramVec
-	quotaUsed     *prometheus.CounterVec
-	quotaPerUnit  prometheus.Gauge
+	relayDuration    *prometheus.HistogramVec
+	quotaUsed        *prometheus.CounterVec
+	quotaPerUnit     prometheus.Gauge
+	errorsTotal      *prometheus.CounterVec
+
+	// errorHighCardLabels gates the high-cardinality error labels (model and
+	// customer). When false their values are blanked so a large model/customer
+	// space cannot explode the error metric's series count.
+	errorHighCardLabels = true
 )
 
 // Init registers all collectors into a dedicated registry. It is safe to call
@@ -62,9 +68,38 @@ func Init() {
 			Name: "newapi_quota_per_unit",
 			Help: "Quota units per 1 USD; divide quota by this value to get the amount in USD.",
 		})
+		errorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "newapi_error_total",
+			Help: "Total upstream/relay errors by detailed-error short name and request dimensions.",
+		}, []string{"short_name", "model", "channel", "status", "protocol", "stream", "customer"})
 		registry.MustRegister(httpRequests, httpDuration, relayRequests,
-			promptTokens, completionTokens, relayDuration, quotaUsed, quotaPerUnit)
+			promptTokens, completionTokens, relayDuration, quotaUsed, quotaPerUnit, errorsTotal)
 	})
+}
+
+// SetErrorHighCardLabels toggles whether the error metric carries real model
+// and customer label values. Disable it when those spaces are large enough to
+// risk a Prometheus cardinality blow-up; the label names stay present (with
+// empty values) so the series schema is stable either way.
+func SetErrorHighCardLabels(enabled bool) {
+	errorHighCardLabels = enabled
+}
+
+// RecordError records one error occurrence. shortName is the admin-configured
+// category ("" becomes "uncategorized"); the remaining labels describe the
+// request. No-op when metrics are disabled.
+func RecordError(shortName, model, channel, status, protocol, stream, customer string) {
+	if registry == nil {
+		return
+	}
+	if shortName == "" {
+		shortName = "uncategorized"
+	}
+	if !errorHighCardLabels {
+		model = ""
+		customer = ""
+	}
+	errorsTotal.WithLabelValues(shortName, model, channel, status, protocol, stream, customer).Inc()
 }
 
 // Enabled reports whether metrics collection is active.

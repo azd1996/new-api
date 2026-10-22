@@ -25,7 +25,18 @@ import {
   USAGE_LOGS_DEFAULT_SECTION,
 } from '@/features/usage-logs/section-registry'
 
-const logTypeValues = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
+const logTypeValues = [
+  '0',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '8',
+  '9',
+] as const
 const logTypeSearchSchema = z
   .preprocess((value) => {
     if (value == null || value === '') return undefined
@@ -47,6 +58,9 @@ const usageLogsSearchSchema = z.object({
   upstreamRequestId: z.string().optional().catch(''),
   statusCode: z.string().optional().catch(''),
   errorKeyword: z.string().optional().catch(''),
+  // Exact-match filter on the normalized error signature hash. Used by the
+  // detailed error stats page drill-down to jump straight to matching logs.
+  errorSignatureHash: z.string().optional().catch(''),
   sessionId: z.string().optional().catch(''),
   customerId: z.string().optional().catch(''),
   downstreamRequestId: z.string().optional().catch(''),

@@ -113,27 +113,81 @@
             "logic": "AND"
         },
         {
-            "description": "claude-opus-5-5: thinking存在且type不存在或!=adaptive时补output_config.effort",
+            "description": "claude-opus-4-7: 模型仅支持thinking.type=adaptive，disabled/enabled等会400；thinking存在且type不存在或!=adaptive时补output_config.effort",
             "mode": "set",
             "path": "output_config.effort",
             "value": "medium",
             "keep_origin": true,
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-5-5" },
+                { "path": "model", "mode": "prefix", "value": "claude-opus-4-7" },
                 { "path": "thinking", "mode": "contains", "value": "" },
                 { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
             ],
             "logic": "AND"
         },
         {
-            "description": "claude-opus-5-5: thinking存在且type不存在或!=adaptive时统一转adaptive",
+            "description": "claude-opus-4-7: thinking存在且type不存在或!=adaptive时统一转adaptive",
             "mode": "set",
             "path": "thinking",
             "value": {
                 "type": "adaptive"
             },
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-5-5" },
+                { "path": "model", "mode": "prefix", "value": "claude-opus-4-7" },
+                { "path": "thinking", "mode": "contains", "value": "" },
+                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-4-8: 提前适配，模型仅支持thinking.type=adaptive；thinking存在且type不存在或!=adaptive时补output_config.effort",
+            "mode": "set",
+            "path": "output_config.effort",
+            "value": "medium",
+            "keep_origin": true,
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-4-8" },
+                { "path": "thinking", "mode": "contains", "value": "" },
+                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-4-8: thinking存在且type不存在或!=adaptive时统一转adaptive",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-4-8" },
+                { "path": "thinking", "mode": "contains", "value": "" },
+                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 提前适配(前缀含opus-5/opus-5-5)，模型仅支持thinking.type=adaptive；thinking存在且type不存在或!=adaptive时补output_config.effort",
+            "mode": "set",
+            "path": "output_config.effort",
+            "value": "medium",
+            "keep_origin": true,
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
+                { "path": "thinking", "mode": "contains", "value": "" },
+                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: thinking存在且type不存在或!=adaptive时统一转adaptive",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
                 { "path": "thinking", "mode": "contains", "value": "" },
                 { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
             ],
@@ -152,14 +206,26 @@
             ]
         },
         {
-            "description": "claude-opus-5: 工具定义里的strict不被Bedrock支持(400 strict: Extra inputs are not permitted)，逐个剥掉；工具与input_schema保留，响应仍是tool_use，对客户端无感",
+            "description": "claude-: 工具定义里的strict不被Bedrock支持(报错tools.N.custom.strict里custom是判别联合变体标签type=custom，真实字段在工具顶层tools.N.strict)，逐个剥掉；工具与input_schema保留，响应仍是tool_use，对客户端无感。覆盖opus/sonnet全系(sonnet-5-5等也会报)",
             "mode": "delete",
             "path": "tools.*.strict",
             "conditions": [
                 {
                     "path": "model",
                     "mode": "prefix",
-                    "value": "claude-opus-5"
+                    "value": "claude-"
+                }
+            ]
+        },
+        {
+            "description": "claude-: 工具里的defer_loading(tool-search-tool beta字段)不被Bedrock支持。Bedrock报错路径tools.N.custom.defer_loading里的custom是判别联合的变体标签(type=custom)而非真实键，真实JSON字段在工具顶层，故按tools.*.defer_loading逐个剥掉；工具定义本身保留，对客户端无感",
+            "mode": "delete",
+            "path": "tools.*.defer_loading",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
                 }
             ]
         },
@@ -187,6 +253,33 @@
             "logic": "AND"
         },
         {
+            "description": "claude-: 黑名单过滤anthropic-beta里不被Bedrock支持的beta token，逐个置null剔除，其余token原样透传(未设$keep_only_declared)",
+            "mode": "set_header",
+            "path": "anthropic-beta",
+            "value": {
+                "prompt-caching-2024-07-31": null,
+                "extended-cache-ttl-2025-04-11": null,
+                "redact-thinking-2026-02-12": null,
+                "thinking-token-count-2026-05-13": null,
+                "prompt-caching-scope-2026-01-05": null,
+                "mid-conversation-system-2026-04-07": null,
+                "per-turn-control-2026-07-01": null,
+                "mid-conversation-tool-changes-2026-07-01": null,
+                "inline-tools-2026-09-15": null,
+                "advisor-tool-2026-03-01": null,
+                "afk-mode-2026-01-31": null,
+                "fallback-credit-2026-06-01": null,
+                "thinking-binding-controls-2026-08-01": null,
+                "thinking-display-updates-2026-08-18": null,
+                "dangerous-tool-use-2026-09-03": null,
+                "advanced-tool-use-2025-11-20": null,
+                "structured-outputs-2025-12-15": null
+            },
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" }
+            ]
+        },
+        {
             "description": "claude-sonnet-5-5: 关闭thinking需用type=between_tools而非disabled，避免Bedrock 400",
             "mode": "set",
             "path": "thinking.type",
@@ -196,6 +289,26 @@
                 { "path": "thinking.type", "mode": "full", "value": "disabled" }
             ],
             "logic": "AND"
+        },
+        {
+            "description": "claude-sonnet-5-5: thinking.type=between_tools时不允许display(400 thinking.between_tools.display: Extra inputs are not permitted；between_tools是判别联合变体标签，真实字段是thinking.display)。须在disabled→between_tools转换之后执行，清掉display兜底规则补上的字段",
+            "mode": "delete",
+            "path": "thinking.display",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" },
+                { "path": "thinking.type", "mode": "full", "value": "between_tools" }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-: Bedrock不接受messages里的developer角色(400 Unexpected role \"developer\"，只允许user/assistant/system)，把role精确等于developer的逐条改写成user，保留该条内容；用^developer$锚定，不误伤其它角色",
+            "mode": "regex_replace",
+            "path": "messages.*.role",
+            "from": "^developer$",
+            "to": "user",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" }
+            ]
         },
         {
             "description": "删除messages里的system角色",
@@ -236,12 +349,15 @@
             "logic": "AND"
         },
         {
-            "description": "claude 5系列(opus-5/sonnet-5)已弃用temperature，存在即删除，避免400 temperature is deprecated for this model",
+            "description": "claude 新世代(opus-5/sonnet-5 及 opus-4-6/4-7/4-8)已弃用temperature，存在即删除，避免400 temperature is deprecated for this model。按精确型号匹配，不放宽到老的 opus-4/4-1(它们仍支持temperature)",
             "mode": "delete",
             "path": "temperature",
             "conditions": [
                 { "path": "model", "mode": "contains", "value": "claude-opus-5" },
-                { "path": "model", "mode": "contains", "value": "claude-sonnet-5" }
+                { "path": "model", "mode": "contains", "value": "claude-sonnet-5" },
+                { "path": "model", "mode": "contains", "value": "claude-opus-4-6" },
+                { "path": "model", "mode": "contains", "value": "claude-opus-4-7" },
+                { "path": "model", "mode": "contains", "value": "claude-opus-4-8" }
             ],
             "logic": "OR"
         }

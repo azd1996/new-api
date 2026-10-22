@@ -311,6 +311,22 @@ func SetApiRouter(router *gin.Engine) {
 			logRoute.GET("/self/hourly", middleware.CslHourlyAuth(), controller.GetUserCslHourly)
 			logRoute.GET("/monthly", middleware.CslHourlyAuth(), controller.GetCslMonthlyUserTotals)
 		}
+		// Detailed-error ("明细错误") stats, admin only. Drill-down reuses the
+		// normal log list via the error_signature_hash filter on GET /log/.
+		logRoute.GET("/error-stats", middleware.AdminAuth(), controller.GetErrorStats)
+		// Admin-editable normalization rule set behind the signature.
+		logRoute.GET("/error-signature-rules", middleware.AdminAuth(), controller.GetErrorSignatureRules)
+		logRoute.PUT("/error-signature-rules", middleware.AdminAuth(), controller.UpdateErrorSignatureRules)
+		logRoute.GET("/error-signature-rules/suggestions", middleware.AdminAuth(), controller.GetErrorSignatureRuleSuggestions)
+
+		// Error-signature → short-name ("明细错误类型") alias config, admin only.
+		errorAliasRoute := apiRouter.Group("/error-alias")
+		errorAliasRoute.Use(middleware.AdminAuth())
+		{
+			errorAliasRoute.GET("", controller.GetErrorSignatureAliases)
+			errorAliasRoute.POST("", controller.UpsertErrorSignatureAlias)
+			errorAliasRoute.DELETE("/:hash", controller.DeleteErrorSignatureAlias)
+		}
 
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())

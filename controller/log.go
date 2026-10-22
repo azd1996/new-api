@@ -28,7 +28,8 @@ func GetAllLogs(c *gin.Context) {
 	customerId := c.Query("customer_id")
 	downstreamRequestId := c.Query("downstream_request_id")
 	downstreamTraceTag := c.Query("downstream_trace_tag")
-	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, downstreamRequestId, downstreamTraceTag)
+	errorSignatureHash := c.Query("error_signature_hash")
+	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, downstreamRequestId, downstreamTraceTag, errorSignatureHash)
 	if err != nil {
 		common.ApiError(c, err)
 		return

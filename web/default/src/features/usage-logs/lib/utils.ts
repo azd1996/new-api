@@ -222,6 +222,9 @@ export function buildApiParams(config: {
     ...(searchParams.errorKeyword
       ? { error_keyword: String(searchParams.errorKeyword) }
       : {}),
+    ...(searchParams.errorSignatureHash
+      ? { error_signature_hash: String(searchParams.errorSignatureHash) }
+      : {}),
     ...(searchParams.customerId
       ? { customer_id: String(searchParams.customerId) }
       : {}),

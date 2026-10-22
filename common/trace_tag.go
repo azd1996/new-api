@@ -55,6 +55,7 @@ func GetTraceTagKeys() *TraceTagKeys {
 	traceTagOnce.Do(func() {
 		hexKey := strings.TrimSpace(os.Getenv(TraceTagKeyEnv))
 		if hexKey == "" {
+			SysError(TraceTagKeyEnv + " not set, downstream trace-tag decoding disabled")
 			return
 		}
 		keys, err := newTraceTagKeys(hexKey)

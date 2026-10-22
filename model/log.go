@@ -175,7 +175,12 @@ type Log struct {
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
-	Other             string `json:"other"`
+	// ErrorSignature is the normalized "detailed error" derived from the raw
+	// error message (error logs only); ErrorSignatureHash is its short indexed
+	// fingerprint used for grouping/filtering. Both are empty for non-error logs.
+	ErrorSignature     string `json:"error_signature,omitempty" gorm:"type:text"`
+	ErrorSignatureHash string `json:"error_signature_hash,omitempty" gorm:"type:varchar(32);index:idx_logs_error_sig_hash;default:''"`
+	Other              string `json:"other"`
 }
 
 // don't use iota, avoid change log type value
@@ -507,7 +512,7 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 }
 
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
-	isStream bool, group string, other map[string]interface{}) {
+	isStream bool, group string, other map[string]interface{}, errorSignature string, errorSignatureHash string) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
@@ -543,9 +548,11 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 			}
 			return ""
 		}(),
-		RequestId:         requestId,
-		UpstreamRequestId: upstreamRequestId,
-		Other:             otherStr,
+		RequestId:          requestId,
+		UpstreamRequestId:  upstreamRequestId,
+		ErrorSignature:     errorSignature,
+		ErrorSignatureHash: errorSignatureHash,
+		Other:              otherStr,
 	}
 	err := createLog(log)
 	if err != nil {
@@ -694,7 +701,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, downstreamRequestId string, downstreamTraceTag string) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB
@@ -738,6 +745,11 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if logType == LogTypeError && errorKeyword != "" {
 		condition, pattern := errorContentLikeCondition("logs.content", errorKeyword)
 		tx = tx.Where(condition, pattern)
+	}
+	// error_signature_hash is the indexed fingerprint of the normalized error;
+	// it powers the "明细错误" stats drill-down (exact match on one signature).
+	if errorSignatureHash != "" {
+		tx = tx.Where("logs.error_signature_hash = ?", errorSignatureHash)
 	}
 	tx = applyTraceTagFilters(tx, "logs.other", customerId, downstreamRequestId, downstreamTraceTag)
 	err = tx.Model(&Log{}).Count(&total).Error
