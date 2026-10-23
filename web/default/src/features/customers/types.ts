@@ -28,7 +28,7 @@ export const customerSchema = z.object({
   name: z.string(),
   remark: z.string(),
   default_discount: z.number(), // stat discount multiplier (0.8 = pay 80%)
-  model_discounts: z.record(z.string(), z.number()), // per-model multipliers
+  prefix_discounts: z.record(z.string(), z.number()), // model-name prefix -> multiplier
   created_time: z.number(),
   updated_time: z.number(),
 })
@@ -73,7 +73,7 @@ export interface CustomerFormData {
   name: string
   remark: string
   default_discount: number
-  model_discounts: Record<string, number>
+  prefix_discounts: Record<string, number>
 }
 
 // ============================================================================

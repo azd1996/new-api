@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -76,16 +77,23 @@ func CustomerName(customerID string) string {
 }
 
 // CustomerModelDiscount returns the reporting-only stat discount multiplier for
-// (customerID, modelName): a per-model override if present, else the customer's
-// default discount, else 1 when the customer is unknown. The result is always a
-// positive finite number.
+// (customerID, modelName): the longest matching model-name prefix ("series")
+// wins, else the customer's default discount, else 1 when the customer is
+// unknown. Matching is case-insensitive. The result is always positive/finite.
 func CustomerModelDiscount(customerID, modelName string) float64 {
 	c, ok := getCachedCustomer(customerID)
 	if !ok {
 		return 1
 	}
-	if d, ok := c.ModelDiscountMap[modelName]; ok {
-		return normalizeDiscount(d)
+	lowerModel := strings.ToLower(modelName)
+	best := ""
+	for prefix := range c.PrefixDiscountMap {
+		if len(prefix) > len(best) && strings.HasPrefix(lowerModel, strings.ToLower(prefix)) {
+			best = prefix
+		}
+	}
+	if best != "" {
+		return normalizeDiscount(c.PrefixDiscountMap[best])
 	}
 	return normalizeDiscount(c.DefaultDiscount)
 }

@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 // ============================================================================
 // Utility Functions
 // ============================================================================
-export { getModelDiscountEntries, type ModelDiscountEntry } from './utils'
+export { getPrefixDiscountEntries, type PrefixDiscountEntry } from './utils'
 
 // ============================================================================
 // Form Utilities
@@ -27,7 +27,7 @@ export { getModelDiscountEntries, type ModelDiscountEntry } from './utils'
 export {
   getCustomerFormSchema,
   type CustomerFormValues,
-  type ModelDiscountRow,
+  type PrefixDiscountRow,
   CUSTOMER_FORM_DEFAULT_VALUES,
   transformFormDataToPayload,
   transformCustomerToFormDefaults,

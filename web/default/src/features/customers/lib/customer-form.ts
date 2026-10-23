@@ -29,8 +29,8 @@ import type { Customer, CustomerFormData } from '../types'
 // Model Discount Row
 // ============================================================================
 
-export type ModelDiscountRow = {
-  model: string
+export type PrefixDiscountRow = {
+  prefix: string
   discount: number
 }
 
@@ -47,9 +47,9 @@ export function getCustomerFormSchema(t: TFunction) {
       .min(CUSTOMER_VALIDATION.CUSTOMER_ID_MIN_LENGTH, msg.CUSTOMER_ID_REQUIRED),
     name: z.string(),
     default_discount: z.number().positive(msg.DISCOUNT_INVALID),
-    model_discounts: z.array(
+    prefix_discounts: z.array(
       z.object({
-        model: z.string(),
+        prefix: z.string(),
         discount: z.number(),
       })
     ),
@@ -61,7 +61,7 @@ export type CustomerFormValues = {
   customer_id: string
   name: string
   default_discount: number
-  model_discounts: ModelDiscountRow[]
+  prefix_discounts: PrefixDiscountRow[]
   remark: string
 }
 
@@ -73,7 +73,7 @@ export const CUSTOMER_FORM_DEFAULT_VALUES: CustomerFormValues = {
   customer_id: '',
   name: '',
   default_discount: 1,
-  model_discounts: [],
+  prefix_discounts: [],
   remark: '',
 }
 
@@ -88,12 +88,12 @@ export const CUSTOMER_FORM_DEFAULT_VALUES: CustomerFormValues = {
 export function transformFormDataToPayload(
   data: CustomerFormValues
 ): CustomerFormData {
-  const modelDiscounts: Record<string, number> = {}
-  for (const row of data.model_discounts) {
-    const model = row.model.trim()
-    if (!model) continue
+  const prefixDiscounts: Record<string, number> = {}
+  for (const row of data.prefix_discounts) {
+    const prefix = row.prefix.trim()
+    if (!prefix) continue
     if (!Number.isFinite(row.discount) || row.discount <= 0) continue
-    modelDiscounts[model] = row.discount
+    prefixDiscounts[prefix] = row.discount
   }
 
   return {
@@ -101,26 +101,26 @@ export function transformFormDataToPayload(
     name: data.name,
     remark: data.remark,
     default_discount: data.default_discount,
-    model_discounts: modelDiscounts,
+    prefix_discounts: prefixDiscounts,
   }
 }
 
 /**
- * Transform customer data to form defaults, hydrating the dynamic model
- * discount rows from the Record.
+ * Transform customer data to form defaults, hydrating the dynamic prefix
+ * discount rows from the Record (sorted by prefix string for stable display).
  */
 export function transformCustomerToFormDefaults(
   customer: Customer
 ): CustomerFormValues {
-  const modelDiscounts = Object.entries(customer.model_discounts ?? {}).map(
-    ([model, discount]) => ({ model, discount })
-  )
+  const prefixDiscounts = Object.entries(customer.prefix_discounts ?? {})
+    .map(([prefix, discount]) => ({ prefix, discount }))
+    .sort((a, b) => a.prefix.localeCompare(b.prefix))
 
   return {
     customer_id: customer.customer_id,
     name: customer.name,
     default_discount: customer.default_discount || 1,
-    model_discounts: modelDiscounts,
+    prefix_discounts: prefixDiscounts,
     remark: customer.remark,
   }
 }

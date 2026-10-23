@@ -99,13 +99,41 @@ func otherFieldLikeCondition(column, key, value string) (string, string) {
 	return column + " LIKE ? ESCAPE '!'", "%" + esc + "%"
 }
 
+// customerNoneFilter is the sentinel value the UI sends for the "其他 / Other
+// (no customer info)" option in the customer-id / customer-name filters; it
+// selects logs whose Other JSON has no decoded customer.
+const customerNoneFilter = "__none__"
+
+// otherFieldAbsentCondition builds a cross-dialect condition matching logs whose
+// Other JSON does NOT contain the given key (e.g. requests without a decoded
+// customer). The key's LIKE metacharacters (notably `_`) are escaped.
+func otherFieldAbsentCondition(column, key string) (string, string) {
+	literal := fmt.Sprintf(`"%s":`, key)
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(literal)
+		return column + " NOT LIKE ?", "%" + esc + "%"
+	}
+	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(literal)
+	return column + " NOT LIKE ? ESCAPE '!'", "%" + esc + "%"
+}
+
 // applyTraceTagFilters narrows a log query by the downstream trace-tag fields
-// stored in the Other JSON. Empty values are ignored. Shared by the admin and
-// user log queries so both search the same way.
-func applyTraceTagFilters(tx *gorm.DB, column, customerId, downstreamRequestId, downstreamTraceTag string) *gorm.DB {
-	if customerId != "" {
-		cond, pat := otherFieldLikeCondition(column, "customer_id", customerId)
+// stored in the Other JSON. Empty values are ignored. A customer id or name of
+// customerNoneFilter selects logs with no decoded customer. Shared by the admin
+// and user log queries so both search the same way.
+func applyTraceTagFilters(tx *gorm.DB, column, customerId, customerName, downstreamRequestId, downstreamTraceTag string) *gorm.DB {
+	if customerId == customerNoneFilter || customerName == customerNoneFilter {
+		cond, pat := otherFieldAbsentCondition(column, "customer_id")
 		tx = tx.Where(cond, pat)
+	} else {
+		if customerId != "" {
+			cond, pat := otherFieldLikeCondition(column, "customer_id", customerId)
+			tx = tx.Where(cond, pat)
+		}
+		if customerName != "" {
+			cond, pat := otherFieldLikeCondition(column, "customer_name", customerName)
+			tx = tx.Where(cond, pat)
+		}
 	}
 	if downstreamRequestId != "" {
 		cond, pat := otherFieldLikeCondition(column, "downstream_request_id", downstreamRequestId)
@@ -689,7 +717,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB
@@ -741,7 +769,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		cond, pat := otherFieldLikeCondition("logs.other", "error_signature_hash", errorSignatureHash)
 		tx = tx.Where(cond, pat)
 	}
-	tx = applyTraceTagFilters(tx, "logs.other", customerId, downstreamRequestId, downstreamTraceTag)
+	tx = applyTraceTagFilters(tx, "logs.other", customerId, customerName, downstreamRequestId, downstreamTraceTag)
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
 		return nil, 0, err
@@ -803,7 +831,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 
 const logSearchCountLimit = 10000
 
-func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, statusCode int, customerId string, downstreamRequestId string, downstreamTraceTag string) (logs []*Log, total int64, err error) {
+func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, statusCode int, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB.Where("logs.user_id = ?", userId)
@@ -838,7 +866,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 		condition, args := statusCodeOtherCondition("logs.other", statusCode)
 		tx = tx.Where(condition, args...)
 	}
-	tx = applyTraceTagFilters(tx, "logs.other", customerId, downstreamRequestId, downstreamTraceTag)
+	tx = applyTraceTagFilters(tx, "logs.other", customerId, customerName, downstreamRequestId, downstreamTraceTag)
 	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
 	if err != nil {
 		common.SysError("failed to count user logs: " + err.Error())

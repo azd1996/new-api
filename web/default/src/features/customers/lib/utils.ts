@@ -20,20 +20,20 @@ For commercial licensing, please contact support@quantumnous.com
  * Utility functions for customers
  */
 
-export type ModelDiscountEntry = {
-  model: string
+export type PrefixDiscountEntry = {
+  prefix: string
   discount: number
 }
 
 /**
- * Normalize a customer's model_discounts map into a stable, sorted list of
- * entries for display (table summary chips, mobile list, tooltips).
+ * Normalize a customer's prefix_discounts map into a stable, string-sorted list
+ * of entries for display (table summary, drawer rows, tooltips).
  */
-export function getModelDiscountEntries(
-  modelDiscounts: Record<string, number> | undefined | null
-): ModelDiscountEntry[] {
-  if (!modelDiscounts) return []
-  return Object.entries(modelDiscounts)
-    .map(([model, discount]) => ({ model, discount }))
-    .sort((a, b) => a.model.localeCompare(b.model))
+export function getPrefixDiscountEntries(
+  prefixDiscounts: Record<string, number> | undefined | null
+): PrefixDiscountEntry[] {
+  if (!prefixDiscounts) return []
+  return Object.entries(prefixDiscounts)
+    .map(([prefix, discount]) => ({ prefix, discount }))
+    .sort((a, b) => a.prefix.localeCompare(b.prefix))
 }

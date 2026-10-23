@@ -65,6 +65,9 @@ export function buildSearchParams(
           errorKeyword: commonFilters.errorKeyword,
         }),
         ...(commonFilters.sessionId && { sessionId: commonFilters.sessionId }),
+        ...(commonFilters.customerName && {
+          customerName: commonFilters.customerName,
+        }),
         ...(commonFilters.customerId && {
           customerId: commonFilters.customerId,
         }),

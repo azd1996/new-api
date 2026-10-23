@@ -80,9 +80,9 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
     defaultValues: CUSTOMER_FORM_DEFAULT_VALUES,
   })
 
-  const modelDiscounts = useFieldArray({
+  const prefixDiscounts = useFieldArray({
     control: form.control,
-    name: 'model_discounts',
+    name: 'prefix_discounts',
   })
 
   useEffect(() => {
@@ -216,20 +216,25 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
               />
 
               <FormItem>
-                <FormLabel>{t('Model Discounts')}</FormLabel>
+                <FormLabel>{t('Series Discounts')}</FormLabel>
                 <FormDescription>
-                  {t('Per-model discount multipliers that override the default.')}
+                  {t(
+                    'Per-series discounts by model-name prefix (e.g. claude / gpt / gemini / grok); the longest matching prefix wins.'
+                  )}
                 </FormDescription>
                 <div className='space-y-2'>
-                  {modelDiscounts.fields.map((row, index) => (
+                  {prefixDiscounts.fields.map((row, index) => (
                     <div key={row.id} className='flex items-start gap-2'>
                       <FormField
                         control={form.control}
-                        name={`model_discounts.${index}.model`}
+                        name={`prefix_discounts.${index}.prefix`}
                         render={({ field }) => (
                           <FormItem className='flex-1'>
                             <FormControl>
-                              <Input {...field} placeholder={t('Model name')} />
+                              <Input
+                                {...field}
+                                placeholder={t('Model name prefix (e.g. claude)')}
+                              />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -237,7 +242,7 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
                       />
                       <FormField
                         control={form.control}
-                        name={`model_discounts.${index}.discount`}
+                        name={`prefix_discounts.${index}.discount`}
                         render={({ field }) => (
                           <FormItem className='w-28'>
                             <FormControl>
@@ -262,7 +267,7 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
                         type='button'
                         variant='ghost'
                         size='icon'
-                        onClick={() => modelDiscounts.remove(index)}
+                        onClick={() => prefixDiscounts.remove(index)}
                         aria-label={t('Remove')}
                       >
                         <Trash2 className='text-destructive h-4 w-4' />
@@ -273,10 +278,12 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
                     type='button'
                     variant='outline'
                     size='sm'
-                    onClick={() => modelDiscounts.append({ model: '', discount: 1 })}
+                    onClick={() =>
+                      prefixDiscounts.append({ prefix: '', discount: 1 })
+                    }
                   >
                     <Plus className='h-4 w-4' />
-                    {t('Add model discount')}
+                    {t('Add series discount')}
                   </Button>
                 </div>
               </FormItem>

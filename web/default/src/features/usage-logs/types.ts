@@ -64,6 +64,9 @@ export interface CommonLogFilters extends CommonFilters {
   sessionId?: string
   // Downstream trace-tag search (admin). Substring (LIKE) match on the matching
   // field stored in the log's `other` JSON; pair with a time range to narrow.
+  // customerName / customerId accept a configured value or the "__none__"
+  // sentinel, which selects logs that carry no decoded customer at all.
+  customerName?: string
   customerId?: string
   downstreamRequestId?: string
   downstreamTraceTag?: string
@@ -382,6 +385,7 @@ export interface GetLogsParams {
   status_code?: number
   error_keyword?: string
   error_signature_hash?: string
+  customer_name?: string
   customer_id?: string
   downstream_request_id?: string
   downstream_trace_tag?: string

@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/tooltip'
 import { formatTimestampToDate } from '@/lib/format'
 
-import { getModelDiscountEntries } from '../lib'
+import { getPrefixDiscountEntries } from '../lib'
 import type { Customer } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
@@ -78,12 +78,12 @@ export function useCustomersColumns(): ColumnDef<Customer>[] {
       size: 120,
     },
     {
-      id: 'model_discounts',
-      header: t('Model Discounts'),
+      id: 'prefix_discounts',
+      header: t('Series Discounts'),
       meta: { mobileHidden: true },
       enableSorting: false,
       cell: ({ row }) => {
-        const entries = getModelDiscountEntries(row.original.model_discounts)
+        const entries = getPrefixDiscountEntries(row.original.prefix_discounts)
         if (entries.length === 0) {
           return <span className='text-muted-foreground text-sm'>-</span>
         }
@@ -92,7 +92,7 @@ export function useCustomersColumns(): ColumnDef<Customer>[] {
             <TooltipTrigger
               render={
                 <StatusBadge
-                  label={t('{{count}} models', { count: entries.length })}
+                  label={t('{{count}} series', { count: entries.length })}
                   variant='neutral'
                   copyable={false}
                   className='cursor-help'
@@ -102,8 +102,8 @@ export function useCustomersColumns(): ColumnDef<Customer>[] {
             <TooltipContent>
               <div className='space-y-1 text-xs'>
                 {entries.map((entry) => (
-                  <div key={entry.model}>
-                    {entry.model}: ×{entry.discount}
+                  <div key={entry.prefix}>
+                    {entry.prefix}: ×{entry.discount}
                   </div>
                 ))}
               </div>
