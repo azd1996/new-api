@@ -179,14 +179,33 @@ func GetLogsStat(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, "")
+	// Reporting-only amounts (channel-discounted / customer-discounted / profit)
+	// live per row in the Other JSON, so they are aggregated separately and honor
+	// the full admin log-list filter set (customer, status code, trace-tag, ...).
+	requestId := c.Query("request_id")
+	upstreamRequestId := c.Query("upstream_request_id")
+	statusCode, _ := strconv.Atoi(c.Query("status_code"))
+	errorKeyword := c.Query("error_keyword")
+	customerId := c.Query("customer_id")
+	customerName := c.Query("customer_name")
+	downstreamRequestId := c.Query("downstream_request_id")
+	downstreamTraceTag := c.Query("downstream_trace_tag")
+	errorSignatureHash := c.Query("error_signature_hash")
+	amounts, err := model.SumLogStatAmounts(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"quota": stat.Quota,
-			"rpm":   stat.Rpm,
-			"tpm":   stat.Tpm,
+			"quota":               stat.Quota,
+			"rpm":                 stat.Rpm,
+			"tpm":                 stat.Tpm,
+			"channel_stat_quota":  amounts.ChannelStatQuota,
+			"customer_stat_quota": amounts.CustomerStatQuota,
+			"profit_quota":        amounts.ProfitQuota,
 		},
 	})
 	return

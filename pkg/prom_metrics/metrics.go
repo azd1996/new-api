@@ -21,6 +21,12 @@ var (
 	quotaUsed        *prometheus.CounterVec
 	quotaPerUnit     prometheus.Gauge
 	errorsTotal      *prometheus.CounterVec
+	// Reporting-only settlement amounts (quota units; never affect billing).
+	// channel/customer are monotonic non-negative counters; profit can decrease
+	// (customer discount below channel cost) so it is a gauge.
+	channelStatQuota  *prometheus.CounterVec
+	customerStatQuota *prometheus.CounterVec
+	profitQuota       *prometheus.GaugeVec
 
 	// errorHighCardLabels gates the high-cardinality error labels (model and
 	// customer). When false their values are blanked so a large model/customer
@@ -70,10 +76,23 @@ func Init() {
 		})
 		errorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "newapi_error_total",
-			Help: "Total upstream/relay errors by detailed-error short name and request dimensions.",
-		}, []string{"short_name", "model", "channel", "status", "protocol", "stream", "customer"})
+			Help: "Total upstream/relay errors by detailed-error short name, attribution and request dimensions.",
+		}, []string{"short_name", "attribution", "model", "channel", "status", "protocol", "stream", "customer"})
+		channelStatQuota = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "newapi_channel_stat_quota_total",
+			Help: "Reporting-only channel-discounted amount in quota units (divide by newapi_quota_per_unit for USD). Never affects billing.",
+		}, []string{"model", "group", "channel"})
+		customerStatQuota = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "newapi_customer_stat_quota_total",
+			Help: "Reporting-only customer-discounted amount in quota units, for requests with a decoded customer. Never affects billing.",
+		}, []string{"model", "group", "channel"})
+		profitQuota = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "newapi_profit_quota",
+			Help: "Reporting-only cumulative profit in quota units (customer-discounted minus channel-discounted) over customer-bearing requests; may decrease and resets on restart.",
+		}, []string{"model", "group", "channel"})
 		registry.MustRegister(httpRequests, httpDuration, relayRequests,
-			promptTokens, completionTokens, relayDuration, quotaUsed, quotaPerUnit, errorsTotal)
+			promptTokens, completionTokens, relayDuration, quotaUsed, quotaPerUnit, errorsTotal,
+			channelStatQuota, customerStatQuota, profitQuota)
 	})
 }
 
@@ -85,21 +104,24 @@ func SetErrorHighCardLabels(enabled bool) {
 	errorHighCardLabels = enabled
 }
 
-// RecordError records one error occurrence. shortName is the admin-configured
-// category ("" becomes "uncategorized"); the remaining labels describe the
-// request. No-op when metrics are disabled.
-func RecordError(shortName, model, channel, status, protocol, stream, customer string) {
+// RecordError records one error occurrence. shortName / attribution are the
+// admin-configured category / attribution ("" becomes "uncategorized"); the
+// remaining labels describe the request. No-op when metrics are disabled.
+func RecordError(shortName, attribution, model, channel, status, protocol, stream, customer string) {
 	if registry == nil {
 		return
 	}
 	if shortName == "" {
 		shortName = "uncategorized"
 	}
+	if attribution == "" {
+		attribution = "uncategorized"
+	}
 	if !errorHighCardLabels {
 		model = ""
 		customer = ""
 	}
-	errorsTotal.WithLabelValues(shortName, model, channel, status, protocol, stream, customer).Inc()
+	errorsTotal.WithLabelValues(shortName, attribution, model, channel, status, protocol, stream, customer).Inc()
 }
 
 // Enabled reports whether metrics collection is active.
@@ -141,6 +163,26 @@ func RecordRelay(model, group, channel, result string,
 	}
 	if quota > 0 {
 		quotaUsed.WithLabelValues(model, group, channel).Add(float64(quota))
+	}
+}
+
+// RecordStatAmounts records the reporting-only settlement amounts (quota units)
+// for one relay: the channel-discounted amount, and—when the request carried a
+// decoded customer—the customer-discounted amount and the profit (customer
+// minus channel, which may be negative). These never affect billing. No-op when
+// metrics are disabled.
+func RecordStatAmounts(model, group, channel string, hasCustomer bool, channelStat, customerStat int) {
+	if registry == nil {
+		return
+	}
+	if channelStat > 0 {
+		channelStatQuota.WithLabelValues(model, group, channel).Add(float64(channelStat))
+	}
+	if hasCustomer {
+		if customerStat > 0 {
+			customerStatQuota.WithLabelValues(model, group, channel).Add(float64(customerStat))
+		}
+		profitQuota.WithLabelValues(model, group, channel).Add(float64(customerStat - channelStat))
 	}
 }
 

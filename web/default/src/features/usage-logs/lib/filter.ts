@@ -64,6 +64,12 @@ export function buildSearchParams(
         ...(commonFilters.errorKeyword && {
           errorKeyword: commonFilters.errorKeyword,
         }),
+        ...(commonFilters.errorSignatureHash && {
+          errorSignatureHash: commonFilters.errorSignatureHash,
+        }),
+        ...(commonFilters.errorSignature && {
+          errorSignature: commonFilters.errorSignature,
+        }),
         ...(commonFilters.sessionId && { sessionId: commonFilters.sessionId }),
         ...(commonFilters.customerName && {
           customerName: commonFilters.customerName,

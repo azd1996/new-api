@@ -102,6 +102,37 @@ export function CommonLogsStats() {
         value={stats?.tpm || 0}
         accent='bg-slate-400/70'
       />
+      {isAdmin && (
+        <>
+          <StatBadge
+            label={t('Channel Discounted Amount')}
+            value={
+              sensitiveVisible
+                ? formatLogQuota(stats?.channel_stat_quota || 0)
+                : '••••'
+            }
+            accent='bg-amber-500/70'
+          />
+          <StatBadge
+            label={t('Customer Discounted Amount')}
+            value={
+              sensitiveVisible
+                ? formatLogQuota(stats?.customer_stat_quota || 0)
+                : '••••'
+            }
+            accent='bg-emerald-500/70'
+          />
+          <StatBadge
+            label={t('Profit Amount')}
+            value={
+              sensitiveVisible
+                ? formatLogQuota(stats?.profit_quota || 0)
+                : '••••'
+            }
+            accent='bg-violet-500/70'
+          />
+        </>
+      )}
     </div>
   )
 }

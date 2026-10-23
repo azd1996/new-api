@@ -59,6 +59,11 @@ export interface CommonLogFilters extends CommonFilters {
   // Substring (LIKE) match on the log content. Only applies to error logs,
   // whose message text lives in the content column.
   errorKeyword?: string
+  // Exact-match filter on the normalized error signature hash, set by the
+  // detailed error stats drill-down. errorSignature is the human-readable
+  // signature carried only for display in the filter bar (not sent to the API).
+  errorSignatureHash?: string
+  errorSignature?: string
   // Async session-id search (admin). Enter "notfound" to find logs with no
   // session id. Requires username + time range.
   sessionId?: string
@@ -240,7 +245,9 @@ export interface LogOtherData {
   stat_group_ratio?: number
   // customer_stat_quota is the raw amount scaled by the per-customer stat
   // discount; present only when the request's trace-tag decoded a customer id.
+  // customer_discount is the resolved (customer, model) multiplier behind it.
   customer_stat_quota?: number
+  customer_discount?: number
   cache_ratio?: number
   cache_creation_ratio?: number
   cache_creation_ratio_5m?: number
@@ -311,6 +318,13 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
+  // Reporting-only aggregate amounts (admin only), summed from each log's Other
+  // JSON over the full filter set. channel_stat_quota = sum of stat_quota,
+  // customer_stat_quota = sum of customer_stat_quota, profit_quota = sum of
+  // per-row (customer_stat_quota - stat_quota) over customer-bearing logs.
+  channel_stat_quota?: number
+  customer_stat_quota?: number
+  profit_quota?: number
 }
 
 // ============================================================================

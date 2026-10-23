@@ -25,6 +25,7 @@ import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsAdmin } from '@/hooks/use-admin'
 
 import { deleteErrorAlias, getErrorStats, upsertErrorAlias } from './api'
@@ -34,9 +35,13 @@ import {
   ErrorStatsFilterBar,
   type ErrorStatsFilterDraft,
 } from './components/error-stats-filter-bar'
-import { ErrorStatsTable } from './components/error-stats-table'
+import {
+  type AliasSaveInput,
+  ErrorStatsTable,
+} from './components/error-stats-table'
 import type {
   ErrorStatItem,
+  ErrorStatsGroupBy,
   ErrorStatsParams,
   SignatureRule,
 } from './types'
@@ -45,6 +50,15 @@ const route = getRouteApi('/_authenticated/error-stats/')
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LIMIT = 200
+
+// Seed suggestions for the attribution combobox. These are raw data values
+// (stored verbatim on the alias) and must NOT be run through t().
+const DEFAULT_ATTRIBUTIONS = [
+  '客户端问题-不可解决',
+  '客户端问题-可解决',
+  '源站问题',
+  '上游网关问题',
+]
 
 interface ErrorStatsSearch {
   startTime?: number
@@ -107,7 +121,13 @@ export function ErrorStats() {
     toDraft(search)
   )
 
-  const params = useMemo(() => toParams(search), [search])
+  const [viewMode, setViewMode] = useState<ErrorStatsGroupBy>('signature')
+
+  const baseParams = useMemo(() => toParams(search), [search])
+  const params = useMemo<ErrorStatsParams>(
+    () => ({ ...baseParams, group_by: viewMode }),
+    [baseParams, viewMode]
+  )
 
   const statsQuery = useQuery({
     queryKey: ['error-stats', params],
@@ -123,6 +143,40 @@ export function ErrorStats() {
     () => items.reduce((sum, item) => sum + item.count, 0),
     [items]
   )
+
+  // Distinct short names present in the current stats rows.
+  const shortNameOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const item of items) {
+      const value = item.short_name.trim()
+      if (value && !seen.has(value)) {
+        seen.add(value)
+        result.push(value)
+      }
+    }
+    return result
+  }, [items])
+
+  // Default attributions first, then any distinct values already in the rows.
+  const attributionOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const value of DEFAULT_ATTRIBUTIONS) {
+      if (!seen.has(value)) {
+        seen.add(value)
+        result.push(value)
+      }
+    }
+    for (const item of items) {
+      const value = item.attribution.trim()
+      if (value && !seen.has(value)) {
+        seen.add(value)
+        result.push(value)
+      }
+    }
+    return result
+  }, [items])
 
   const [savingHash, setSavingHash] = useState<string | null>(null)
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -146,7 +200,6 @@ export function ErrorStats() {
     mutationFn: upsertErrorAlias,
     onSuccess: (res) => {
       if (res.success) {
-        toast.success(t('Short name updated'))
         void queryClient.invalidateQueries({ queryKey: ['error-stats'] })
       }
     },
@@ -182,18 +235,34 @@ export function ErrorStats() {
     })
   }
 
-  const handleSaveShortName = (item: ErrorStatItem, shortName: string) => {
+  const handleSaveAlias = (item: ErrorStatItem, next: AliasSaveInput) => {
+    const shortName = next.short_name.trim()
+    const attribution = next.attribution.trim()
     setSavingHash(item.signature_hash)
-    upsertMutation.mutate({
-      signature_hash: item.signature_hash,
-      signature: item.signature,
-      short_name: shortName,
-    })
-  }
 
-  const handleClearShortName = (item: ErrorStatItem) => {
-    setSavingHash(item.signature_hash)
-    deleteMutation.mutate(item.signature_hash)
+    // Clearing both fields removes the alias entirely.
+    if (!shortName && !attribution) {
+      deleteMutation.mutate(item.signature_hash)
+      return
+    }
+
+    const message =
+      next.field === 'attribution'
+        ? t('Attribution updated')
+        : t('Short name updated')
+    upsertMutation.mutate(
+      {
+        signature_hash: item.signature_hash,
+        signature: item.signature,
+        short_name: shortName,
+        attribution,
+      },
+      {
+        onSuccess: (res) => {
+          if (res.success) toast.success(message)
+        },
+      }
+    )
   }
 
   const handleDrillDown = (item: ErrorStatItem) => {
@@ -204,6 +273,7 @@ export function ErrorStats() {
       search: {
         type: ['5'],
         errorSignatureHash: item.signature_hash,
+        errorSignature: item.signature,
         startTime: startMs,
         endTime: endMs,
       },
@@ -249,20 +319,43 @@ export function ErrorStats() {
               </Button>
             </div>
             <div className='min-h-0 flex-1'>
-              <ErrorStatsTable
-                items={items}
-                total={total}
-                isLoading={statsQuery.isLoading}
-                savingHash={savingHash}
-                onSaveShortName={handleSaveShortName}
-                onClearShortName={handleClearShortName}
-                onDrillDown={handleDrillDown}
-              />
+              <Tabs
+                value={viewMode}
+                onValueChange={(value) =>
+                  setViewMode(value as ErrorStatsGroupBy)
+                }
+                className='flex h-full min-h-0 flex-col gap-3'
+              >
+                <TabsList>
+                  <TabsTrigger value='signature'>
+                    {t('By detailed error')}
+                  </TabsTrigger>
+                  <TabsTrigger value='short_name'>
+                    {t('By error type')}
+                  </TabsTrigger>
+                  <TabsTrigger value='attribution'>
+                    {t('By attribution')}
+                  </TabsTrigger>
+                </TabsList>
+                <div className='min-h-0 flex-1'>
+                  <ErrorStatsTable
+                    items={items}
+                    total={total}
+                    isLoading={statsQuery.isLoading}
+                    viewMode={viewMode}
+                    savingHash={savingHash}
+                    shortNameOptions={shortNameOptions}
+                    attributionOptions={attributionOptions}
+                    onSaveAlias={handleSaveAlias}
+                    onDrillDown={handleDrillDown}
+                  />
+                </div>
+              </Tabs>
             </div>
             <ErrorSignatureRuleSuggestionsDialog
               open={suggestionsOpen}
               onOpenChange={setSuggestionsOpen}
-              params={params}
+              params={baseParams}
               onAddRules={handleAddSuggestions}
             />
             <ErrorSignatureRulesDialog

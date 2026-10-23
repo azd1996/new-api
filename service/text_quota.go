@@ -486,8 +486,11 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	other["stat_group_ratio"] = summary.StatGroupRatio
 	// Customer discounted amount: raw amount scaled by the per-customer stat
 	// discount. Written only for requests whose trace-tag decoded a customer id.
+	// customer_discount is the resolved (customer, model) multiplier so the log
+	// detail can show it alongside the amount.
 	if summary.HasCustomer {
 		other["customer_stat_quota"] = summary.CustomerStatQuota
+		other["customer_discount"] = summary.CustomerDiscount
 	}
 	appendUsageBillingPathForLog(other, common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), originUsage)
 	if adminRejectReason != "" {
@@ -572,4 +575,8 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	})
 	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
 		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota)
+	// Reporting-only amounts (never affect billing): channel-discounted,
+	// customer-discounted and profit, mirroring the per-log stat fields.
+	prommetrics.RecordStatAmounts(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId),
+		summary.HasCustomer, summary.StatQuota, summary.CustomerStatQuota)
 }

@@ -61,6 +61,7 @@ const usageLogsSearchSchema = z.object({
   // Exact-match filter on the normalized error signature hash. Used by the
   // detailed error stats page drill-down to jump straight to matching logs.
   errorSignatureHash: z.string().optional().catch(''),
+  errorSignature: z.string().optional().catch(''),
   sessionId: z.string().optional().catch(''),
   customerName: z.string().optional().catch(''),
   customerId: z.string().optional().catch(''),

@@ -87,18 +87,18 @@ export function useCustomersColumns(): ColumnDef<Customer>[] {
         if (entries.length === 0) {
           return <span className='text-muted-foreground text-sm'>-</span>
         }
+        const summary = entries
+          .map((entry) => `${entry.prefix} ×${entry.discount}`)
+          .join('   ')
         return (
           <Tooltip>
             <TooltipTrigger
               render={
-                <StatusBadge
-                  label={t('{{count}} series', { count: entries.length })}
-                  variant='neutral'
-                  copyable={false}
-                  className='cursor-help'
-                />
+                <span className='block max-w-[240px] cursor-help truncate font-mono text-sm' />
               }
-            />
+            >
+              {summary}
+            </TooltipTrigger>
             <TooltipContent>
               <div className='space-y-1 text-xs'>
                 {entries.map((entry) => (
@@ -111,7 +111,7 @@ export function useCustomersColumns(): ColumnDef<Customer>[] {
           </Tooltip>
         )
       },
-      size: 140,
+      size: 260,
     },
     {
       accessorKey: 'remark',

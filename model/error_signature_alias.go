@@ -11,23 +11,30 @@ import (
 )
 
 // ErrorSignatureAlias maps a normalized error signature (by its hash) to an
-// admin-chosen short name ("明细错误类型" / category). The mapping is
-// many-signatures-to-one-shortname; signatures without a row resolve to the
-// empty short name, which callers render as "uncategorized". The short name is
-// what gets exported as a bounded Prometheus label, keeping metric cardinality
-// under admin control even though signatures themselves are high-cardinality.
+// admin-chosen short name ("明细错误类型" / category) and error attribution
+// ("错误归因"). Both are many-signatures-to-one-value; signatures without a row
+// resolve to empty (rendered as "uncategorized" / "unattributed"). The short
+// name is also exported as a bounded Prometheus label, keeping metric
+// cardinality under admin control even though signatures are high-cardinality.
 type ErrorSignatureAlias struct {
 	Id            int    `json:"id" gorm:"primaryKey"`
 	SignatureHash string `json:"signature_hash" gorm:"type:varchar(32);uniqueIndex"`
 	Signature     string `json:"signature" gorm:"type:text"`
 	ShortName     string `json:"short_name" gorm:"type:varchar(128);index;default:''"`
+	Attribution   string `json:"attribution" gorm:"type:varchar(128);index;default:''"`
 	CreatedAt     int64  `json:"created_at" gorm:"bigint"`
 	UpdatedAt     int64  `json:"updated_at" gorm:"bigint"`
 }
 
+// errorAliasEntry is the cached resolution for one signature hash.
+type errorAliasEntry struct {
+	ShortName   string
+	Attribution string
+}
+
 var (
 	errorAliasCacheMu sync.RWMutex
-	errorAliasCache   = map[string]string{}
+	errorAliasCache   = map[string]errorAliasEntry{}
 )
 
 // GetAllErrorSignatureAliases returns every configured signature→short-name
@@ -38,10 +45,11 @@ func GetAllErrorSignatureAliases() ([]*ErrorSignatureAlias, error) {
 	return aliases, err
 }
 
-// UpsertErrorSignatureAlias sets (or replaces) the short name for a signature
-// hash and refreshes the in-memory cache. It uses find-then-save/create instead
-// of dialect-specific upsert so it works on SQLite, MySQL and PostgreSQL alike.
-func UpsertErrorSignatureAlias(hash string, signature string, shortName string) error {
+// UpsertErrorSignatureAlias sets (or replaces) the short name + attribution for
+// a signature hash and refreshes the in-memory cache. It uses find-then-save/
+// create instead of dialect-specific upsert so it works on SQLite, MySQL and
+// PostgreSQL alike.
+func UpsertErrorSignatureAlias(hash string, signature string, shortName string, attribution string) error {
 	if hash == "" {
 		return errors.New("signature hash is required")
 	}
@@ -52,6 +60,7 @@ func UpsertErrorSignatureAlias(hash string, signature string, shortName string) 
 	case err == nil:
 		existing.Signature = signature
 		existing.ShortName = shortName
+		existing.Attribution = attribution
 		existing.UpdatedAt = now
 		if err := DB.Save(&existing).Error; err != nil {
 			return err
@@ -61,6 +70,7 @@ func UpsertErrorSignatureAlias(hash string, signature string, shortName string) 
 			SignatureHash: hash,
 			Signature:     signature,
 			ShortName:     shortName,
+			Attribution:   attribution,
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
@@ -85,15 +95,15 @@ func DeleteErrorSignatureAlias(hash string) error {
 	return ReloadErrorAliasCache()
 }
 
-// ReloadErrorAliasCache rebuilds the hash→short-name cache from the database.
+// ReloadErrorAliasCache rebuilds the hash→{short-name,attribution} cache.
 func ReloadErrorAliasCache() error {
 	aliases, err := GetAllErrorSignatureAliases()
 	if err != nil {
 		return err
 	}
-	m := make(map[string]string, len(aliases))
+	m := make(map[string]errorAliasEntry, len(aliases))
 	for _, a := range aliases {
-		m[a.SignatureHash] = a.ShortName
+		m[a.SignatureHash] = errorAliasEntry{ShortName: a.ShortName, Attribution: a.Attribution}
 	}
 	errorAliasCacheMu.Lock()
 	errorAliasCache = m
@@ -117,7 +127,18 @@ func ResolveErrorShortName(hash string) string {
 	}
 	errorAliasCacheMu.RLock()
 	defer errorAliasCacheMu.RUnlock()
-	return errorAliasCache[hash]
+	return errorAliasCache[hash].ShortName
+}
+
+// ResolveErrorAttribution returns the configured attribution for a signature
+// hash, or "" when none is configured.
+func ResolveErrorAttribution(hash string) string {
+	if hash == "" {
+		return ""
+	}
+	errorAliasCacheMu.RLock()
+	defer errorAliasCacheMu.RUnlock()
+	return errorAliasCache[hash].Attribution
 }
 
 // SyncErrorAliasCache periodically rebuilds the alias cache from the DB so

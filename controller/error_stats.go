@@ -37,11 +37,12 @@ type errorAliasUpsertRequest struct {
 	SignatureHash string `json:"signature_hash"`
 	Signature     string `json:"signature"`
 	ShortName     string `json:"short_name"`
+	Attribution   string `json:"attribution"`
 }
 
-// UpsertErrorSignatureAlias assigns (or replaces) the short name for a single
-// signature. Admin only. Clearing a short name is done via delete, not an empty
-// upsert, so the "uncategorized" bucket stays implicit.
+// UpsertErrorSignatureAlias assigns (or replaces) the short name and error
+// attribution for a single signature. Admin only. Clearing both is done via
+// delete, not an empty upsert, so the "uncategorized" bucket stays implicit.
 func UpsertErrorSignatureAlias(c *gin.Context) {
 	var req errorAliasUpsertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -50,15 +51,16 @@ func UpsertErrorSignatureAlias(c *gin.Context) {
 	}
 	req.SignatureHash = strings.TrimSpace(req.SignatureHash)
 	req.ShortName = strings.TrimSpace(req.ShortName)
+	req.Attribution = strings.TrimSpace(req.Attribution)
 	if req.SignatureHash == "" {
 		common.ApiErrorMsg(c, "signature_hash is required")
 		return
 	}
-	if req.ShortName == "" {
-		common.ApiErrorMsg(c, "short_name is required")
+	if req.ShortName == "" && req.Attribution == "" {
+		common.ApiErrorMsg(c, "short_name or attribution is required")
 		return
 	}
-	if err := model.UpsertErrorSignatureAlias(req.SignatureHash, req.Signature, req.ShortName); err != nil {
+	if err := model.UpsertErrorSignatureAlias(req.SignatureHash, req.Signature, req.ShortName, req.Attribution); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -92,9 +94,12 @@ type errorStatChannelCount struct {
 }
 
 type errorStatItem struct {
+	GroupKey      string                  `json:"group_key"`
+	GroupLabel    string                  `json:"group_label"`
 	Signature     string                  `json:"signature"`
 	SignatureHash string                  `json:"signature_hash"`
 	ShortName     string                  `json:"short_name"`
+	Attribution   string                  `json:"attribution"`
 	Count         int64                   `json:"count"`
 	FirstSeen     int64                   `json:"first_seen"`
 	LastSeen      int64                   `json:"last_seen"`
@@ -103,9 +108,9 @@ type errorStatItem struct {
 	Channels      []errorStatChannelCount `json:"channels"`
 }
 
-// GetErrorStats aggregates error logs in the requested window by normalized
-// error signature ("明细错误"), attaching the admin-configured short name plus
-// per-model and per-channel breakdowns. Admin only.
+// GetErrorStats aggregates error logs in the requested window by the chosen
+// dimension — 明细错误 (signature), 明细错误类型 (short_name), or 错误归因
+// (attribution) — attaching per-model and per-channel breakdowns. Admin only.
 func GetErrorStats(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
@@ -121,7 +126,15 @@ func GetErrorStats(c *gin.Context) {
 		Group:          c.Query("group"),
 	}
 
-	stats, err := model.GetErrorSignatureStats(filter, limit)
+	groupBy := c.Query("group_by")
+	switch groupBy {
+	case model.ErrorStatGroupByShortName, model.ErrorStatGroupByAttribution:
+		// use as-is
+	default:
+		groupBy = model.ErrorStatGroupBySignature
+	}
+
+	stats, err := model.GetErrorStatsGrouped(filter, groupBy, limit)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -129,9 +142,9 @@ func GetErrorStats(c *gin.Context) {
 	buildErrorStatsResponse(c, stats)
 }
 
-// buildErrorStatsResponse enriches the aggregated signature rows with short
-// names and sorted model/channel breakdowns, then writes the API response.
-func buildErrorStatsResponse(c *gin.Context, stats []*model.ErrorSignatureStat) {
+// buildErrorStatsResponse enriches the aggregated buckets with sorted
+// model/channel breakdowns, then writes the API response.
+func buildErrorStatsResponse(c *gin.Context, stats []*model.ErrorGroupStat) {
 	channelIdSet := make(map[int]struct{})
 	for _, s := range stats {
 		for id := range s.Channels {
@@ -157,9 +170,12 @@ func buildErrorStatsResponse(c *gin.Context, stats []*model.ErrorSignatureStat) 
 		}
 		sort.Slice(channels, func(i, j int) bool { return channels[i].Count > channels[j].Count })
 		items = append(items, errorStatItem{
+			GroupKey:      s.GroupKey,
+			GroupLabel:    s.GroupLabel,
 			Signature:     s.Signature,
 			SignatureHash: s.SignatureHash,
-			ShortName:     model.ResolveErrorShortName(s.SignatureHash),
+			ShortName:     s.ShortName,
+			Attribution:   s.Attribution,
 			Count:         s.Count,
 			FirstSeen:     s.FirstSeen,
 			LastSeen:      s.LastSeen,

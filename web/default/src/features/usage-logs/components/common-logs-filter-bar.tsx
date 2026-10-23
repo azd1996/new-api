@@ -105,6 +105,7 @@ function buildSearchSourceKey(values: {
   upstreamRequestId?: unknown
   statusCode?: unknown
   errorKeyword?: unknown
+  errorSignatureHash?: unknown
   sessionId?: unknown
   customerName?: unknown
   customerId?: unknown
@@ -124,6 +125,7 @@ function buildSearchSourceKey(values: {
     values.upstreamRequestId,
     values.statusCode,
     values.errorKeyword,
+    values.errorSignatureHash,
     values.sessionId,
     values.customerName,
     values.customerId,
@@ -230,6 +232,7 @@ export function CommonLogsFilterBar<TData>(
       upstreamRequestId: searchParams.upstreamRequestId,
       statusCode: searchParams.statusCode,
       errorKeyword: searchParams.errorKeyword,
+      errorSignatureHash: searchParams.errorSignatureHash,
       sessionId: searchParams.sessionId,
       customerName: searchParams.customerName,
       customerId: searchParams.customerId,
@@ -251,6 +254,8 @@ export function CommonLogsFilterBar<TData>(
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
       statusCode: searchParams.statusCode || undefined,
       errorKeyword: searchParams.errorKeyword || undefined,
+      errorSignatureHash: searchParams.errorSignatureHash || undefined,
+      errorSignature: searchParams.errorSignature || undefined,
       sessionId: searchParams.sessionId || undefined,
       customerName: searchParams.customerName || undefined,
       customerId: searchParams.customerId || undefined,
@@ -274,6 +279,8 @@ export function CommonLogsFilterBar<TData>(
     searchParams.upstreamRequestId,
     searchParams.statusCode,
     searchParams.errorKeyword,
+    searchParams.errorSignatureHash,
+    searchParams.errorSignature,
     searchParams.sessionId,
     searchParams.customerName,
     searchParams.customerId,
@@ -406,6 +413,7 @@ export function CommonLogsFilterBar<TData>(
     !!filters.upstreamRequestId ||
     !!filters.statusCode ||
     !!filters.errorKeyword ||
+    !!filters.errorSignatureHash ||
     !!filters.sessionId ||
     !!filters.customerName ||
     !!filters.customerId ||
@@ -425,6 +433,7 @@ export function CommonLogsFilterBar<TData>(
     filters.upstreamRequestId,
     filters.statusCode,
     isErrorLogType ? filters.errorKeyword : undefined,
+    isAdmin ? filters.errorSignatureHash : undefined,
     isAdmin ? filters.sessionId : undefined,
     isAdmin ? filters.customerName : undefined,
     isAdmin ? filters.customerId : undefined,
@@ -610,16 +619,6 @@ export function CommonLogsFilterBar<TData>(
           onKeyDown={handleKeyDown}
         />
       </LogsFilterField>
-      {isErrorLogType && (
-        <LogsFilterField>
-          <LogsFilterInput
-            placeholder={t('Error Keyword')}
-            value={filters.errorKeyword || ''}
-            onChange={(e) => handleChange('errorKeyword', e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
-        </LogsFilterField>
-      )}
       {isAdmin && (
         <LogsFilterField>
           <LogsFilterInput
@@ -693,6 +692,31 @@ export function CommonLogsFilterBar<TData>(
           </LogsFilterField>
         </div>
       )}
+      {isAdmin && filters.errorSignatureHash && (
+        <div className='col-span-full grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
+          <LogsFilterField>
+            <LogsFilterInput
+              placeholder={t('Error Signature')}
+              value={filters.errorSignature || filters.errorSignatureHash}
+              title={filters.errorSignature || filters.errorSignatureHash}
+              readOnly
+              className='cursor-default'
+            />
+          </LogsFilterField>
+        </div>
+      )}
+      {isErrorLogType && (
+        <div className='col-span-full grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
+          <LogsFilterField>
+            <LogsFilterInput
+              placeholder={t('Error Keyword')}
+              value={filters.errorKeyword || ''}
+              onChange={(e) => handleChange('errorKeyword', e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+          </LogsFilterField>
+        </div>
+      )}
     </>
   )
 
@@ -703,10 +727,10 @@ export function CommonLogsFilterBar<TData>(
       actionStart={sensitiveToggle}
       primaryFilters={
         <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-12'>
-          <div className='min-w-0 sm:col-span-4'>{dateRangeFilter}</div>
+          <div className='min-w-0 sm:col-span-3'>{dateRangeFilter}</div>
           <div className='min-w-0 sm:col-span-3'>{modelFilter}</div>
           <div className='min-w-0 sm:col-span-4'>{groupFilter}</div>
-          <div className='min-w-0 sm:col-span-1'>{typeFilter}</div>
+          <div className='min-w-0 sm:col-span-2'>{typeFilter}</div>
         </div>
       }
       advancedFilters={advancedFilters}

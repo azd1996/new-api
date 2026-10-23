@@ -40,15 +40,41 @@ export interface ErrorStatChannel {
   count: number
 }
 
-// A single aggregated error signature row returned by /api/log/error-stats.
+// How /api/log/error-stats aggregates its rows. `signature` (default) returns
+// one row per distinct error signature; the grouped modes collapse rows by the
+// resolved category ("简名") or attribution ("错误归因").
+export type ErrorStatsGroupBy = 'signature' | 'short_name' | 'attribution'
+
+// Ordered list of supported view modes for the stats page toggle.
+export const ERROR_STATS_GROUP_BY_VALUES: readonly ErrorStatsGroupBy[] = [
+  'signature',
+  'short_name',
+  'attribution',
+]
+
+// A single aggregated error row returned by /api/log/error-stats. The meaning
+// of several fields depends on the active `group_by` mode (see field notes).
 export interface ErrorStatItem {
+  // Grouping identity. In signature mode this is the signature hash; in grouped
+  // modes it is the category/attribution value ("" => uncategorized).
+  group_key: string
+  // Human-readable label for the group. In signature mode this is the signature
+  // text; in grouped modes it is the category/attribution value.
+  group_label: string
+  // Only meaningful in signature mode; "" in grouped modes.
   signature: string
+  // Only meaningful in signature mode; "" in grouped modes.
   signature_hash: string
-  // Admin-configured category ("简名"); "" means uncategorized.
+  // Admin-configured category ("简名"); "" means uncategorized. In short_name
+  // mode this carries the group value; in attribution mode it is "".
   short_name: string
+  // Admin-configured attribution ("错误归因"). In attribution mode this carries
+  // the group value; in short_name mode it is "".
+  attribution: string
   count: number
   first_seen: number // unix seconds
   last_seen: number // unix seconds
+  // Only populated in signature mode.
   status_code: number
   models: ErrorStatModel[]
   channels: ErrorStatChannel[]
@@ -63,24 +89,28 @@ export interface ErrorStatsParams {
   model_name?: string
   channel?: number
   group?: string
+  group_by?: ErrorStatsGroupBy
   limit?: number
 }
 
-// Admin-configured signature -> short name mapping.
+// Admin-configured signature -> short name / attribution mapping.
 export interface ErrorAlias {
   id: number
   signature_hash: string
   signature: string
   short_name: string
+  attribution: string
   created_at: number
   updated_at: number
 }
 
-// Upsert payload for /api/error-alias.
+// Upsert payload for /api/error-alias. The backend requires signature_hash plus
+// at least one of short_name / attribution to be non-empty.
 export interface UpsertErrorAliasPayload {
   signature_hash: string
   signature: string
   short_name: string
+  attribution: string
 }
 
 // A single error-signature normalization rule. Rules are applied in order

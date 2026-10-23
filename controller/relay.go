@@ -449,6 +449,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			}
 			prommetrics.RecordError(
 				model.ResolveErrorShortName(signatureHash),
+				model.ResolveErrorAttribution(signatureHash),
 				modelName,
 				c.GetString("channel_name"),
 				strconv.Itoa(err.StatusCode),

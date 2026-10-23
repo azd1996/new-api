@@ -379,17 +379,29 @@ function BillingBreakdown(props: {
       typeof other.stat_group_ratio === 'number' && other.stat_group_ratio !== 1
     rows.push({
       label: hasStatRatio
-        ? `${t('Discounted Amount')} (x${other.stat_group_ratio})`
-        : t('Discounted Amount'),
+        ? `${t('Channel Discounted Amount')} (x${other.stat_group_ratio})`
+        : t('Channel Discounted Amount'),
       value: formatLogQuota(other.stat_quota),
     })
   }
 
   if (typeof other.customer_stat_quota === 'number') {
+    const hasCustomerDiscount =
+      typeof other.customer_discount === 'number' &&
+      other.customer_discount !== 1
     rows.push({
-      label: t('Customer Discounted Amount'),
+      label: hasCustomerDiscount
+        ? `${t('Customer Discounted Amount')} (x${other.customer_discount})`
+        : t('Customer Discounted Amount'),
       value: formatLogQuota(other.customer_stat_quota),
     })
+    // Profit = what the customer is billed minus our channel-discounted cost.
+    if (typeof other.stat_quota === 'number') {
+      rows.push({
+        label: t('Profit Amount'),
+        value: formatLogQuota(other.customer_stat_quota - other.stat_quota),
+      })
+    }
   }
 
   rows.push({

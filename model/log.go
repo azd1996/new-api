@@ -725,51 +725,9 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		tx = LOG_DB.Where("logs.type = ?", logType)
 	}
 
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
+	if tx, err = applyAdminLogFilters(tx, logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash); err != nil {
 		return nil, 0, err
 	}
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.username", username); err != nil {
-		return nil, 0, err
-	}
-	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
-	}
-	if requestId != "" {
-		tx = tx.Where("logs.request_id = ?", requestId)
-	}
-	if upstreamRequestId != "" {
-		tx = tx.Where("logs.upstream_request_id = ?", upstreamRequestId)
-	}
-	if startTimestamp != 0 {
-		tx = tx.Where("logs.created_at >= ?", startTimestamp)
-	}
-	if endTimestamp != 0 {
-		tx = tx.Where("logs.created_at <= ?", endTimestamp)
-	}
-	if channel != 0 {
-		tx = tx.Where("logs.channel_id = ?", channel)
-	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
-	}
-	if statusCode != 0 {
-		condition, args := statusCodeOtherCondition("logs.other", statusCode)
-		tx = tx.Where(condition, args...)
-	}
-	// Error keyword is a substring match on the content column and only applies
-	// to error logs, whose message text lives in content (see RecordErrorLog).
-	if logType == LogTypeError && errorKeyword != "" {
-		condition, pattern := errorContentLikeCondition("logs.content", errorKeyword)
-		tx = tx.Where(condition, pattern)
-	}
-	// error_signature_hash lives in the Other JSON (reusing the existing
-	// extensible column, no schema change); it powers the "明细错误" stats
-	// drill-down (one signature) via a cross-dialect other LIKE.
-	if errorSignatureHash != "" {
-		cond, pat := otherFieldLikeCondition("logs.other", "error_signature_hash", errorSignatureHash)
-		tx = tx.Where(cond, pat)
-	}
-	tx = applyTraceTagFilters(tx, "logs.other", customerId, customerName, downstreamRequestId, downstreamTraceTag)
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
 		return nil, 0, err
@@ -830,6 +788,120 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 }
 
 const logSearchCountLimit = 10000
+
+// applyAdminLogFilters applies the shared admin log-list filter chain (used by
+// both GetAllLogs and SumLogStatAmounts) onto a query that has already scoped
+// the log type. Keeping it in one place ensures the stats aggregation honors
+// exactly the same filters as the visible list.
+func applyAdminLogFilters(tx *gorm.DB, logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (*gorm.DB, error) {
+	var err error
+	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
+		return nil, err
+	}
+	if tx, err = applyExplicitLogTextFilter(tx, "logs.username", username); err != nil {
+		return nil, err
+	}
+	if tokenName != "" {
+		tx = tx.Where("logs.token_name = ?", tokenName)
+	}
+	if requestId != "" {
+		tx = tx.Where("logs.request_id = ?", requestId)
+	}
+	if upstreamRequestId != "" {
+		tx = tx.Where("logs.upstream_request_id = ?", upstreamRequestId)
+	}
+	if startTimestamp != 0 {
+		tx = tx.Where("logs.created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("logs.created_at <= ?", endTimestamp)
+	}
+	if channel != 0 {
+		tx = tx.Where("logs.channel_id = ?", channel)
+	}
+	if group != "" {
+		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	}
+	if statusCode != 0 {
+		condition, args := statusCodeOtherCondition("logs.other", statusCode)
+		tx = tx.Where(condition, args...)
+	}
+	// Error keyword is a substring match on the content column and only applies
+	// to error logs, whose message text lives in content (see RecordErrorLog).
+	if logType == LogTypeError && errorKeyword != "" {
+		condition, pattern := errorContentLikeCondition("logs.content", errorKeyword)
+		tx = tx.Where(condition, pattern)
+	}
+	// error_signature_hash lives in the Other JSON (reusing the existing
+	// extensible column, no schema change); it powers the "明细错误" stats
+	// drill-down (one signature) via a cross-dialect other LIKE.
+	if errorSignatureHash != "" {
+		cond, pat := otherFieldLikeCondition("logs.other", "error_signature_hash", errorSignatureHash)
+		tx = tx.Where(cond, pat)
+	}
+	return applyTraceTagFilters(tx, "logs.other", customerId, customerName, downstreamRequestId, downstreamTraceTag), nil
+}
+
+// logStatAmountScanLimit bounds how many matching rows SumLogStatAmounts scans
+// and parses. The per-row stat amounts live in the Other JSON (no SUM-able
+// column), so the aggregation reads `other` and sums in Go; the cap keeps a
+// wide-range query from scanning unbounded rows (pair with a time range).
+const logStatAmountScanLimit = 100000
+
+// LogStatAmounts holds the reporting-only aggregate amounts derived from each
+// log's Other JSON: channel-discounted amount (sum of stat_quota), customer
+// discounted amount (sum of customer_stat_quota) and profit (per-row
+// customer_stat_quota - stat_quota, summed only over customer-bearing logs).
+type LogStatAmounts struct {
+	ChannelStatQuota  int64 `json:"channel_stat_quota"`
+	CustomerStatQuota int64 `json:"customer_stat_quota"`
+	ProfitQuota       int64 `json:"profit_quota"`
+}
+
+// SumLogStatAmounts aggregates the reporting-only stat amounts over the admin
+// log list filtered exactly like GetAllLogs. Amounts are stored per row in the
+// Other JSON, so it scans matching rows (capped) and sums in Go.
+func SumLogStatAmounts(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (LogStatAmounts, error) {
+	var result LogStatAmounts
+	var tx *gorm.DB
+	if logType == LogTypeUnknown {
+		tx = LOG_DB
+	} else {
+		tx = LOG_DB.Where("logs.type = ?", logType)
+	}
+	var err error
+	if tx, err = applyAdminLogFilters(tx, logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash); err != nil {
+		return result, err
+	}
+	var others []string
+	if err = tx.Model(&Log{}).Limit(logStatAmountScanLimit).Pluck("logs.other", &others).Error; err != nil {
+		return result, err
+	}
+	for _, raw := range others {
+		if raw == "" {
+			continue
+		}
+		var fields struct {
+			StatQuota         *int64 `json:"stat_quota"`
+			CustomerStatQuota *int64 `json:"customer_stat_quota"`
+		}
+		if err := common.UnmarshalJsonStr(raw, &fields); err != nil {
+			continue
+		}
+		if fields.StatQuota != nil {
+			result.ChannelStatQuota += *fields.StatQuota
+		}
+		if fields.CustomerStatQuota != nil {
+			result.CustomerStatQuota += *fields.CustomerStatQuota
+			channelPart := int64(0)
+			if fields.StatQuota != nil {
+				channelPart = *fields.StatQuota
+			}
+			result.ProfitQuota += *fields.CustomerStatQuota - channelPart
+		}
+	}
+	return result, nil
+}
 
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, statusCode int, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
