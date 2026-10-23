@@ -726,11 +726,11 @@ export function CommonLogsFilterBar<TData>(
       stats={statsBar}
       actionStart={sensitiveToggle}
       primaryFilters={
-        <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-12'>
-          <div className='min-w-0 sm:col-span-3'>{dateRangeFilter}</div>
-          <div className='min-w-0 sm:col-span-3'>{modelFilter}</div>
-          <div className='min-w-0 sm:col-span-4'>{groupFilter}</div>
-          <div className='min-w-0 sm:col-span-2'>{typeFilter}</div>
+        <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[repeat(24,minmax(0,1fr))]'>
+          <div className='min-w-0 sm:col-span-8'>{dateRangeFilter}</div>
+          <div className='min-w-0 sm:col-span-6'>{modelFilter}</div>
+          <div className='min-w-0 sm:col-span-5'>{groupFilter}</div>
+          <div className='min-w-0 sm:col-span-5'>{typeFilter}</div>
         </div>
       }
       advancedFilters={advancedFilters}

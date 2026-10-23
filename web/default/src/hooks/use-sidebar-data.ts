@@ -100,7 +100,7 @@ export function useSidebarData(): SidebarData {
             icon: ListTodo,
           },
           {
-            title: t('Detailed Error Stats'),
+            title: t('Detailed Error'),
             url: '/error-stats',
             icon: AlertTriangle,
             requiredRole: ROLE.ADMIN,

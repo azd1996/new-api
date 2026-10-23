@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Popover,
@@ -47,14 +48,18 @@ import dayjs from '@/lib/dayjs'
 import type { ErrorStatItem, ErrorStatsGroupBy } from '../types'
 
 // Which editable alias field a save originated from, used to pick the right
-// toast and preserve the sibling field's value.
+// toast and preserve the sibling fields' values.
 type AliasField = 'short_name' | 'attribution'
+
+// The full set of editable alias fields, including the free-text note.
+type AliasSaveField = AliasField | 'note'
 
 // Merged alias values plus the field that triggered the save.
 export interface AliasSaveInput {
   short_name: string
   attribution: string
-  field: AliasField
+  note: string
+  field: AliasSaveField
 }
 
 function formatSeconds(seconds: number): string {
@@ -106,6 +111,7 @@ function AliasEditCell(props: AliasEditCellProps) {
   const buildPayload = (value: string): AliasSaveInput => ({
     short_name: isShortName ? value : props.item.short_name,
     attribution: isShortName ? props.item.attribution : value,
+    note: props.item.note,
     field: props.field,
   })
 
@@ -191,6 +197,112 @@ function AliasEditCell(props: AliasEditCellProps) {
   )
 }
 
+interface NoteEditCellProps {
+  item: ErrorStatItem
+  isSaving: boolean
+  onSave: (item: ErrorStatItem, next: AliasSaveInput) => void
+}
+
+// Editable free-text note cell shown in signature mode. The note explains WHY
+// the admin categorized a signature a given way. Saving always sends the row's
+// current short_name/attribution merged so editing the note never drops them.
+function NoteEditCell(props: NoteEditCellProps) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const current = props.item.note
+  const [draft, setDraft] = useState(current)
+
+  useEffect(() => {
+    if (open) setDraft(current)
+  }, [open, current])
+
+  const hasValue = current.trim() !== ''
+  const editLabel = hasValue ? t('Edit note') : t('Add note')
+
+  const buildPayload = (value: string): AliasSaveInput => ({
+    short_name: props.item.short_name,
+    attribution: props.item.attribution,
+    note: value,
+    field: 'note',
+  })
+
+  const handleSave = () => {
+    props.onSave(props.item, buildPayload(draft.trim()))
+    setOpen(false)
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      handleSave()
+    }
+  }
+
+  return (
+    <div className='flex items-center gap-1.5'>
+      {hasValue ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={<span className='block max-w-[200px] truncate text-xs' />}
+          >
+            {current}
+          </TooltipTrigger>
+          <TooltipContent className='max-w-[360px] break-words'>
+            {current}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className='text-muted-foreground text-xs'>{t('Add note')}</span>
+      )}
+
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon-xs'
+              aria-label={editLabel}
+            />
+          }
+        >
+          <Pencil className='size-3' aria-hidden='true' />
+        </PopoverTrigger>
+        <PopoverContent align='start' className='w-[280px] space-y-2 p-3'>
+          <Label className='text-muted-foreground text-xs'>
+            {t('Explanation')}
+          </Label>
+          <Input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={props.isSaving}
+            className='h-8'
+          />
+          <div className='flex justify-end gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={() => setOpen(false)}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button
+              type='button'
+              size='sm'
+              onClick={handleSave}
+              disabled={props.isSaving}
+            >
+              {t('Save')}
+            </Button>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+}
+
 function CountCell(props: { count: number; total: number }) {
   return (
     <div className='flex flex-col'>
@@ -262,7 +374,7 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
   const { t } = useTranslation()
 
   const isSignatureMode = props.viewMode === 'signature'
-  const colSpan = isSignatureMode ? 8 : 5
+  const colSpan = isSignatureMode ? 10 : 5
   const groupHeader =
     props.viewMode === 'attribution'
       ? t('Error Attribution')
@@ -282,6 +394,9 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
                 </TableHead>
                 <TableHead className='min-w-[160px]'>
                   {t('Error Attribution')}
+                </TableHead>
+                <TableHead className='min-w-[160px]'>
+                  {t('Explanation')}
                 </TableHead>
                 <TableHead className='min-w-[280px]'>
                   {t('Detailed Error')}
@@ -344,6 +459,13 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
                     item={item}
                     field='attribution'
                     options={props.attributionOptions}
+                    isSaving={props.savingHash === item.signature_hash}
+                    onSave={props.onSaveAlias}
+                  />
+                </TableCell>
+                <TableCell>
+                  <NoteEditCell
+                    item={item}
                     isSaving={props.savingHash === item.signature_hash}
                     onSave={props.onSaveAlias}
                   />

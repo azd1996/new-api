@@ -22,6 +22,7 @@ type ErrorSignatureAlias struct {
 	Signature     string `json:"signature" gorm:"type:text"`
 	ShortName     string `json:"short_name" gorm:"type:varchar(128);index;default:''"`
 	Attribution   string `json:"attribution" gorm:"type:varchar(128);index;default:''"`
+	Note          string `json:"note" gorm:"type:varchar(255);default:''"`
 	CreatedAt     int64  `json:"created_at" gorm:"bigint"`
 	UpdatedAt     int64  `json:"updated_at" gorm:"bigint"`
 }
@@ -30,6 +31,7 @@ type ErrorSignatureAlias struct {
 type errorAliasEntry struct {
 	ShortName   string
 	Attribution string
+	Note        string
 }
 
 var (
@@ -49,7 +51,7 @@ func GetAllErrorSignatureAliases() ([]*ErrorSignatureAlias, error) {
 // a signature hash and refreshes the in-memory cache. It uses find-then-save/
 // create instead of dialect-specific upsert so it works on SQLite, MySQL and
 // PostgreSQL alike.
-func UpsertErrorSignatureAlias(hash string, signature string, shortName string, attribution string) error {
+func UpsertErrorSignatureAlias(hash string, signature string, shortName string, attribution string, note string) error {
 	if hash == "" {
 		return errors.New("signature hash is required")
 	}
@@ -61,6 +63,7 @@ func UpsertErrorSignatureAlias(hash string, signature string, shortName string, 
 		existing.Signature = signature
 		existing.ShortName = shortName
 		existing.Attribution = attribution
+		existing.Note = note
 		existing.UpdatedAt = now
 		if err := DB.Save(&existing).Error; err != nil {
 			return err
@@ -71,6 +74,7 @@ func UpsertErrorSignatureAlias(hash string, signature string, shortName string, 
 			Signature:     signature,
 			ShortName:     shortName,
 			Attribution:   attribution,
+			Note:          note,
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
@@ -103,7 +107,7 @@ func ReloadErrorAliasCache() error {
 	}
 	m := make(map[string]errorAliasEntry, len(aliases))
 	for _, a := range aliases {
-		m[a.SignatureHash] = errorAliasEntry{ShortName: a.ShortName, Attribution: a.Attribution}
+		m[a.SignatureHash] = errorAliasEntry{ShortName: a.ShortName, Attribution: a.Attribution, Note: a.Note}
 	}
 	errorAliasCacheMu.Lock()
 	errorAliasCache = m
@@ -139,6 +143,17 @@ func ResolveErrorAttribution(hash string) string {
 	errorAliasCacheMu.RLock()
 	defer errorAliasCacheMu.RUnlock()
 	return errorAliasCache[hash].Attribution
+}
+
+// ResolveErrorNote returns the admin's free-text note for a signature hash, or
+// "" when none is configured.
+func ResolveErrorNote(hash string) string {
+	if hash == "" {
+		return ""
+	}
+	errorAliasCacheMu.RLock()
+	defer errorAliasCacheMu.RUnlock()
+	return errorAliasCache[hash].Note
 }
 
 // SyncErrorAliasCache periodically rebuilds the alias cache from the DB so

@@ -38,11 +38,13 @@ type errorAliasUpsertRequest struct {
 	Signature     string `json:"signature"`
 	ShortName     string `json:"short_name"`
 	Attribution   string `json:"attribution"`
+	Note          string `json:"note"`
 }
 
-// UpsertErrorSignatureAlias assigns (or replaces) the short name and error
-// attribution for a single signature. Admin only. Clearing both is done via
-// delete, not an empty upsert, so the "uncategorized" bucket stays implicit.
+// UpsertErrorSignatureAlias assigns (or replaces) the short name, error
+// attribution, and free-text note for a single signature. Admin only. Clearing
+// all three is done via delete, not an empty upsert, so the "uncategorized"
+// bucket stays implicit.
 func UpsertErrorSignatureAlias(c *gin.Context) {
 	var req errorAliasUpsertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -52,15 +54,16 @@ func UpsertErrorSignatureAlias(c *gin.Context) {
 	req.SignatureHash = strings.TrimSpace(req.SignatureHash)
 	req.ShortName = strings.TrimSpace(req.ShortName)
 	req.Attribution = strings.TrimSpace(req.Attribution)
+	req.Note = strings.TrimSpace(req.Note)
 	if req.SignatureHash == "" {
 		common.ApiErrorMsg(c, "signature_hash is required")
 		return
 	}
-	if req.ShortName == "" && req.Attribution == "" {
-		common.ApiErrorMsg(c, "short_name or attribution is required")
+	if req.ShortName == "" && req.Attribution == "" && req.Note == "" {
+		common.ApiErrorMsg(c, "short_name, attribution or note is required")
 		return
 	}
-	if err := model.UpsertErrorSignatureAlias(req.SignatureHash, req.Signature, req.ShortName, req.Attribution); err != nil {
+	if err := model.UpsertErrorSignatureAlias(req.SignatureHash, req.Signature, req.ShortName, req.Attribution, req.Note); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -100,6 +103,7 @@ type errorStatItem struct {
 	SignatureHash string                  `json:"signature_hash"`
 	ShortName     string                  `json:"short_name"`
 	Attribution   string                  `json:"attribution"`
+	Note          string                  `json:"note"`
 	Count         int64                   `json:"count"`
 	FirstSeen     int64                   `json:"first_seen"`
 	LastSeen      int64                   `json:"last_seen"`
@@ -176,6 +180,7 @@ func buildErrorStatsResponse(c *gin.Context, stats []*model.ErrorGroupStat) {
 			SignatureHash: s.SignatureHash,
 			ShortName:     s.ShortName,
 			Attribution:   s.Attribution,
+			Note:          s.Note,
 			Count:         s.Count,
 			FirstSeen:     s.FirstSeen,
 			LastSeen:      s.LastSeen,

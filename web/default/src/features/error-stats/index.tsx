@@ -238,24 +238,28 @@ export function ErrorStats() {
   const handleSaveAlias = (item: ErrorStatItem, next: AliasSaveInput) => {
     const shortName = next.short_name.trim()
     const attribution = next.attribution.trim()
+    const note = next.note.trim()
     setSavingHash(item.signature_hash)
 
-    // Clearing both fields removes the alias entirely.
-    if (!shortName && !attribution) {
+    // Clearing every field removes the alias entirely.
+    if (!shortName && !attribution && !note) {
       deleteMutation.mutate(item.signature_hash)
       return
     }
 
-    const message =
-      next.field === 'attribution'
-        ? t('Attribution updated')
-        : t('Short name updated')
+    let message = t('Short name updated')
+    if (next.field === 'attribution') {
+      message = t('Attribution updated')
+    } else if (next.field === 'note') {
+      message = t('Note updated')
+    }
     upsertMutation.mutate(
       {
         signature_hash: item.signature_hash,
         signature: item.signature,
         short_name: shortName,
         attribution,
+        note,
       },
       {
         onSuccess: (res) => {
@@ -292,31 +296,13 @@ export function ErrorStats() {
           </div>
         ) : (
           <div className='flex h-full min-h-0 flex-col gap-4'>
-            <div className='flex flex-wrap items-end justify-between gap-3'>
+            <div className='flex flex-wrap items-end gap-3'>
               <ErrorStatsFilterBar
                 draft={draft}
                 onDraftChange={handleDraftChange}
                 onSearch={handleSearch}
                 isFetching={statsQuery.isFetching}
               />
-              <Button
-                type='button'
-                variant='outline'
-                className='h-8'
-                onClick={() => setSuggestionsOpen(true)}
-              >
-                <Lightbulb className='size-4' aria-hidden='true' />
-                {t('Recommend rules')}
-              </Button>
-              <Button
-                type='button'
-                variant='outline'
-                className='h-8'
-                onClick={() => setRulesOpen(true)}
-              >
-                <SlidersHorizontal className='size-4' aria-hidden='true' />
-                {t('Edit normalization rules')}
-              </Button>
             </div>
             <div className='min-h-0 flex-1'>
               <Tabs
@@ -326,17 +312,39 @@ export function ErrorStats() {
                 }
                 className='flex h-full min-h-0 flex-col gap-3'
               >
-                <TabsList>
-                  <TabsTrigger value='signature'>
-                    {t('By detailed error')}
-                  </TabsTrigger>
-                  <TabsTrigger value='short_name'>
-                    {t('By error type')}
-                  </TabsTrigger>
-                  <TabsTrigger value='attribution'>
-                    {t('By attribution')}
-                  </TabsTrigger>
-                </TabsList>
+                <div className='flex flex-wrap items-center justify-between gap-3'>
+                  <TabsList>
+                    <TabsTrigger value='signature'>
+                      {t('By detailed error')}
+                    </TabsTrigger>
+                    <TabsTrigger value='short_name'>
+                      {t('By error type')}
+                    </TabsTrigger>
+                    <TabsTrigger value='attribution'>
+                      {t('By attribution')}
+                    </TabsTrigger>
+                  </TabsList>
+                  <div className='flex items-center gap-3'>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      className='h-8'
+                      onClick={() => setSuggestionsOpen(true)}
+                    >
+                      <Lightbulb className='size-4' aria-hidden='true' />
+                      {t('Recommend rules')}
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      className='h-8'
+                      onClick={() => setRulesOpen(true)}
+                    >
+                      <SlidersHorizontal className='size-4' aria-hidden='true' />
+                      {t('Edit normalization rules')}
+                    </Button>
+                  </div>
+                </div>
                 <div className='min-h-0 flex-1'>
                   <ErrorStatsTable
                     items={items}

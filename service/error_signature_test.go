@@ -50,6 +50,16 @@ func TestNormalizeErrorSignatureRules(t *testing.T) {
 			want:  "trace * failed",
 		},
 		{
+			name:  "masks openai responses item id",
+			input: "status_code=400, The encrypted content for item rs_051dff7379a0ef60016adb2a53ca948194a8282bff7c2d471e could not be verified.",
+			want:  "status_code=400, The encrypted content for item rs_* could not be verified.",
+		},
+		{
+			name:  "masks anthropic bedrock tool id",
+			input: "status_code=400, unexpected `tool_use_id`: toolu_bdrk_01QNt6oBGUi8AtDkLkJtT4CN. Each block must match.",
+			want:  "status_code=400, unexpected `tool_use_id`: toolu_*. Each block must match.",
+		},
+		{
 			name:  "collapses whitespace and newlines",
 			input: "line one\n   line two\tend",
 			want:  "line one line two end",

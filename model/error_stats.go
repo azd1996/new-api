@@ -165,6 +165,7 @@ type ErrorGroupStat struct {
 	SignatureHash string
 	ShortName     string
 	Attribution   string
+	Note          string
 	Count         int64
 	FirstSeen     int64
 	LastSeen      int64
@@ -197,6 +198,7 @@ func GetErrorStatsGrouped(f ErrorStatFilter, groupBy string, limit int) ([]*Erro
 				SignatureHash: s.SignatureHash,
 				ShortName:     ResolveErrorShortName(s.SignatureHash),
 				Attribution:   ResolveErrorAttribution(s.SignatureHash),
+				Note:          ResolveErrorNote(s.SignatureHash),
 				Count:         s.Count,
 				FirstSeen:     s.FirstSeen,
 				LastSeen:      s.LastSeen,

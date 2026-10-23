@@ -42,12 +42,14 @@ var (
 
 // DefaultErrorSignatureRules returns the seed rule set. Order matters: whitespace
 // is collapsed first, our own request-id suffixes are stripped, then request-id
-// shaped tokens (UUID, long hex, key-anchored ids) and timestamps are masked.
+// shaped tokens (UUID, vendor-prefixed ids, long hex, key-anchored ids) and
+// timestamps are masked.
 func DefaultErrorSignatureRules() []SignatureRule {
 	return []SignatureRule{
 		{Name: "collapse-whitespace", Pattern: `\s+`, Replacement: " ", Enabled: true},
 		{Name: "strip-newapi-request-id", Pattern: ` *\(request id: [^)]*\)`, Replacement: "", Enabled: true},
 		{Name: "uuid", Pattern: `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`, Replacement: "********-****-****-****-************", Enabled: true},
+		{Name: "vendor-prefixed-id", Pattern: `\b(toolu|rs|resp|msg|item|fc|call|chatcmpl|req)_[A-Za-z0-9_]{6,}`, Replacement: "${1}_*", Enabled: true},
 		{Name: "long-hex", Pattern: `\b[0-9a-fA-F]{16,}\b`, Replacement: "*", Enabled: true},
 		{Name: "request-id-by-key", Pattern: `(?i)(request[ -]?id:\s*)[A-Za-z0-9._-]+`, Replacement: "${1}*", Enabled: true},
 		{Name: "amzn-request-id", Pattern: `(?i)(x-amzn-requestid:\s*)[A-Za-z0-9._-]+`, Replacement: "${1}*", Enabled: true},

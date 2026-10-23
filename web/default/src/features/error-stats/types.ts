@@ -71,6 +71,9 @@ export interface ErrorStatItem {
   // Admin-configured attribution ("错误归因"). In attribution mode this carries
   // the group value; in short_name mode it is "".
   attribution: string
+  // Admin-written free-text explanation of why the signature was categorized
+  // this way. Only meaningful in signature mode; "" in grouped modes.
+  note: string
   count: number
   first_seen: number // unix seconds
   last_seen: number // unix seconds
@@ -100,17 +103,19 @@ export interface ErrorAlias {
   signature: string
   short_name: string
   attribution: string
+  note: string
   created_at: number
   updated_at: number
 }
 
 // Upsert payload for /api/error-alias. The backend requires signature_hash plus
-// at least one of short_name / attribution to be non-empty.
+// at least one of short_name / attribution / note to be non-empty.
 export interface UpsertErrorAliasPayload {
   signature_hash: string
   signature: string
   short_name: string
   attribution: string
+  note: string
 }
 
 // A single error-signature normalization rule. Rules are applied in order
