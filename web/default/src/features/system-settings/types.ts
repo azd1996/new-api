@@ -357,11 +357,19 @@ export type ProxyHealthResponse = {
   data: ProxyHealthEntry[]
 }
 
+export type GroupModelRule = {
+  group: string
+  models: string[]
+}
+
 export type OperationsSettings = {
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
   SelfUseModeEnabled: boolean
   AllowUnsetModelRatio: boolean
+  DebugEnabled: boolean
+  'extended_cache_ttl_setting.rules': GroupModelRule[]
+  'metadata_injection_disable_setting.rules': GroupModelRule[]
   QuotaRemindThreshold: string
   SMTPServer: string
   SMTPPort: string

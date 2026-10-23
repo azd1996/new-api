@@ -440,6 +440,13 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			if common.GetContextKeyBool(c, constant.ContextKeyIsStream) {
 				stream = "true"
 			}
+			// Prefer the decoded downstream customer id (the real customer
+			// concept, also recorded on the log's other.customer_id); fall back
+			// to the gateway username when no customer is identified.
+			customerLabel := c.GetString("username")
+			if _, _, customerID, decoded := common.TraceTagFromContext(c); decoded && customerID != "" {
+				customerLabel = customerID
+			}
 			prommetrics.RecordError(
 				model.ResolveErrorShortName(signatureHash),
 				modelName,
@@ -447,7 +454,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 				strconv.Itoa(err.StatusCode),
 				string(relayFormat),
 				stream,
-				c.GetString("username"),
+				customerLabel,
 			)
 		}
 	}

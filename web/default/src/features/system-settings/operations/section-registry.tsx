@@ -37,6 +37,11 @@ const OPERATIONS_SECTIONS = [
           DemoSiteEnabled: settings.DemoSiteEnabled,
           SelfUseModeEnabled: settings.SelfUseModeEnabled,
           AllowUnsetModelRatio: settings.AllowUnsetModelRatio,
+          DebugEnabled: settings.DebugEnabled,
+          'extended_cache_ttl_setting.rules':
+            settings['extended_cache_ttl_setting.rules'],
+          'metadata_injection_disable_setting.rules':
+            settings['metadata_injection_disable_setting.rules'],
         }}
       />
     ),
