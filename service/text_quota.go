@@ -53,9 +53,17 @@ type textQuotaSummary struct {
 	// channel's statistics/discount ratio). They never affect actual billing;
 	// they exist so consumption stays visible even when the billing group ratio
 	// is 0 (free pass-through channels). See finalizeTextQuotaForGroupRatio.
-	RawQuota                 int
-	StatQuota                int
-	StatGroupRatio           float64
+	RawQuota       int
+	StatQuota      int
+	StatGroupRatio float64
+	// CustomerDiscount is the per-(customer, model) statistics discount resolved
+	// from the decoded trace-tag customer id; CustomerStatQuota is the raw amount
+	// (group ratio 1) scaled by it. HasCustomer is true only when a customer id
+	// was decoded, so the amount is logged only for identified downstream
+	// customers. Like RawQuota/StatQuota these are reporting-only (never billed).
+	CustomerDiscount         float64
+	CustomerStatQuota        int
+	HasCustomer              bool
 	IsClaudeUsageSemantic    bool
 	UsageSemantic            string
 	WebSearchPrice           float64
@@ -240,6 +248,16 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		}
 	}
 
+	// CustomerDiscount is the per-(customer, model) statistics discount resolved
+	// from the decoded trace-tag customer id (per-model override, else customer
+	// default, else 1). Reporting-only; recorded only when a customer id was
+	// actually decoded from the inbound trace-tag header.
+	summary.CustomerDiscount = 1
+	if _, _, customerID, decoded := common.TraceTagFromContext(ctx); decoded && customerID != "" {
+		summary.HasCustomer = true
+		summary.CustomerDiscount = model.CustomerModelDiscount(customerID, summary.ModelName)
+	}
+
 	if usage == nil {
 		usage = &dto.Usage{
 			PromptTokens:     relayInfo.GetEstimatePromptTokens(),
@@ -365,6 +383,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	noteQuotaClamp(relayInfo, billingClamp)
 	summary.RawQuota, _ = finalizeTextQuotaForGroupRatio(&relayInfo.PriceData, combinedUnit, summary.ModelRatio, 1, isRatioBranch, summary.TotalTokens)
 	summary.StatQuota, _ = finalizeTextQuotaForGroupRatio(&relayInfo.PriceData, combinedUnit, summary.ModelRatio, summary.StatGroupRatio, isRatioBranch, summary.TotalTokens)
+	summary.CustomerStatQuota, _ = finalizeTextQuotaForGroupRatio(&relayInfo.PriceData, combinedUnit, summary.ModelRatio, summary.CustomerDiscount, isRatioBranch, summary.TotalTokens)
 
 	return summary
 }
@@ -465,6 +484,11 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	other["raw_quota"] = summary.RawQuota
 	other["stat_quota"] = summary.StatQuota
 	other["stat_group_ratio"] = summary.StatGroupRatio
+	// Customer discounted amount: raw amount scaled by the per-customer stat
+	// discount. Written only for requests whose trace-tag decoded a customer id.
+	if summary.HasCustomer {
+		other["customer_stat_quota"] = summary.CustomerStatQuota
+	}
 	appendUsageBillingPathForLog(other, common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), originUsage)
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason

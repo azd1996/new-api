@@ -175,12 +175,7 @@ type Log struct {
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
-	// ErrorSignature is the normalized "detailed error" derived from the raw
-	// error message (error logs only); ErrorSignatureHash is its short indexed
-	// fingerprint used for grouping/filtering. Both are empty for non-error logs.
-	ErrorSignature     string `json:"error_signature,omitempty" gorm:"type:text"`
-	ErrorSignatureHash string `json:"error_signature_hash,omitempty" gorm:"type:varchar(32);index:idx_logs_error_sig_hash;default:''"`
-	Other              string `json:"other"`
+	Other             string `json:"other"`
 }
 
 // don't use iota, avoid change log type value
@@ -211,30 +206,25 @@ func ensureLogRequestId(log *Log) {
 
 // attachDownstreamTraceTag parses the inbound trace-tag header (set by the
 // downstream gateway) and records the raw value plus the decoded downstream
-// request id and customer id into the log's other map, so model-access
-// consume/error logs can surface and search them. The raw value is always
-// recorded when the header is present; the decoded ids are added only when
-// decryption + authentication succeed (a decode failure or missing key leaves
-// just the raw value). Returns the map, allocating one if a header is present
-// but other was nil.
+// request id, customer id, and configured customer name into the log's other
+// map, so model-access consume/error logs can surface and search them. The raw
+// value is always recorded when the header is present; the decoded fields are
+// added only when decryption + authentication succeed. Returns the map,
+// allocating one if a header is present but other was nil.
 func attachDownstreamTraceTag(c *gin.Context, other map[string]interface{}) map[string]interface{} {
-	if c == nil || c.Request == nil {
-		return other
-	}
-	headerVal := strings.TrimSpace(c.GetHeader(common.TraceTagHeader))
-	if headerVal == "" {
+	raw, requestID, customerID, decoded := common.TraceTagFromContext(c)
+	if raw == "" {
 		return other
 	}
 	if other == nil {
 		other = make(map[string]interface{})
 	}
-	other["downstream_trace_tag"] = headerVal
-	if keys := common.GetTraceTagKeys(); keys != nil {
-		if requestID, customerID, err := keys.Decode(headerVal); err == nil {
-			other["downstream_request_id"] = requestID
-			other["customer_id"] = customerID
-		} else {
-			logger.LogWarn(c, "failed to decode "+common.TraceTagHeader+": "+err.Error())
+	other["downstream_trace_tag"] = raw
+	if decoded {
+		other["downstream_request_id"] = requestID
+		other["customer_id"] = customerID
+		if name := CustomerName(customerID); name != "" {
+			other["customer_name"] = name
 		}
 	}
 	return other
@@ -512,7 +502,7 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 }
 
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
-	isStream bool, group string, other map[string]interface{}, errorSignature string, errorSignatureHash string) {
+	isStream bool, group string, other map[string]interface{}) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
@@ -548,11 +538,9 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 			}
 			return ""
 		}(),
-		RequestId:          requestId,
-		UpstreamRequestId:  upstreamRequestId,
-		ErrorSignature:     errorSignature,
-		ErrorSignatureHash: errorSignatureHash,
-		Other:              otherStr,
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
+		Other:             otherStr,
 	}
 	err := createLog(log)
 	if err != nil {
@@ -746,10 +734,12 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		condition, pattern := errorContentLikeCondition("logs.content", errorKeyword)
 		tx = tx.Where(condition, pattern)
 	}
-	// error_signature_hash is the indexed fingerprint of the normalized error;
-	// it powers the "明细错误" stats drill-down (exact match on one signature).
+	// error_signature_hash lives in the Other JSON (reusing the existing
+	// extensible column, no schema change); it powers the "明细错误" stats
+	// drill-down (one signature) via a cross-dialect other LIKE.
 	if errorSignatureHash != "" {
-		tx = tx.Where("logs.error_signature_hash = ?", errorSignatureHash)
+		cond, pat := otherFieldLikeCondition("logs.other", "error_signature_hash", errorSignatureHash)
+		tx = tx.Where(cond, pat)
 	}
 	tx = applyTraceTagFilters(tx, "logs.other", customerId, downstreamRequestId, downstreamTraceTag)
 	err = tx.Model(&Log{}).Count(&total).Error

@@ -424,7 +424,14 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		rawError := err.ErrorWithStatusCode()
 		signature := service.NormalizeErrorSignature(rawError)
 		signatureHash := service.ErrorSignatureHash(signature)
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, rawError, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other, signature, signatureHash)
+		// Store the signature + its hash inside the existing Other JSON (no new
+		// columns, so no log-table schema change across SQLite/MySQL/PG/ClickHouse);
+		// the hash powers stats grouping and drill-down (other LIKE).
+		if signatureHash != "" {
+			other["error_signature"] = signature
+			other["error_signature_hash"] = signatureHash
+		}
+		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, rawError, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 
 		// Export one error metric sample labeled by the admin-configured short
 		// name (bounded) plus request dimensions, for Prometheus/VM dashboards.

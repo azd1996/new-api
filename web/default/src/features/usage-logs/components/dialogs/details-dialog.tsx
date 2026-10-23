@@ -385,6 +385,13 @@ function BillingBreakdown(props: {
     })
   }
 
+  if (typeof other.customer_stat_quota === 'number') {
+    rows.push({
+      label: t('Customer Discounted Amount'),
+      value: formatLogQuota(other.customer_stat_quota),
+    })
+  }
+
   rows.push({
     label: t('Total Cost'),
     value: formatLogQuota(log.quota),
@@ -715,6 +722,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   )}
                 </span>
               }
+              mono
+            />
+          )}
+
+          {props.isAdmin && other?.customer_name && (
+            <DetailRow
+              label={t('Customer Name')}
+              value={other.customer_name}
               mono
             />
           )}

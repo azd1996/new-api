@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/gin-gonic/gin"
 )
 
 // Trace-tag decoding. The downstream gateway tags each outbound request with the
@@ -123,4 +125,42 @@ func (k *TraceTagKeys) Decode(tag string) (requestID, customerID string, err err
 		return "", "", errors.New("malformed trace tag plaintext")
 	}
 	return parts[0], parts[1], nil
+}
+
+// traceTagCtxKey caches the per-request decode result on the gin context.
+const traceTagCtxKey = "x_trace_tag_decoded"
+
+type traceTagResult struct {
+	raw        string
+	requestID  string
+	customerID string
+	decoded    bool
+}
+
+// TraceTagFromContext decodes the inbound trace-tag header once per request and
+// caches the result on the gin context, so the billing settle path and the log
+// writer can both read it without decoding twice. raw is the verbatim header
+// (empty when absent); decoded reports whether authentication succeeded, in
+// which case downstreamRequestID and customerID are populated. Decode failures
+// are intentionally silent here (the raw value is still surfaced for triage) to
+// avoid per-request log flooding from an untrusted inbound header.
+func TraceTagFromContext(c *gin.Context) (raw, downstreamRequestID, customerID string, decoded bool) {
+	if c == nil || c.Request == nil {
+		return "", "", "", false
+	}
+	if v, ok := c.Get(traceTagCtxKey); ok {
+		if r, ok := v.(traceTagResult); ok {
+			return r.raw, r.requestID, r.customerID, r.decoded
+		}
+	}
+	res := traceTagResult{raw: strings.TrimSpace(c.GetHeader(TraceTagHeader))}
+	if res.raw != "" {
+		if keys := GetTraceTagKeys(); keys != nil {
+			if reqID, custID, err := keys.Decode(res.raw); err == nil {
+				res.requestID, res.customerID, res.decoded = reqID, custID, true
+			}
+		}
+	}
+	c.Set(traceTagCtxKey, res)
+	return res.raw, res.requestID, res.customerID, res.decoded
 }

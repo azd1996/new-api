@@ -2,6 +2,7 @@ package controller
 
 import (
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -125,37 +126,17 @@ func GetErrorStats(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	buildErrorStatsResponse(c, filter, stats)
+	buildErrorStatsResponse(c, stats)
 }
 
-// buildErrorStatsResponse enriches the headline signature rows with short names
-// and model/channel breakdowns, then writes the API response.
-func buildErrorStatsResponse(c *gin.Context, filter model.ErrorStatFilter, stats []*model.ErrorSignatureStat) {
-	hashes := make([]string, 0, len(stats))
-	for _, s := range stats {
-		hashes = append(hashes, s.SignatureHash)
-	}
-
-	modelRows, err := model.GetErrorSignatureModelBreakdown(filter, hashes)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	channelRows, err := model.GetErrorSignatureChannelBreakdown(filter, hashes)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-
-	modelsByHash := make(map[string][]errorStatModelCount)
-	for _, r := range modelRows {
-		modelsByHash[r.SignatureHash] = append(modelsByHash[r.SignatureHash], errorStatModelCount{Model: r.ModelName, Count: r.Count})
-	}
-	channelsByHash := make(map[string][]errorStatChannelCount)
+// buildErrorStatsResponse enriches the aggregated signature rows with short
+// names and sorted model/channel breakdowns, then writes the API response.
+func buildErrorStatsResponse(c *gin.Context, stats []*model.ErrorSignatureStat) {
 	channelIdSet := make(map[int]struct{})
-	for _, r := range channelRows {
-		channelsByHash[r.SignatureHash] = append(channelsByHash[r.SignatureHash], errorStatChannelCount{ChannelId: r.ChannelId, Count: r.Count})
-		channelIdSet[r.ChannelId] = struct{}{}
+	for _, s := range stats {
+		for id := range s.Channels {
+			channelIdSet[id] = struct{}{}
+		}
 	}
 	channelNames := resolveChannelNames(channelIdSet)
 
@@ -165,10 +146,16 @@ func buildErrorStatsResponse(c *gin.Context, filter model.ErrorStatFilter, stats
 		if m := errorStatusFromSignaturePattern.FindStringSubmatch(s.Signature); m != nil {
 			statusCode, _ = strconv.Atoi(m[1])
 		}
-		channels := channelsByHash[s.SignatureHash]
-		for i := range channels {
-			channels[i].ChannelName = channelNames[channels[i].ChannelId]
+		models := make([]errorStatModelCount, 0, len(s.Models))
+		for name, cnt := range s.Models {
+			models = append(models, errorStatModelCount{Model: name, Count: cnt})
 		}
+		sort.Slice(models, func(i, j int) bool { return models[i].Count > models[j].Count })
+		channels := make([]errorStatChannelCount, 0, len(s.Channels))
+		for id, cnt := range s.Channels {
+			channels = append(channels, errorStatChannelCount{ChannelId: id, ChannelName: channelNames[id], Count: cnt})
+		}
+		sort.Slice(channels, func(i, j int) bool { return channels[i].Count > channels[j].Count })
 		items = append(items, errorStatItem{
 			Signature:     s.Signature,
 			SignatureHash: s.SignatureHash,
@@ -177,7 +164,7 @@ func buildErrorStatsResponse(c *gin.Context, filter model.ErrorStatFilter, stats
 			FirstSeen:     s.FirstSeen,
 			LastSeen:      s.LastSeen,
 			StatusCode:    statusCode,
-			Models:        modelsByHash[s.SignatureHash],
+			Models:        models,
 			Channels:      channels,
 		})
 	}

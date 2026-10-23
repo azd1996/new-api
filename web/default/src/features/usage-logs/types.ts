@@ -191,6 +191,7 @@ export interface LogOtherData {
   // was sent; the decoded ids require a valid key and successful authentication.
   downstream_trace_tag?: string
   customer_id?: string
+  customer_name?: string
   downstream_request_id?: string
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.
@@ -234,6 +235,9 @@ export interface LogOtherData {
   raw_quota?: number
   stat_quota?: number
   stat_group_ratio?: number
+  // customer_stat_quota is the raw amount scaled by the per-customer stat
+  // discount; present only when the request's trace-tag decoded a customer id.
+  customer_stat_quota?: number
   cache_ratio?: number
   cache_creation_ratio?: number
   cache_creation_ratio_5m?: number

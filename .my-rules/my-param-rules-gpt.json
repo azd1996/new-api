@@ -1,72 +1,81 @@
 {
     "operations": [
         {
-            "description": "gpt-6只支持默认temperature(1)，删除非1的temperature避免400",
             "mode": "delete",
+            "description": "gpt-6只支持默认temperature(1)，删除非1的temperature避免400",
             "path": "temperature",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "gpt-6" },
-                { "path": "temperature", "mode": "full", "value": 1, "invert": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                },
+                {
+                    "path": "temperature",
+                    "mode": "full",
+                    "value": 1,
+                    "invert": true
+                }
             ],
             "logic": "AND"
         },
         {
-            "description": "gpt-6的max_output_tokens低于最小值16时抬到16避免400",
             "mode": "set",
+            "description": "gpt-6的max_output_tokens低于最小值16时抬到16避免400",
             "path": "max_output_tokens",
             "value": 16,
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "gpt-6" },
-                { "path": "max_output_tokens", "mode": "lt", "value": 16 }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                },
+                {
+                    "path": "max_output_tokens",
+                    "mode": "lt",
+                    "value": 16
+                }
             ],
             "logic": "AND"
         },
         {
-            "description": "gpt-6在chat/completions下function tools与reasoning_effort冲突，置为none避免400",
             "mode": "set",
+            "description": "gpt-6在chat/completions下function tools与reasoning_effort冲突，置为none避免400",
             "path": "reasoning_effort",
             "value": "none",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "gpt-6" },
-                { "path": "tools.#(type==\"function\").type", "mode": "full", "value": "function" },
-                { "path": "reasoning_effort", "mode": "full", "value": "none", "invert": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                },
+                {
+                    "path": "tools.#(type==\"function\").type",
+                    "mode": "full",
+                    "value": "function"
+                },
+                {
+                    "path": "reasoning_effort",
+                    "mode": "full",
+                    "value": "none",
+                    "invert": true
+                }
             ],
             "logic": "AND"
         },
         {
-            "description": "gpt-6在无function tools时不支持reasoning_effort=none(仅low/medium/high/xhigh/max)，改写为low避免400",
-            "mode": "set",
-            "path": "reasoning_effort",
-            "value": "low",
-            "conditions": [
-                { "path": "model", "mode": "prefix", "value": "gpt-6" },
-                { "path": "reasoning_effort", "mode": "full", "value": "none" },
-                { "path": "tools.#(type==\"function\").type", "mode": "full", "value": "function", "invert": true, "pass_missing_key": true }
-            ],
-            "logic": "AND"
-        },
-        {
-            "description": "gpt-6不支持max_tokens，仅传了max_tokens时改名为max_completion_tokens避免400",
             "mode": "move",
+            "description": "chat completions的max_tokens已经弃用",
             "from": "max_tokens",
             "to": "max_completion_tokens",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "gpt-6" },
-                { "path": "max_tokens", "mode": "gte", "value": 0 },
-                { "path": "max_completion_tokens", "mode": "gte", "value": 0, "invert": true, "pass_missing_key": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                }
             ],
-            "logic": "AND"
-        },
-        {
-            "description": "gpt-6不支持max_tokens，已存在max_completion_tokens时直接删除多余的max_tokens避免400",
-            "mode": "delete",
-            "path": "max_tokens",
-            "conditions": [
-                { "path": "model", "mode": "prefix", "value": "gpt-6" },
-                { "path": "max_tokens", "mode": "gte", "value": 0 },
-                { "path": "max_completion_tokens", "mode": "gte", "value": 0 }
-            ],
-            "logic": "AND"
+            "logic": "OR"
         }
     ]
 }

@@ -17,10 +17,10 @@
 
 1. 取**未脱敏原文** `err.ErrorWithStatusCode()`（给请求方的响应仍走 `MaskSensitiveError` 脱敏，两条路径解耦）。
 2. `service.NormalizeErrorSignature(raw)` 得到签名；`service.ErrorSignatureHash(sig)` 取 `sha256` 前 32 位 hex 作指纹。
-3. 落库到 `logs` 两个新列：`error_signature`(TEXT，展示/精确匹配) 与 `error_signature_hash`(varchar(32)，索引，用于分组/过滤/下钻)。
+3. 把签名与指纹写入日志既有的 **`other` JSON**（`error_signature` / `error_signature_hash`）——**复用现有可扩展字段，不新增列、不改表结构**，因此对 SQLite/MySQL/PostgreSQL/ClickHouse 全部日志库零 schema 变更。
 4. 若 Prometheus 开启，按「当时的简名」给 `newapi_error_total` 计数器 +1。
 
-仅对错误日志（`type=5`）生效；**只对新日志生效**，历史日志无签名。新列、新表均走 GORM `AutoMigrate`，兼容 SQLite/MySQL/PostgreSQL。
+仅对错误日志（`type=5`）生效；**只对新日志生效**，历史日志无签名。简名映射表 `error_signature_alias` 在**主库**（非日志库，永不为 ClickHouse），走 GORM `AutoMigrate`。
 
 ## 归一化规则（纯正则、可配置）
 
@@ -37,7 +37,11 @@
 
 ## 下钻
 
-签名 hash 是可过滤的索引列，`GetAllLogs` 新增 `error_signature_hash` 精确过滤参数。明细错误页「查看日志」跳转「使用日志」并带上该 hash + 时间范围 + `type=5`，复用既有日志列表与详情弹窗。
+`GetAllLogs` 新增 `error_signature_hash` 过滤参数：因签名/指纹存在 `other` JSON，用跨方言的 `other LIKE '%"error_signature_hash":"<hash>"%'`（复用 `otherFieldLikeCondition`，与 trace-tag 检索同机制）精确匹配。明细错误页「查看日志」跳转「使用日志」并带上该 hash + 时间范围 + `type=5`，复用既有日志列表与详情弹窗。
+
+## 聚合实现
+
+`GET /api/log/error-stats` 在窗口内按过滤条件捞错误日志（上限 `maxErrorStatScanRows=50000` 行），逐行解析 `other` 取签名/指纹，在 Go 内存里按指纹聚合出次数/首末时间/模型·渠道分布。签名存在 `other`（非独立索引列），故**不走 SQL `GROUP BY` 而在内存聚合**——以此换取「零 schema 变更、跨全部日志库（含 ClickHouse）」。因此务必配合时间范围收窄，避免扫描触顶被截断。
 
 ## Prometheus 指标
 
@@ -60,5 +64,5 @@
 ## 注意事项
 
 - **错误日志存未脱敏原文**：`Content` 现存上游原始错误，可能含上游密钥片段/内网地址/PII。错误日志（`type=5`）默认**不在** `adminOnlyLogTypes`，普通用户经 `GET /api/log/self` 可见自身错误日志原文。本部署不开放普通用户，故风险可控；**若将来启用普通用户，应将 `LogTypeError` 加入 `adminOnlyLogTypes`，或把原文仅存入 `other.admin_info`、`Content` 保留脱敏版**。
-- `error-stats` 聚合在缺省时间窗（start/end 为 0）时会对 LOG_DB 全量错误日志做 GROUP BY；建议配合时间范围使用，大表时考虑给默认窗口。
+- `error-stats` 聚合在缺省时间窗（start/end 为 0）时会扫描 LOG_DB 错误日志（上限 5 万行后截断、在内存解析 `other` 聚合）；务必配合时间范围使用，大表时考虑给默认窗口。
 - 规则集若被清空，签名≈原文，基数会上升；属管理员显式操作。
