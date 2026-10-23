@@ -20,8 +20,11 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import * as z from 'zod'
 
+import { Dialog } from '@/components/dialog'
+import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -96,6 +99,24 @@ export function SystemBehaviorSection({
     )
   }, [defaultValues])
 
+  const [confirmDisableRatioOpen, setConfirmDisableRatioOpen] = useState(false)
+
+  const rejectEnablingRestrictedMode = (
+    onChange: (value: boolean) => void,
+    checked: boolean
+  ) => {
+    if (checked) {
+      toast.warning(t('This mode cannot be enabled'))
+      return
+    }
+    onChange(checked)
+  }
+
+  const confirmDisableAllowUnsetModelRatio = () => {
+    form.setValue('AllowUnsetModelRatio', false, { shouldDirty: true })
+    setConfirmDisableRatioOpen(false)
+  }
+
   const onSubmit = async (data: BehaviorFormValues) => {
     const updates: { key: string; value: string | boolean }[] = (
       Object.entries(data) as [keyof BehaviorFormValues, boolean][]
@@ -131,7 +152,8 @@ export function SystemBehaviorSection({
   }
 
   return (
-    <SettingsSection title={t('System Behavior')}>
+    <>
+      <SettingsSection title={t('System Behavior')}>
       <Form {...form}>
         <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
           <SettingsPageFormActions
@@ -173,7 +195,9 @@ export function SystemBehaviorSection({
                 <FormControl>
                   <Switch
                     checked={field.value}
-                    onCheckedChange={field.onChange}
+                    onCheckedChange={(checked) =>
+                      rejectEnablingRestrictedMode(field.onChange, checked)
+                    }
                   />
                 </FormControl>
               </SettingsSwitchItem>
@@ -194,7 +218,40 @@ export function SystemBehaviorSection({
                 <FormControl>
                   <Switch
                     checked={field.value}
-                    onCheckedChange={field.onChange}
+                    onCheckedChange={(checked) =>
+                      rejectEnablingRestrictedMode(field.onChange, checked)
+                    }
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='AllowUnsetModelRatio'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>
+                    {t('Allow Models Without Configured Price')}
+                  </FormLabel>
+                  <FormDescription>
+                    {t(
+                      'When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={(checked) => {
+                      if (!checked) {
+                        setConfirmDisableRatioOpen(true)
+                        return
+                      }
+                      field.onChange(true)
+                    }}
                   />
                 </FormControl>
               </SettingsSwitchItem>
@@ -245,6 +302,36 @@ export function SystemBehaviorSection({
           />
         </SettingsForm>
       </Form>
-    </SettingsSection>
+      </SettingsSection>
+
+      <Dialog
+        open={confirmDisableRatioOpen}
+        onOpenChange={setConfirmDisableRatioOpen}
+        title={t('Confirm disabling this option')}
+        contentClassName='sm:max-w-md'
+        footer={
+          <>
+            <Button
+              variant='outline'
+              onClick={() => setConfirmDisableRatioOpen(false)}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button
+              variant='destructive'
+              onClick={confirmDisableAllowUnsetModelRatio}
+            >
+              {t('Confirm Disable')}
+            </Button>
+          </>
+        }
+      >
+        <div className='text-muted-foreground text-sm'>
+          {t(
+            'After disabling, requests to models that have no configured price will be rejected instead of billed at the fallback ratio. Any in-use model that is not yet priced will immediately become unavailable, which may break live traffic. Please confirm you understand the risk before turning it off.'
+          )}
+        </div>
+      </Dialog>
+    </>
   )
 }

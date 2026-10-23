@@ -1,6 +1,11 @@
 package model
 
-import "sync"
+import (
+	"sync"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+)
 
 // Customer config is admin-managed and tiny, so it is kept fully in memory and
 // rebuilt on every mutation. The map is keyed by CustomerId. Lookups run on the
@@ -32,6 +37,22 @@ func refreshCustomerCache() error {
 	customerCache = m
 	customerCacheMu.Unlock()
 	return nil
+}
+
+// SyncCustomerCache periodically rebuilds the customer cache from the DB so
+// customer config created/edited on another instance propagates to this one
+// without a restart, mirroring SyncChannelCache / SyncOptions. frequency is the
+// SYNC_FREQUENCY interval in seconds; a non-positive value disables polling.
+func SyncCustomerCache(frequency int) {
+	if frequency <= 0 {
+		return
+	}
+	for {
+		time.Sleep(time.Duration(frequency) * time.Second)
+		if err := refreshCustomerCache(); err != nil {
+			common.SysError("failed to sync customer cache: " + err.Error())
+		}
+	}
 }
 
 func getCachedCustomer(customerID string) (*Customer, bool) {

@@ -5,6 +5,15 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-10-23]
+
+### 新增 Added
+- **系统行为页补齐三项运维开关前端（System Behavior Options Frontend）**：为此前仅有后端的三个选项补齐「系统设置 → 运维 → 系统行为」前端——「调试模式」(`DebugEnabled`，即时生效无需重启)、「强制 1h 提示缓存 TTL」(`extended_cache_ttl_setting.rules`，Claude，按 分组×模型 规则命中，留空关闭)、「禁用元数据注入」(`metadata_injection_disable_setting.rules`，按 分组×模型 规则禁用 Claude `metadata.user_id/session_id` 注入，留空则全量注入)。两条规则用「分组 + 模型（逗号分隔、`*` 通配）」行编辑器维护，保存统一走 `/api/option/`，`.rules` 以 JSON 字符串下发；后端逻辑不变。
+- **客户配置与错误简名映射的多实例缓存周期同步（Cache Sync Across Instances）**：`main.go` 启动 `SyncCustomerCache`/`SyncErrorAliasCache` 两个 goroutine，按 `SYNC_FREQUENCY` 从 DB 轮询重建「客户映射/折扣」与「错误签名→简名」内存缓存（对齐 `SyncOptions`/`SyncChannelCache`），使在另一实例上的新增/修改能在一个同步周期内传播到本实例，不再仅在处理写操作的那个实例生效；`frequency<=0` 则禁用。
+
+### 优化 Changed
+- **系统行为页危险开关增加前端防护**：「演示站点模式」「自用模式」禁止开启——尝试开启被拦截并弹浮窗提示；「即使未配金额也允许模型访问」关闭时弹二次确认，提示关闭后未配价模型请求将被拒绝、在用的未定价模型会立即不可用的风险。
+
 ## [2026-10-22]
 
 ### 新增 Added

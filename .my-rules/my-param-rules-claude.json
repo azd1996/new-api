@@ -353,6 +353,7 @@
             "mode": "delete",
             "path": "temperature",
             "conditions": [
+                { "path": "model", "mode": "contains", "value": "claude-fable-5" },
                 { "path": "model", "mode": "contains", "value": "claude-opus-5" },
                 { "path": "model", "mode": "contains", "value": "claude-sonnet-5" },
                 { "path": "model", "mode": "contains", "value": "claude-opus-4-6" },

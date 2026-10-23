@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -117,4 +118,20 @@ func ResolveErrorShortName(hash string) string {
 	errorAliasCacheMu.RLock()
 	defer errorAliasCacheMu.RUnlock()
 	return errorAliasCache[hash]
+}
+
+// SyncErrorAliasCache periodically rebuilds the alias cache from the DB so
+// short-name mappings created/edited on another instance propagate to this one
+// without a restart, mirroring SyncChannelCache / SyncOptions. frequency is the
+// SYNC_FREQUENCY interval in seconds; a non-positive value disables polling.
+func SyncErrorAliasCache(frequency int) {
+	if frequency <= 0 {
+		return
+	}
+	for {
+		time.Sleep(time.Duration(frequency) * time.Second)
+		if err := ReloadErrorAliasCache(); err != nil {
+			common.SysError("failed to sync error signature alias cache: " + err.Error())
+		}
+	}
 }

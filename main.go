@@ -114,6 +114,12 @@ func main() {
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)
 
+	// 周期性重载客户配置与明细错误「简名」映射：两者都是每实例内存缓存，需像
+	// SyncOptions 一样按 SYNC_FREQUENCY 从 DB 轮询，保证在另一实例上新增/修改
+	// 后能在一个同步周期内传播到本实例（否则只有处理写操作的那个实例会更新）。
+	go model.SyncCustomerCache(common.SyncFrequency)
+	go model.SyncErrorAliasCache(common.SyncFrequency)
+
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
 	go authz.StartPolicySync(common.SyncFrequency)
 
