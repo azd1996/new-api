@@ -5,5 +5,19 @@
   "Leave blank to keep the stored password": "Leave blank to keep the stored password",
   "Parameter template content must be a JSON object or array": "Parameter template content must be a JSON object or array",
   "Please select a template": "Please select a template",
-  "Retry override rules as a JSON array. Leave empty to disable.": "Retry override rules as a JSON array. Leave empty to disable."
+  "Retry override rules as a JSON array. Leave empty to disable.": "Retry override rules as a JSON array. Leave empty to disable.",
+  "No customers configured. Add your first customer to get started.": "No customers configured. Add your first customer to get started.",
+  "Filter by customer ID or name...": "Filter by customer ID or name...",
+  "Configure the customer name and per-model stat discounts. Discounts are multipliers (e.g. 0.8 = 80%) and only affect reporting, not actual billing.": "Configure the customer name and per-model stat discounts. Discounts are multipliers (e.g. 0.8 = 80%) and only affect reporting, not actual billing.",
+  "Unique identifier (the downstream api_key_id)": "Unique identifier (the downstream api_key_id)",
+  "Per-model discount multipliers that override the default.": "Per-model discount multipliers that override the default.",
+  "Failed to load customers": "Failed to load customers",
+  "Failed to search customers": "Failed to search customers",
+  "Failed to create customer": "Failed to create customer",
+  "Failed to update customer": "Failed to update customer",
+  "Failed to delete customer": "Failed to delete customer",
+  "Add to rules": "Add to rules",
+  "Add all to rules": "Add all to rules",
+  "Rules run top to bottom as regex replacements; $1 capture groups are supported.": "Rules run top to bottom as regex replacements; $1 capture groups are supported.",
+  "Failed to save rules": "Failed to save rules"
 }

@@ -1,0 +1,157 @@
+{
+  "name": "new-api Gateway",
+  "tags": "new-api prometheus ai-gateway",
+  "ident": "",
+  "configs": {
+    "version": "3.0.0",
+    "links": [],
+    "var": [
+      { "type": "datasource", "name": "prom", "definition": "prometheus" },
+      { "type": "query", "name": "instance", "datasource": { "cate": "prometheus", "value": "${prom}" }, "definition": "label_values(up{job=\"newapi-31525\"}, instance)", "reg": "", "multi": true, "allOption": true, "allValue": "" },
+      { "type": "query", "name": "model", "datasource": { "cate": "prometheus", "value": "${prom}" }, "definition": "label_values(newapi_relay_requests_total{job=\"newapi-31525\"}, model)", "reg": "", "multi": true, "allOption": true, "allValue": "" },
+      { "type": "query", "name": "group", "datasource": { "cate": "prometheus", "value": "${prom}" }, "definition": "label_values(newapi_relay_requests_total{job=\"newapi-31525\"}, group)", "reg": "", "multi": true, "allOption": true, "allValue": "" }
+    ],
+    "panels": [
+      {
+        "type": "stat", "id": "1", "name": "Relay QPS", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 3, "w": 4, "x": 0, "y": 0, "i": "1" },
+        "targets": [ { "refId": "A", "expr": "sum(rate(newapi_relay_requests_total{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval]))", "legend": "qps" } ],
+        "custom": { "textMode": "value", "colorMode": "value", "calc": "lastNotNull", "valueField": "Value" },
+        "options": { "standardOptions": { "util": "none", "decimals": 2 }, "thresholds": { "steps": [ { "color": "#3FC453", "type": "base", "value": null } ] } }
+      },
+      {
+        "type": "stat", "id": "2", "name": "Relay Success Rate", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 3, "w": 4, "x": 4, "y": 0, "i": "2" },
+        "targets": [ { "refId": "A", "expr": "100 * sum(rate(newapi_relay_requests_total{job=\"newapi-31525\", instance=~\"$instance\", result=\"success\"}[$__rate_interval])) / clamp_min(sum(rate(newapi_relay_requests_total{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval])), 1e-9)", "legend": "success %" } ],
+        "custom": { "textMode": "value", "colorMode": "value", "calc": "lastNotNull", "valueField": "Value" },
+        "options": { "standardOptions": { "util": "percent", "decimals": 2 }, "thresholds": { "steps": [ { "color": "#FF656B", "type": "base", "value": null }, { "color": "#FF9830", "type": "le", "value": 95 }, { "color": "#3FC453", "type": "le", "value": 99 } ] } }
+      },
+      {
+        "type": "stat", "id": "3", "name": "Relay Failure Rate", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 3, "w": 4, "x": 8, "y": 0, "i": "3" },
+        "targets": [ { "refId": "A", "expr": "100 * sum(rate(newapi_relay_requests_total{job=\"newapi-31525\", instance=~\"$instance\", result=\"failure\"}[$__rate_interval])) / clamp_min(sum(rate(newapi_relay_requests_total{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval])), 1e-9)", "legend": "failure %" } ],
+        "custom": { "textMode": "value", "colorMode": "value", "calc": "lastNotNull", "valueField": "Value" },
+        "options": { "standardOptions": { "util": "percent", "decimals": 2 }, "thresholds": { "steps": [ { "color": "#3FC453", "type": "base", "value": null }, { "color": "#FF9830", "type": "le", "value": 1 }, { "color": "#FF656B", "type": "le", "value": 5 } ] } }
+      },
+      {
+        "type": "stat", "id": "4", "name": "Errors / s", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 3, "w": 4, "x": 12, "y": 0, "i": "4" },
+        "targets": [ { "refId": "A", "expr": "sum(rate(newapi_error_total{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval]))", "legend": "errors/s" } ],
+        "custom": { "textMode": "value", "colorMode": "value", "calc": "lastNotNull", "valueField": "Value" },
+        "options": { "standardOptions": { "util": "none", "decimals": 2 }, "thresholds": { "steps": [ { "color": "#3FC453", "type": "base", "value": null }, { "color": "#FF9830", "type": "le", "value": 1 }, { "color": "#FF656B", "type": "le", "value": 5 } ] } }
+      },
+      {
+        "type": "stat", "id": "5", "name": "Cost Rate (USD/s)", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 3, "w": 4, "x": 16, "y": 0, "i": "5" },
+        "targets": [ { "refId": "A", "expr": "sum(rate(newapi_relay_quota_used_total{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval])) / scalar(max(newapi_quota_per_unit{job=\"newapi-31525\"}))", "legend": "USD/s" } ],
+        "custom": { "textMode": "value", "colorMode": "value", "calc": "lastNotNull", "valueField": "Value" },
+        "options": { "standardOptions": { "util": "none", "decimals": 4 }, "thresholds": { "steps": [ { "color": "#634CD9", "type": "base", "value": null } ] } }
+      },
+      {
+        "type": "stat", "id": "6", "name": "Instances Up", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 3, "w": 4, "x": 20, "y": 0, "i": "6" },
+        "targets": [ { "refId": "A", "expr": "count(up{job=\"newapi-31525\"} == 1)", "legend": "up" } ],
+        "custom": { "textMode": "value", "colorMode": "value", "calc": "lastNotNull", "valueField": "Value" },
+        "options": { "standardOptions": { "util": "none", "decimals": 0 }, "thresholds": { "steps": [ { "color": "#FF656B", "type": "base", "value": null }, { "color": "#3FC453", "type": "le", "value": 1 } ] } }
+      },
+      {
+        "type": "timeseries", "id": "7", "name": "HTTP Requests by Status", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 0, "y": 3, "i": "7" },
+        "targets": [ { "refId": "A", "expr": "sum by (status) (rate(newapi_http_requests_total{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval]))", "legend": "{{status}}" } ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0.4, "stack": "normal", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "none" } }
+      },
+      {
+        "type": "timeseries", "id": "8", "name": "Relay Requests by Result", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 12, "y": 3, "i": "8" },
+        "targets": [ { "refId": "A", "expr": "sum by (result) (rate(newapi_relay_requests_total{job=\"newapi-31525\", instance=~\"$instance\", model=~\"$model\", group=~\"$group\"}[$__rate_interval]))", "legend": "{{result}}" } ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0.4, "stack": "normal", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "none" } }
+      },
+      {
+        "type": "timeseries", "id": "9", "name": "Relay QPS by Model (Top 10)", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 0, "y": 10, "i": "9" },
+        "targets": [ { "refId": "A", "expr": "topk(10, sum by (model) (rate(newapi_relay_requests_total{job=\"newapi-31525\", instance=~\"$instance\", model=~\"$model\", group=~\"$group\"}[$__rate_interval])))", "legend": "{{model}}" } ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0.1, "stack": "off", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "none" } }
+      },
+      {
+        "type": "timeseries", "id": "10", "name": "Relay Upstream Latency (P50/P90/P99)", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 12, "y": 10, "i": "10" },
+        "targets": [
+          { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(newapi_relay_duration_seconds_bucket{job=\"newapi-31525\", instance=~\"$instance\", model=~\"$model\", group=~\"$group\"}[$__rate_interval])))", "legend": "p50" },
+          { "refId": "B", "expr": "histogram_quantile(0.90, sum by (le) (rate(newapi_relay_duration_seconds_bucket{job=\"newapi-31525\", instance=~\"$instance\", model=~\"$model\", group=~\"$group\"}[$__rate_interval])))", "legend": "p90" },
+          { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(newapi_relay_duration_seconds_bucket{job=\"newapi-31525\", instance=~\"$instance\", model=~\"$model\", group=~\"$group\"}[$__rate_interval])))", "legend": "p99" }
+        ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0, "stack": "off", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "seconds" } }
+      },
+      {
+        "type": "timeseries", "id": "11", "name": "HTTP Latency (P50/P90/P99)", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 0, "y": 17, "i": "11" },
+        "targets": [
+          { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(newapi_http_request_duration_seconds_bucket{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval])))", "legend": "p50" },
+          { "refId": "B", "expr": "histogram_quantile(0.90, sum by (le) (rate(newapi_http_request_duration_seconds_bucket{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval])))", "legend": "p90" },
+          { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(newapi_http_request_duration_seconds_bucket{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval])))", "legend": "p99" }
+        ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0, "stack": "off", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "seconds" } }
+      },
+      {
+        "type": "timeseries", "id": "12", "name": "Token Throughput (prompt/completion)", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 12, "y": 17, "i": "12" },
+        "targets": [
+          { "refId": "A", "expr": "sum(rate(newapi_relay_prompt_tokens_total{job=\"newapi-31525\", instance=~\"$instance\", model=~\"$model\", group=~\"$group\"}[$__rate_interval]))", "legend": "prompt tokens/s" },
+          { "refId": "B", "expr": "sum(rate(newapi_relay_completion_tokens_total{job=\"newapi-31525\", instance=~\"$instance\", model=~\"$model\", group=~\"$group\"}[$__rate_interval]))", "legend": "completion tokens/s" }
+        ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0.1, "stack": "off", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "none" } }
+      },
+      {
+        "type": "timeseries", "id": "13", "name": "Cost Rate by Model (USD/s, Top 10)", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 0, "y": 24, "i": "13" },
+        "targets": [ { "refId": "A", "expr": "topk(10, sum by (model) (rate(newapi_relay_quota_used_total{job=\"newapi-31525\", instance=~\"$instance\", model=~\"$model\", group=~\"$group\"}[$__rate_interval]))) / scalar(max(newapi_quota_per_unit{job=\"newapi-31525\"}))", "legend": "{{model}}" } ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0.2, "stack": "normal", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "none", "decimals": 4 } }
+      },
+      {
+        "type": "timeseries", "id": "14", "name": "Errors by Short Name", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 12, "y": 24, "i": "14" },
+        "targets": [ { "refId": "A", "expr": "sum by (short_name) (rate(newapi_error_total{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval]))", "legend": "{{short_name}}" } ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0.4, "stack": "normal", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "none" } }
+      },
+      {
+        "type": "timeseries", "id": "15", "name": "Errors by Status Code", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 0, "y": 31, "i": "15" },
+        "targets": [ { "refId": "A", "expr": "sum by (status) (rate(newapi_error_total{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval]))", "legend": "{{status}}" } ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0.4, "stack": "normal", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "none" } }
+      },
+      {
+        "type": "timeseries", "id": "16", "name": "Errors by Channel (Top 10)", "version": "3.0.0",
+        "datasourceCate": "prometheus", "datasourceValue": "${prom}",
+        "layout": { "h": 7, "w": 12, "x": 12, "y": 31, "i": "16" },
+        "targets": [ { "refId": "A", "expr": "topk(10, sum by (channel) (rate(newapi_error_total{job=\"newapi-31525\", instance=~\"$instance\"}[$__rate_interval])))", "legend": "channel {{channel}}" } ],
+        "custom": { "drawStyle": "lines", "lineInterpolation": "smooth", "fillOpacity": 0.1, "stack": "off", "spanNulls": false, "lineWidth": 1, "gradientMode": "none", "scaleDistribution": { "type": "linear" } },
+        "options": { "tooltip": { "mode": "all", "sort": "desc" }, "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"] }, "standardOptions": { "util": "none" } }
+      }
+
+    ]
+  }
+}
