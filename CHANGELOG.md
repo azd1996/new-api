@@ -20,6 +20,9 @@
 - **计费详情金额行调整**：「折扣后金额」更名为「渠道折后金额」(带 `(x分组统计倍率)`)；「客户折扣后金额」展示 `(x客户折扣)`（后端新增写 `other.customer_discount`，按客户×模型解析）；在其后新增「利润金额」行＝客户折扣后金额 − 渠道折后金额（二者都存在时显示，可为负）。
 - **Prometheus `newapi_error_total` 新增 `attribution` 标签**：与 `short_name` 并列记录错误归因（空值回退 `uncategorized`，低基数、不受 `ERROR_METRIC_HIGH_CARD_LABELS` 开关影响）；落点取 `model.ResolveErrorAttribution(signatureHash)`。注意该指标 series schema 多一标签，历史与新 series 会并存。
 
+### 修复 Fixed
+- **「编辑归一化规则」弹窗在明文 HTTP/内网 IP 下白屏 500（Error Signature Rules Dialog Crash）**：弹窗生成规则行的客户端 id 用了 `crypto.randomUUID()`，而该 API 仅在**安全上下文**（HTTPS 或 localhost）下有定义；经 `http://<内网IP>` 访问后台时 `crypto.randomUUID` 为 `undefined`，弹窗一打开即抛 `TypeError`、被前端 error boundary 接管渲染成「500」页（后端 `/api/log/error-signature-rules` 实际返回 200，并非服务端 500）。改用项目已在用的 `nanoid()`（底层 `crypto.getRandomValues`，明文 HTTP 下亦可用）。全局仅此一处使用 `crypto.randomUUID`。需重新 `bun run build` 前端生效。
+
 ## [2026-10-22]
 
 ### 新增 Added

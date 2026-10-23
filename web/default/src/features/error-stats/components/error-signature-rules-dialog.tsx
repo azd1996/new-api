@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, Plus, X } from 'lucide-react'
+import { nanoid } from 'nanoid'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -46,8 +47,12 @@ interface RuleRow extends SignatureRule {
   _id: string
 }
 
+// Generate a client-only row id. Uses nanoid (crypto.getRandomValues under the
+// hood) rather than crypto.randomUUID, which is only defined in secure contexts
+// — the admin UI is often served over plain HTTP on an internal IP, where
+// crypto.randomUUID is undefined and would crash the dialog.
 function newId(): string {
-  return crypto.randomUUID()
+  return nanoid()
 }
 
 function toRows(rules: SignatureRule[]): RuleRow[] {

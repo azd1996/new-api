@@ -311,6 +311,14 @@
             ]
         },
         {
+            "description": "claude-: thinking内容块里的endpoint_signature不被Bedrock支持(报错路径...content.M.thinking.endpoint_signature里thinking是判别联合变体标签type=thinking，真实字段在块顶层messages.N.content.M.endpoint_signature)，逐个删除；signature本体保留，不影响thinking多轮验签",
+            "mode": "delete",
+            "path": "messages.*.content.*.endpoint_signature",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" }
+            ]
+        },
+        {
             "description": "删除messages里的system角色",
             "mode": "prune_objects",
             "path": "messages",

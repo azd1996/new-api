@@ -2,9 +2,10 @@
 
 > 本文档按「出现了什么问题 → 加了什么规则解决」整理当前 `.my-rules/` 下的实际配置，便于回溯每条规则的来由。
 > 规则机制与模板化方案见 `docs/override-rule-templates.md`（功能架构），本文只记录具体规则内容。
+> param 规则搞不定/有取舍的报错（整块类型不支持、需结构转换等）另见 `.my-rules/hard-to-handle-errors.md`。
 >
 > 配置来源：
-> - 参数覆盖：`.my-rules/my-param-rules-claude.json`（Claude，下表列出 24 条）+ `.my-rules/my-param-rules-gpt.json`（GPT，3 条），下表合并编号共 27 条。注：Claude 文件另有一条"anthropic-beta 黑名单剔除"规则（用户新增）暂未收录进下表。
+> - 参数覆盖：`.my-rules/my-param-rules-claude.json`（Claude，下表列出 25 条）+ `.my-rules/my-param-rules-gpt.json`（GPT，3 条），下表合并编号共 28 条。注：Claude 文件另有一条"anthropic-beta 黑名单剔除"规则（用户新增）暂未收录进下表。
 > - 重试覆盖：`.my-rules/my-retry-rules.json`（6 条）、`.my-rules/my-channel-setting.json` 的 `retry_override`（5 条）
 > - `.my-rules/c.json` 是一个抓包的 `/v1/responses` 响应示例，非规则配置。
 
@@ -55,18 +56,19 @@ Claude 5 系列不再接受 `thinking.type == "enabled"`；opus-4-7 等模型则
 | # | 问题 | 规则 |
 |---|------|------|
 | 20 | messages 里出现 `role==developer`（OpenAI 新角色），Bedrock 只允许 user/assistant/system，报 400 `Unexpected role "developer"` | `regex_replace` `messages.*.role` 把 `^developer$` 改写成 `user`（cond: 前缀 `claude-`；锚定精确匹配，保留该条内容，不误伤其它角色） |
-| 21 | messages 里混入 `role==system`，Bedrock 不接受 | `prune_objects` `messages`，删除 `where role==system`（`recursive:false`） |
-| 22 | content 内有空 text 块（`type==text && text==""`）导致 Bedrock 400 "text content blocks must be non-empty" | `prune_objects` `messages.*.content`，删除 `type==text && text==""`（cond: 前缀 `claude-`；`recursive:false`，避免误入 `tool_use.input` 触发类型比较崩溃） |
-| 23 | `messages.0.content` 为空数组 `[]` 时 Bedrock 400 non-empty content | `set` `messages.0.content = "."` 占位（cond: 前缀 `claude-` AND `messages.0.content.# == 0`，用长度判空保证类型安全） |
+| 21 | thinking 内容块里的 `endpoint_signature` 不被 Bedrock 支持（报错 `...content.M.thinking.endpoint_signature`，`thinking` 是判别联合变体标签 `type=thinking`，真实字段在块顶层 `messages.N.content.M.endpoint_signature`） | `delete` `messages.*.content.*.endpoint_signature`（cond: 前缀 `claude-`；逐个删除，`signature` 本体保留，不影响 thinking 多轮验签） |
+| 22 | messages 里混入 `role==system`，Bedrock 不接受 | `prune_objects` `messages`，删除 `where role==system`（`recursive:false`） |
+| 23 | content 内有空 text 块（`type==text && text==""`）导致 Bedrock 400 "text content blocks must be non-empty" | `prune_objects` `messages.*.content`，删除 `type==text && text==""`（cond: 前缀 `claude-`；`recursive:false`，避免误入 `tool_use.input` 触发类型比较崩溃） |
+| 24 | `messages.0.content` 为空数组 `[]` 时 Bedrock 400 non-empty content | `set` `messages.0.content = "."` 占位（cond: 前缀 `claude-` AND `messages.0.content.# == 0`，用长度判空保证类型安全） |
 
 ### 5. temperature / token 参数约束
 
 | # | 问题 | 规则 |
 |---|------|------|
-| 24 | Claude 新世代（opus-5 / sonnet-5 及 opus-4-6/4-7/4-8）已弃用 temperature，带上会 400 "temperature is deprecated" | `delete` `temperature`（cond: model `contains` `claude-opus-5` OR `claude-sonnet-5` OR `claude-opus-4-6` OR `claude-opus-4-7` OR `claude-opus-4-8`；按精确型号，不放宽到老的 opus-4/4-1） |
-| 25 | `gpt-6` 只支持默认 `temperature=1`，其它值 400 | `delete` `temperature`（cond: 前缀 `gpt-6` AND `temperature != 1`） |
-| 26 | `gpt-6` 的 `max_output_tokens` 低于最小值 16 会 400 | `set` `max_output_tokens = 16`（cond: 前缀 `gpt-6` AND `max_output_tokens < 16`） |
-| 27 | `gpt-6` 在 chat/completions 下 function tools 与 `reasoning_effort` 冲突 400 | `set` `reasoning_effort = "none"`（cond: 前缀 `gpt-6` AND 存在 `tools` 中 `type==function` AND `reasoning_effort != none`） |
+| 25 | Claude 新世代（opus-5 / sonnet-5 及 opus-4-6/4-7/4-8）已弃用 temperature，带上会 400 "temperature is deprecated" | `delete` `temperature`（cond: model `contains` `claude-opus-5` OR `claude-sonnet-5` OR `claude-opus-4-6` OR `claude-opus-4-7` OR `claude-opus-4-8`；按精确型号，不放宽到老的 opus-4/4-1） |
+| 26 | `gpt-6` 只支持默认 `temperature=1`，其它值 400 | `delete` `temperature`（cond: 前缀 `gpt-6` AND `temperature != 1`） |
+| 27 | `gpt-6` 的 `max_output_tokens` 低于最小值 16 会 400 | `set` `max_output_tokens = 16`（cond: 前缀 `gpt-6` AND `max_output_tokens < 16`） |
+| 28 | `gpt-6` 在 chat/completions 下 function tools 与 `reasoning_effort` 冲突 400 | `set` `reasoning_effort = "none"`（cond: 前缀 `gpt-6` AND 存在 `tools` 中 `type==function` AND `reasoning_effort != none`） |
 
 ---
 
