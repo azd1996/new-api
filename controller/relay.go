@@ -424,9 +424,10 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		rawError := err.ErrorWithStatusCode()
 		signature := service.NormalizeErrorSignature(rawError)
 		signatureHash := service.ErrorSignatureHash(signature)
-		// Store the signature + its hash inside the existing Other JSON (no new
-		// columns, so no log-table schema change across SQLite/MySQL/PG/ClickHouse);
-		// the hash powers stats grouping and drill-down (other LIKE).
+		// Store the signature + its hash inside the existing Other JSON; the hash
+		// is additionally dual-written into the logs.error_signature_hash column
+		// by RecordErrorLog. Reads still use the Other JSON copy, so old rows that
+		// predate the column keep powering stats grouping and drill-down.
 		if signatureHash != "" {
 			other["error_signature"] = signature
 			other["error_signature_hash"] = signatureHash

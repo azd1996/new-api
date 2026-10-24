@@ -203,7 +203,12 @@ type Log struct {
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
-	Other             string `json:"other"`
+	// ErrorSignatureHash duplicates other.error_signature_hash into a real
+	// column (error logs only). It is written alongside the Other JSON copy so
+	// the hash can later back a column-based filter/group-by; reads still go
+	// through Other for now, so old rows that only have it in Other keep working.
+	ErrorSignatureHash string `json:"error_signature_hash,omitempty" gorm:"type:varchar(64);default:''"`
+	Other              string `json:"other"`
 }
 
 // don't use iota, avoid change log type value
@@ -537,6 +542,9 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	other = attachDownstreamTraceTag(c, other)
 	otherStr := common.MapToJsonStr(other)
+	// Dual-write the error signature hash into its own column while keeping the
+	// Other JSON copy (nil map reads are safe and yield "").
+	errorSignatureHash, _ := other["error_signature_hash"].(string)
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
@@ -566,9 +574,10 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 			}
 			return ""
 		}(),
-		RequestId:         requestId,
-		UpstreamRequestId: upstreamRequestId,
-		Other:             otherStr,
+		RequestId:          requestId,
+		UpstreamRequestId:  upstreamRequestId,
+		ErrorSignatureHash: errorSignatureHash,
+		Other:              otherStr,
 	}
 	err := createLog(log)
 	if err != nil {
