@@ -628,6 +628,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	statGroupRatio, _ := params.Other["stat_group_ratio"].(float64)
 	customerStatQuota, _ := params.Other["customer_stat_quota"].(int)
 	customerDiscount, _ := params.Other["customer_discount"].(float64)
+	customerId, _ := params.Other["customer_id"].(string)
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
@@ -682,6 +683,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			TokenID:           params.TokenId,
 			ChannelID:         params.ChannelId,
 			NodeName:          common.NodeName,
+			CustomerId:        customerId,
 			ChannelStatQuota:  statQuota,
 			CustomerStatQuota: customerStatQuota,
 		})
@@ -881,9 +883,9 @@ func applyAdminLogFilters(tx *gorm.DB, logType int, startTimestamp int64, endTim
 // discounted amount (sum of customer_stat_quota) and profit (per-row
 // customer_stat_quota - stat_quota, summed only over customer-bearing rows).
 type LogStatAmounts struct {
-	ChannelStatQuota  int64 `json:"channel_stat_quota"`
-	CustomerStatQuota int64 `json:"customer_stat_quota"`
-	ProfitQuota       int64 `json:"profit_quota"`
+	ChannelStatQuota  int64 `json:"channel_stat_quota" gorm:"column:channel_stat_quota_sum"`
+	CustomerStatQuota int64 `json:"customer_stat_quota" gorm:"column:customer_stat_quota_sum"`
+	ProfitQuota       int64 `json:"profit_quota" gorm:"column:profit_quota_sum"`
 }
 
 // SumLogStatAmounts aggregates the reporting-only stat amounts over the admin
@@ -909,10 +911,15 @@ func SumLogStatAmounts(logType int, startTimestamp int64, endTimestamp int64, mo
 	if tx, err = applyAdminLogFilters(tx, logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash); err != nil {
 		return result, err
 	}
+	// Alias outputs with a _sum suffix so they do NOT shadow the same-named
+	// columns: ClickHouse resolves an identifier inside an aggregate to a
+	// same-SELECT alias first, so `SUM(... customer_stat_quota ...)` referencing
+	// the column would otherwise bind to the `AS customer_stat_quota` aggregate
+	// alias and fail with "aggregate function found inside another aggregate".
 	err = tx.Model(&Log{}).
-		Select("COALESCE(SUM(stat_quota), 0) AS channel_stat_quota, " +
-			"COALESCE(SUM(customer_stat_quota), 0) AS customer_stat_quota, " +
-			"COALESCE(SUM(CASE WHEN customer_discount > 0 THEN customer_stat_quota - stat_quota ELSE 0 END), 0) AS profit_quota").
+		Select("COALESCE(SUM(stat_quota), 0) AS channel_stat_quota_sum, " +
+			"COALESCE(SUM(customer_stat_quota), 0) AS customer_stat_quota_sum, " +
+			"COALESCE(SUM(CASE WHEN customer_discount > 0 THEN customer_stat_quota - stat_quota ELSE 0 END), 0) AS profit_quota_sum").
 		Scan(&result).Error
 	return result, err
 }

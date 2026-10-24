@@ -60,6 +60,56 @@ func GetQuotaDatesByUser(c *gin.Context) {
 	})
 }
 
+// customerQuotaDatum is the customer-statistics row: the aggregated quota_data
+// bucket plus the resolved customer name and whether the customer is configured.
+// The frontend uses customer_configured to decide whether to show the
+// per-customer discounted amount or fall back to the channel-discounted amount.
+type customerQuotaDatum struct {
+	CustomerId         string `json:"customer_id"`
+	CustomerName       string `json:"customer_name"`
+	CustomerConfigured bool   `json:"customer_configured"`
+	CreatedAt          int64  `json:"created_at"`
+	Count              int    `json:"count"`
+	Quota              int    `json:"quota"`
+	TokenUsed          int    `json:"token_used"`
+	ChannelStatQuota   int    `json:"channel_stat_quota"`
+	CustomerStatQuota  int    `json:"customer_stat_quota"`
+}
+
+func GetQuotaDatesByCustomer(c *gin.Context) {
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	dates, err := model.GetQuotaDataGroupByCustomer(startTimestamp, endTimestamp)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	data := make([]customerQuotaDatum, 0, len(dates))
+	for _, d := range dates {
+		configured := model.CustomerConfigured(d.CustomerId)
+		name := model.CustomerName(d.CustomerId)
+		if name == "" {
+			name = d.CustomerId
+		}
+		data = append(data, customerQuotaDatum{
+			CustomerId:         d.CustomerId,
+			CustomerName:       name,
+			CustomerConfigured: configured,
+			CreatedAt:          d.CreatedAt,
+			Count:              d.Count,
+			Quota:              d.Quota,
+			TokenUsed:          d.TokenUsed,
+			ChannelStatQuota:   d.ChannelStatQuota,
+			CustomerStatQuota:  d.CustomerStatQuota,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    data,
+	})
+}
+
 func GetUserQuotaDates(c *gin.Context) {
 	userId := c.GetInt("id")
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)

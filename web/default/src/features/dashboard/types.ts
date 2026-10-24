@@ -229,6 +229,35 @@ export interface UserChartsFilters {
   topUserLimit: number
 }
 
+// A customer-statistics row: aggregated per customer with the resolved name and
+// whether the customer is configured. Unconfigured customers fall back to the
+// channel-discounted amount (channel_stat_quota) for the "customer discounted
+// amount" metric; configured customers use customer_stat_quota.
+export interface CustomerQuotaDataItem {
+  customer_id: string
+  customer_name: string
+  customer_configured: boolean
+  created_at: number
+  token_used?: number
+  count?: number
+  quota?: number
+  channel_stat_quota?: number
+  customer_stat_quota?: number
+}
+
+// Group the customer-statistics charts by the customer's display name or by its
+// raw customer id.
+export type CustomerGroupBy = 'name' | 'id'
+
+// Customer analytics selections, held by the dashboard parent like the user
+// analytics filters.
+export interface CustomerChartsFilters {
+  timeGranularity: TimeGranularity
+  selectedRange: number
+  topCustomerLimit: number
+  groupBy: CustomerGroupBy
+}
+
 // ============================================================================
 // API Info Types
 // ============================================================================
@@ -268,6 +297,11 @@ export interface ProcessedChartData {
 export interface ProcessedUserChartData {
   spec_user_rank: VChartSpec
   spec_user_trend: VChartSpec
+}
+
+export interface ProcessedCustomerChartData {
+  spec_customer_rank: VChartSpec
+  spec_customer_trend: VChartSpec
 }
 
 // ============================================================================

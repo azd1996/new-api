@@ -76,6 +76,15 @@ func CustomerName(customerID string) string {
 	return ""
 }
 
+// CustomerConfigured reports whether a customer id has an admin-managed mapping
+// (name + discounts). The customer-statistics dashboard uses this to decide
+// whether the per-customer discounted amount is meaningful or should fall back
+// to the channel-discounted amount.
+func CustomerConfigured(customerID string) bool {
+	_, ok := getCachedCustomer(customerID)
+	return ok
+}
+
 // CustomerModelDiscount returns the reporting-only stat discount multiplier for
 // (customerID, modelName): the longest matching model-name prefix ("series")
 // wins, else the customer's default discount, else 1 when the customer is

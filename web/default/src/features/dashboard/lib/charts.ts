@@ -21,8 +21,11 @@ import { dataScheme as vchartDefaultDataScheme } from '@visactor/vchart/esm/them
 import { MAX_CHART_TREND_POINTS } from '@/features/dashboard/constants'
 import type {
   ConsumptionAmountCaliber,
+  CustomerGroupBy,
+  CustomerQuotaDataItem,
   QuotaDataItem,
   ProcessedChartData,
+  ProcessedCustomerChartData,
   ProcessedUserChartData,
 } from '@/features/dashboard/types'
 import { getCurrencyDisplay } from '@/lib/currency'
@@ -708,7 +711,11 @@ export function processUserChartData(
   timeGranularity: TimeGranularity = 'day',
   t?: TFunction,
   limit = 10,
-  quotaField: 'quota' | 'customer_stat_quota' = 'quota'
+  quotaField: 'quota' | 'customer_stat_quota' = 'quota',
+  titles: { rankKey: string; trendKey: string } = {
+    rankKey: 'User Consumption Ranking',
+    trendKey: 'User Consumption Trend',
+  }
 ): ProcessedUserChartData {
   const tt: TFunction = t ?? ((x) => x)
   const { config } = getCurrencyDisplay()
@@ -726,7 +733,7 @@ export function processUserChartData(
       direction: 'horizontal',
       title: {
         visible: true,
-        text: tt('User Consumption Ranking'),
+        text: tt(titles.rankKey),
         subtext: tt('No data available'),
       },
       legends: { visible: false },
@@ -741,7 +748,7 @@ export function processUserChartData(
       seriesField: 'User',
       title: {
         visible: true,
-        text: tt('User Consumption Trend'),
+        text: tt(titles.trendKey),
         subtext: tt('No data available'),
       },
       legends: { visible: true, selectMode: 'single' },
@@ -825,7 +832,7 @@ export function processUserChartData(
       direction: 'horizontal',
       title: {
         visible: true,
-        text: tt('User Consumption Ranking'),
+        text: tt(titles.rankKey),
         subtext: `${tt('Total:')} ${formatVal(totalQuota)}`,
       },
       legends: { visible: false },
@@ -881,7 +888,7 @@ export function processUserChartData(
       stack: false,
       title: {
         visible: true,
-        text: tt('User Consumption Trend'),
+        text: tt(titles.trendKey),
         subtext: `${tt('Total:')} ${formatVal(totalQuota)}`,
       },
       legends: { visible: true, selectMode: 'single' },
@@ -953,5 +960,40 @@ export function processUserChartData(
       background: { fill: 'transparent' },
       animation: true,
     },
+  }
+}
+
+// processCustomerChartData builds the customer-statistics rank/trend specs. It
+// reuses the user-chart renderer: each customer row is flattened to a labelled
+// amount, where the "customer discounted amount" is the per-customer discounted
+// stat amount for configured customers, and falls back to the channel-discounted
+// amount for customers without a configured discount (those are also tagged so
+// the fallback is visible). groupBy selects the customer name or raw id label.
+export function processCustomerChartData(
+  data: CustomerQuotaDataItem[],
+  timeGranularity: TimeGranularity = 'day',
+  t?: TFunction,
+  limit = 10,
+  groupBy: CustomerGroupBy = 'name'
+): ProcessedCustomerChartData {
+  const tt: TFunction = t ?? ((x) => x)
+  const fallbackSuffix = ` ${tt('(channel discount fallback)')}`
+
+  const mapped: QuotaDataItem[] = (data ?? []).map((item) => {
+    const base = groupBy === 'id' ? item.customer_id : item.customer_name
+    const label = item.customer_configured ? base : `${base}${fallbackSuffix}`
+    const amount = item.customer_configured
+      ? Number(item.customer_stat_quota) || 0
+      : Number(item.channel_stat_quota) || 0
+    return { username: label, created_at: item.created_at, quota: amount }
+  })
+
+  const result = processUserChartData(mapped, timeGranularity, t, limit, 'quota', {
+    rankKey: 'Customer Consumption Ranking',
+    trendKey: 'Customer Consumption Trend',
+  })
+  return {
+    spec_customer_rank: result.spec_user_rank,
+    spec_customer_trend: result.spec_user_trend,
   }
 }

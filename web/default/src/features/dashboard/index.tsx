@@ -55,6 +55,7 @@ import type {
   DashboardChartPreferences,
   DashboardFilters,
   QuotaDataItem,
+  CustomerChartsFilters,
   UserChartsFilters,
 } from './types'
 
@@ -110,6 +111,12 @@ const LazyPerformanceOverview = lazy(() =>
 const LazyUserCharts = lazy(() =>
   import('./components/users/user-charts').then((m) => ({
     default: m.UserCharts,
+  }))
+)
+
+const LazyCustomerCharts = lazy(() =>
+  import('./components/customers/customer-charts').then((m) => ({
+    default: m.CustomerCharts,
   }))
 )
 
@@ -195,6 +202,9 @@ const SECTION_META: Record<DashboardSectionId, { titleKey: string }> = {
   users: {
     titleKey: 'User Analytics',
   },
+  customers: {
+    titleKey: 'Customer Analytics',
+  },
 }
 
 export function Dashboard() {
@@ -222,6 +232,16 @@ export function Dashboard() {
       }
     }
   )
+  const [customerChartsFilters, setCustomerChartsFilters] =
+    useState<CustomerChartsFilters>(() => {
+      const granularity = getSavedGranularity()
+      return {
+        timeGranularity: granularity,
+        selectedRange: getDefaultDays(granularity),
+        topCustomerLimit: 10,
+        groupBy: 'name',
+      }
+    })
   const [flowSensitiveVisible, setFlowSensitiveVisible] = useState(true)
 
   const handleFilterChange = useCallback((filters: DashboardFilters) => {
@@ -254,7 +274,10 @@ export function Dashboard() {
   const visibleSections = useMemo(
     () =>
       DASHBOARD_SECTION_IDS.filter(
-        (section) => section !== 'overview' && (section !== 'users' || isAdmin)
+        (section) =>
+          section !== 'overview' &&
+          (section !== 'users' || isAdmin) &&
+          (section !== 'customers' || isAdmin)
       ),
     [isAdmin]
   )
@@ -413,6 +436,16 @@ export function Dashboard() {
                 <LazyUserCharts
                   filters={userChartsFilters}
                   onFiltersChange={setUserChartsFilters}
+                />
+              </Suspense>
+            </FadeIn>
+          )}
+          {activeSection === 'customers' && (
+            <FadeIn>
+              <Suspense fallback={<ModelChartsFallback />}>
+                <LazyCustomerCharts
+                  filters={customerChartsFilters}
+                  onFiltersChange={setCustomerChartsFilters}
                 />
               </Suspense>
             </FadeIn>
