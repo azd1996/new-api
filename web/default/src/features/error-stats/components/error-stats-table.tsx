@@ -347,12 +347,22 @@ function ChannelsCell(props: { item: ErrorStatItem }) {
       {props.item.channels.length === 0 && (
         <span className='text-muted-foreground text-xs'>-</span>
       )}
-      {props.item.channels.map((c) => (
-        <Badge key={c.channel_id} variant='outline' className='max-w-[180px]'>
-          <span className='truncate'>{c.channel_name || `#${c.channel_id}`}</span>
-          <span className='text-muted-foreground'>×{c.count}</span>
-        </Badge>
-      ))}
+      {props.item.channels.map((c) => {
+        const name = c.channel_name || `#${c.channel_id}`
+        return (
+          <Tooltip key={c.channel_id}>
+            <TooltipTrigger
+              render={<Badge variant='outline' className='max-w-[450px]' />}
+            >
+              <span className='truncate'>{name}</span>
+              <span className='text-muted-foreground'>×{c.count}</span>
+            </TooltipTrigger>
+            <TooltipContent className='max-w-[480px] break-words'>
+              {name} ×{c.count}
+            </TooltipContent>
+          </Tooltip>
+        )
+      })}
     </div>
   )
 }
@@ -413,7 +423,7 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
               </TableHead>
             )}
             <TableHead className='min-w-[180px]'>{t('Models')}</TableHead>
-            <TableHead className='min-w-[180px]'>{t('Channels')}</TableHead>
+            <TableHead className='min-w-[450px]'>{t('Channels')}</TableHead>
             {isSignatureMode && (
               <TableHead className='min-w-[120px] text-right'>
                 {t('Actions')}

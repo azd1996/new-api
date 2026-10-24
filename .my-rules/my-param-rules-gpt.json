@@ -64,6 +64,17 @@
             "logic": "AND"
         },
         {
+            "mode": "set",
+            "description": "gpt-6.1-sol不支持reasoning_effort=none(仅low/medium/high/xhigh/max)，把none改成最低档low避免400；兜住客户端直传none及上一条gpt-6兜底置none的情况(故置于其后)",
+            "path": "reasoning_effort",
+            "value": "low",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "gpt-6.1-sol" },
+                { "path": "reasoning_effort", "mode": "full", "value": "none" }
+            ],
+            "logic": "AND"
+        },
+        {
             "mode": "move",
             "description": "chat completions的max_tokens已弃用；仅当请求没有max_completion_tokens时才把max_tokens改名搬过去",
             "from": "max_tokens",

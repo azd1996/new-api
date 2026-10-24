@@ -28,7 +28,12 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsAdmin } from '@/hooks/use-admin'
 
-import { deleteErrorAlias, getErrorStats, upsertErrorAlias } from './api'
+import {
+  deleteErrorAlias,
+  getErrorAliases,
+  getErrorStats,
+  upsertErrorAlias,
+} from './api'
 import { ErrorSignatureRuleSuggestionsDialog } from './components/error-signature-rule-suggestions-dialog'
 import { ErrorSignatureRulesDialog } from './components/error-signature-rules-dialog'
 import {
@@ -144,39 +149,52 @@ export function ErrorStats() {
     [items]
   )
 
-  // Distinct short names present in the current stats rows.
+  // Every configured alias, so the short-name / attribution dropdowns offer
+  // ALL previously-saved values, not just the ones present in the current rows.
+  const aliasesQuery = useQuery({
+    queryKey: ['error-aliases'],
+    queryFn: getErrorAliases,
+    enabled: isAdmin,
+  })
+  const aliases = useMemo(
+    () => aliasesQuery.data?.data ?? [],
+    [aliasesQuery.data]
+  )
+
+  // Distinct short names: every configured alias first, then any extra values
+  // present in the current rows.
   const shortNameOptions = useMemo(() => {
     const seen = new Set<string>()
     const result: string[] = []
-    for (const item of items) {
-      const value = item.short_name.trim()
+    const pushValue = (raw: string) => {
+      const value = raw.trim()
       if (value && !seen.has(value)) {
         seen.add(value)
         result.push(value)
       }
     }
+    for (const alias of aliases) pushValue(alias.short_name)
+    for (const item of items) pushValue(item.short_name)
     return result
-  }, [items])
+  }, [aliases, items])
 
-  // Default attributions first, then any distinct values already in the rows.
+  // Default attributions first, then every configured alias, then any extra
+  // values present in the current rows.
   const attributionOptions = useMemo(() => {
     const seen = new Set<string>()
     const result: string[] = []
-    for (const value of DEFAULT_ATTRIBUTIONS) {
-      if (!seen.has(value)) {
-        seen.add(value)
-        result.push(value)
-      }
-    }
-    for (const item of items) {
-      const value = item.attribution.trim()
+    const pushValue = (raw: string) => {
+      const value = raw.trim()
       if (value && !seen.has(value)) {
         seen.add(value)
         result.push(value)
       }
     }
+    for (const value of DEFAULT_ATTRIBUTIONS) pushValue(value)
+    for (const alias of aliases) pushValue(alias.attribution)
+    for (const item of items) pushValue(item.attribution)
     return result
-  }, [items])
+  }, [aliases, items])
 
   const [savingHash, setSavingHash] = useState<string | null>(null)
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -201,6 +219,7 @@ export function ErrorStats() {
     onSuccess: (res) => {
       if (res.success) {
         void queryClient.invalidateQueries({ queryKey: ['error-stats'] })
+        void queryClient.invalidateQueries({ queryKey: ['error-aliases'] })
       }
     },
     onSettled: () => setSavingHash(null),
@@ -212,6 +231,7 @@ export function ErrorStats() {
       if (res.success) {
         toast.success(t('Category cleared'))
         void queryClient.invalidateQueries({ queryKey: ['error-stats'] })
+        void queryClient.invalidateQueries({ queryKey: ['error-aliases'] })
       }
     },
     onSettled: () => setSavingHash(null),

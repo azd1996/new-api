@@ -1,6 +1,16 @@
 {
     "operations": [
         {
+            "mode": "set",
+            "description": "Bedrock要求anthropic_version(值仅bedrock-2023-05-31)，缺失时补上避免400 anthropic_version: Field required(多见于透传模式下客户端原生Claude body不带该字段)；keep_origin不覆盖已有值",
+            "path": "anthropic_version",
+            "value": "bedrock-2023-05-31",
+            "keep_origin": true,
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" }
+            ]
+        },
+        {
             "mode": "regex_replace",
             "description": "system为数组且首段text存在时才trim",
             "path": "system.0.text",
@@ -230,6 +240,19 @@
             ]
         },
         {
+            "description": "claude-opus-5-5: 不支持强制tool_choice(any/tool)，仅auto/none；tool_choice存在且type既非auto也非none时统一改成auto(保留想用工具的意图，而非用none禁用)，避免400 does not support forced tool_choice",
+            "mode": "set",
+            "path": "tool_choice",
+            "value": { "type": "auto" },
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-5-5" },
+                { "path": "tool_choice", "mode": "contains", "value": "" },
+                { "path": "tool_choice.type", "mode": "full", "value": "auto", "invert": true },
+                { "path": "tool_choice.type", "mode": "full", "value": "none", "invert": true }
+            ],
+            "logic": "AND"
+        },
+        {
             "description": "claude-opus-5: thinking.display仅非法值(非summarized/omitted)兜底改为summarized，合法值保留，避免Bedrock 400",
             "mode": "set",
             "path": "thinking.display",
@@ -273,7 +296,8 @@
                 "thinking-display-updates-2026-08-18": null,
                 "dangerous-tool-use-2026-09-03": null,
                 "advanced-tool-use-2025-11-20": null,
-                "structured-outputs-2025-12-15": null
+                "structured-outputs-2025-12-15": null,
+                "structured-outputs-2025-11-13": null
             },
             "conditions": [
                 { "path": "model", "mode": "prefix", "value": "claude-" }
@@ -346,6 +370,22 @@
             }
         },
         {
+            "description": "claude-: 删除没有thinking文本的thinking块(type==thinking且thinking为空或缺失)，避免Bedrock 400 each thinking block must contain thinking；只扫content数组不递归",
+            "mode": "prune_objects",
+            "path": "messages.*.content",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-" }
+            ],
+            "value": {
+                "logic": "AND",
+                "recursive": false,
+                "conditions": [
+                    { "path": "type", "mode": "full", "value": "thinking" },
+                    { "path": "thinking", "mode": "full", "value": "", "pass_missing_key": true }
+                ]
+            }
+        },
+        {
             "description": "claude-: messages.0 content为空数组([])时补占位，避免Bedrock 400 non-empty content。用content.#==0做类型安全判空，content为非空数组或字符串时都不会触发类型比较崩溃",
             "mode": "set",
             "path": "messages.0.content",
@@ -353,6 +393,16 @@
             "conditions": [
                 { "path": "model", "mode": "prefix", "value": "claude-" },
                 { "path": "messages.0.content.#", "mode": "full", "value": 0 }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 不支持assistant消息预填充(prefill)，对话必须以user消息结尾。末条消息role==assistant时删除它使对话落回上一条user(该模型无法保留prefill意图)；放在所有messages清洗之后，前缀claude-opus-5含opus-5/opus-5-5",
+            "mode": "delete",
+            "path": "messages.-1",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
+                { "path": "messages.-1.role", "mode": "full", "value": "assistant" }
             ],
             "logic": "AND"
         },

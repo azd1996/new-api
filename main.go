@@ -120,6 +120,10 @@ func main() {
 	go model.SyncCustomerCache(common.SyncFrequency)
 	go model.SyncErrorAliasCache(common.SyncFrequency)
 
+	// 明细错误归一化规则被编译进进程内缓存（非每次从 OptionMap 现读），故与简名缓存
+	// 一样需周期性从 Option 重新编译，否则在另一实例上编辑的规则不会传播到本实例。
+	go service.SyncErrorSignatureRules(common.SyncFrequency)
+
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
 	go authz.StartPolicySync(common.SyncFrequency)
 

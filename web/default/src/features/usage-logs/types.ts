@@ -318,6 +318,9 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
+  // Total number of consume-type log rows matching the full filter set over the
+  // selected time range (not the 60s RPM window).
+  request_count?: number
   // Reporting-only aggregate amounts (admin only), summed from each log's Other
   // JSON over the full filter set. channel_stat_quota = sum of stat_quota,
   // customer_stat_quota = sum of customer_stat_quota, profit_quota = sum of

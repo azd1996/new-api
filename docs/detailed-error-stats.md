@@ -41,8 +41,9 @@
 
 归一化是一组**有序的纯正则替换规则** `{name, pattern, replacement, enabled}`，逐条 `ReplaceAllString`，`replacement` 支持 `$1` 捕获组；Go 用 RE2（线性、无回溯），不怕 ReDoS。
 
-- 默认规则（`service.DefaultErrorSignatureRules`）：压空白、删 `(request id: …)` 后缀、UUID→定长星号常量、长 hex→`*`、按 key 掩 request id（`RequestID:`/`x-amzn-requestid` 等）、ISO 时间戳→`*`。
+- 默认规则（`service.DefaultErrorSignatureRules`）：压空白、删 `(request id: …)` 后缀、`encrypted content … could not be verified` 中段 blob→`*`、UUID→定长星号常量、`toolu_/rs_/resp_…` 等厂商前缀 id→`${1}_*`、长 hex→`*`、按 key 掩 request id（`RequestID:`/`x-amzn-requestid` 等）、ISO 时间戳→`*`。
 - 规则集可由管理员编辑并持久化：存为 Option 行 `ErrorSignatureRules`（JSON 数组），启动时在 `InitOptionMap` 后由 `service.ApplyErrorSignatureRulesJSON` 应用，空则保留默认。
+- **多实例同步**：规则被编译进进程内缓存（非每次从 `OptionMap` 现读），故除启动与「保存的那台实例」外，其他实例需 `service.SyncErrorSignatureRules(SYNC_FREQUENCY)` 周期性从 `OptionMap` 重新编译（值变化才重编译，空则回落默认），否则它们会一直用旧规则、产出与保存实例不一致的签名。`main.go` 与 `SyncErrorAliasCache` 等并列启动。
 - 规则**自上而下顺序执行，顺序有意义**；修改规则只影响之后产生的签名（写时归一化，历史签名不回改）。
 
 ## 简名映射
@@ -52,7 +53,7 @@
 
 ## 下钻
 
-`GetAllLogs` 新增 `error_signature_hash` 过滤参数：因签名/指纹存在 `other` JSON，用跨方言的 `other LIKE '%"error_signature_hash":"<hash>"%'`（复用 `otherFieldLikeCondition`，与 trace-tag 检索同机制）精确匹配。明细错误页「查看日志」跳转「使用日志」并带上该 hash + 时间范围 + `type=5`，复用既有日志列表与详情弹窗。
+`GetAllLogs` 新增 `error_signature_hash` 过滤参数：错误日志已把指纹**双写进 `logs.error_signature_hash` 真列**，下钻过滤走 `logs.error_signature_hash = ?`（走索引、快）。明细错误页「查看日志」跳转「使用日志」并带上该 hash + 时间范围 + `type=5`，复用既有日志列表与详情弹窗。注意：列加上之前产生的历史错误日志仅在 `other` 里有指纹、列为空，用列过滤查不到它们；新日志不受影响。
 
 ## 聚合实现
 

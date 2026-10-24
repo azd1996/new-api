@@ -88,6 +88,11 @@ export function CommonLogsStats() {
   return (
     <div className='flex flex-wrap items-center gap-2'>
       <StatBadge
+        label={t('Requests')}
+        value={stats?.request_count || 0}
+        accent='bg-indigo-500/70'
+      />
+      <StatBadge
         label={t('Usage')}
         value={sensitiveVisible ? formatLogQuota(stats?.quota || 0) : '••••'}
         accent='bg-sky-500/70'
@@ -104,6 +109,11 @@ export function CommonLogsStats() {
       />
       {isAdmin && (
         <>
+          <StatBadge
+            label={t('Requests')}
+            value={stats?.request_count || 0}
+            accent='bg-indigo-500/70'
+          />
           <StatBadge
             label={t('Channel Discounted Amount')}
             value={

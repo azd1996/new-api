@@ -5,7 +5,7 @@
 > param 规则搞不定/有取舍的报错（整块类型不支持、需结构转换等）另见 `.my-rules/hard-to-handle-errors.md`。
 >
 > 配置来源：
-> - 参数覆盖：`.my-rules/my-param-rules-claude.json`（Claude，下表列出 25 条）+ `.my-rules/my-param-rules-gpt.json`（GPT，3 条），下表合并编号共 28 条。注：Claude 文件另有一条"anthropic-beta 黑名单剔除"规则（用户新增）暂未收录进下表。
+> - 参数覆盖：`.my-rules/my-param-rules-claude.json`（Claude，下表列出 29 条）+ `.my-rules/my-param-rules-gpt.json`（GPT，4 条），下表合并编号共 33 条。注：Claude 文件另有一条"anthropic-beta 黑名单剔除"规则（用户新增）暂未收录进下表。
 > - 重试覆盖：`.my-rules/my-retry-rules.json`（6 条）、`.my-rules/my-channel-setting.json` 的 `retry_override`（5 条）
 > - `.my-rules/c.json` 是一个抓包的 `/v1/responses` 响应示例，非规则配置。
 
@@ -50,25 +50,30 @@ Claude 5 系列不再接受 `thinking.type == "enabled"`；opus-4-7 等模型则
 | 17 | 请求带 `context_management` 时需启用 Bedrock 服务端上下文管理 | `set_header` `anthropic-beta` `$append` `context-management-2025-06-27`（cond: 前缀 `claude-` AND 存在 `context_management`） |
 | 18 | `claude-sonnet-5-5` 关闭 thinking 用 `disabled` 会 Bedrock 400 | `set` `thinking.type = "between_tools"`（cond: 前缀 `claude-sonnet-5-5` AND `thinking.type==disabled`） |
 | 19 | `thinking.type==between_tools` 时不允许 `display`，报 400 `thinking.between_tools.display: Extra inputs are not permitted`（`between_tools` 是判别联合变体标签，真实字段 `thinking.display`；#16 的 display 兜底会给它补上） | `delete` `thinking.display`（cond: 前缀 `claude-` AND `thinking.type==between_tools`；须排在 #18 转换之后执行） |
+| 20 | `claude-opus-5-5` 不支持强制 tool_choice（`any`/`tool`），仅 `auto`/`none`，报 400 `does not support forced tool_choice; use auto or none` | `set` `tool_choice = {"type":"auto"}`（cond: 前缀 `claude-opus-5-5` AND tool_choice 存在 AND `tool_choice.type != auto` AND `!= none`；改成 auto 而非 none，保留"想用工具"的意图） |
+| 21 | Bedrock 要求 `anthropic_version`（值仅 `bedrock-2023-05-31`），缺失时报 400 `anthropic_version: Field required`（多见于透传模式下客户端原生 Claude body 不带该字段） | `set` `anthropic_version = "bedrock-2023-05-31"`（cond: 前缀 `claude-`；`keep_origin` 不覆盖已有值。置于 operations 开头） |
 
 ### 4. messages 角色与内容块清洗（Bedrock 角色/content 限制）
 
 | # | 问题 | 规则 |
 |---|------|------|
-| 20 | messages 里出现 `role==developer`（OpenAI 新角色），Bedrock 只允许 user/assistant/system，报 400 `Unexpected role "developer"` | `regex_replace` `messages.*.role` 把 `^developer$` 改写成 `user`（cond: 前缀 `claude-`；锚定精确匹配，保留该条内容，不误伤其它角色） |
-| 21 | thinking 内容块里的 `endpoint_signature` 不被 Bedrock 支持（报错 `...content.M.thinking.endpoint_signature`，`thinking` 是判别联合变体标签 `type=thinking`，真实字段在块顶层 `messages.N.content.M.endpoint_signature`） | `delete` `messages.*.content.*.endpoint_signature`（cond: 前缀 `claude-`；逐个删除，`signature` 本体保留，不影响 thinking 多轮验签） |
-| 22 | messages 里混入 `role==system`，Bedrock 不接受 | `prune_objects` `messages`，删除 `where role==system`（`recursive:false`） |
-| 23 | content 内有空 text 块（`type==text && text==""`）导致 Bedrock 400 "text content blocks must be non-empty" | `prune_objects` `messages.*.content`，删除 `type==text && text==""`（cond: 前缀 `claude-`；`recursive:false`，避免误入 `tool_use.input` 触发类型比较崩溃） |
-| 24 | `messages.0.content` 为空数组 `[]` 时 Bedrock 400 non-empty content | `set` `messages.0.content = "."` 占位（cond: 前缀 `claude-` AND `messages.0.content.# == 0`，用长度判空保证类型安全） |
+| 22 | messages 里出现 `role==developer`（OpenAI 新角色），Bedrock 只允许 user/assistant/system，报 400 `Unexpected role "developer"` | `regex_replace` `messages.*.role` 把 `^developer$` 改写成 `user`（cond: 前缀 `claude-`；锚定精确匹配，保留该条内容，不误伤其它角色） |
+| 23 | thinking 内容块里的 `endpoint_signature` 不被 Bedrock 支持（报错 `...content.M.thinking.endpoint_signature`，`thinking` 是判别联合变体标签 `type=thinking`，真实字段在块顶层 `messages.N.content.M.endpoint_signature`） | `delete` `messages.*.content.*.endpoint_signature`（cond: 前缀 `claude-`；逐个删除，`signature` 本体保留，不影响 thinking 多轮验签） |
+| 24 | messages 里混入 `role==system`，Bedrock 不接受 | `prune_objects` `messages`，删除 `where role==system`（`recursive:false`） |
+| 25 | content 内有空 text 块（`type==text && text==""`）导致 Bedrock 400 "text content blocks must be non-empty" | `prune_objects` `messages.*.content`，删除 `type==text && text==""`（cond: 前缀 `claude-`；`recursive:false`，避免误入 `tool_use.input` 触发类型比较崩溃） |
+| 26 | thinking 块没有 thinking 文本（`type==thinking` 且 `thinking` 为空或缺失）导致 400 `each thinking block must contain thinking` | `prune_objects` `messages.*.content`，删除 `type==thinking && thinking∈{空,缺失}`（cond: 前缀 `claude-`；`recursive:false`，`thinking` 条件带 `pass_missing_key`） |
+| 27 | `messages.0.content` 为空数组 `[]` 时 Bedrock 400 non-empty content | `set` `messages.0.content = "."` 占位（cond: 前缀 `claude-` AND `messages.0.content.# == 0`，用长度判空保证类型安全） |
+| 28 | `claude-opus-5` 不支持 assistant 消息预填充（prefill），对话须以 user 结尾，报 400 `does not support assistant message prefill` | `delete` `messages.-1`（cond: 前缀 `claude-opus-5` AND `messages.-1.role==assistant`；删掉末条 assistant 使对话落回上一条 user。放在所有 messages 清洗之后；prefill 意图在该模型无法保留） |
 
 ### 5. temperature / token 参数约束
 
 | # | 问题 | 规则 |
 |---|------|------|
-| 25 | Claude 新世代（opus-5 / sonnet-5 及 opus-4-6/4-7/4-8）已弃用 temperature，带上会 400 "temperature is deprecated" | `delete` `temperature`（cond: model `contains` `claude-opus-5` OR `claude-sonnet-5` OR `claude-opus-4-6` OR `claude-opus-4-7` OR `claude-opus-4-8`；按精确型号，不放宽到老的 opus-4/4-1） |
-| 26 | `gpt-6` 只支持默认 `temperature=1`，其它值 400 | `delete` `temperature`（cond: 前缀 `gpt-6` AND `temperature != 1`） |
-| 27 | `gpt-6` 的 `max_output_tokens` 低于最小值 16 会 400 | `set` `max_output_tokens = 16`（cond: 前缀 `gpt-6` AND `max_output_tokens < 16`） |
-| 28 | `gpt-6` 在 chat/completions 下 function tools 与 `reasoning_effort` 冲突 400 | `set` `reasoning_effort = "none"`（cond: 前缀 `gpt-6` AND 存在 `tools` 中 `type==function` AND `reasoning_effort != none`） |
+| 29 | Claude 新世代（opus-5 / sonnet-5 及 opus-4-6/4-7/4-8）已弃用 temperature，带上会 400 "temperature is deprecated" | `delete` `temperature`（cond: model `contains` `claude-opus-5` OR `claude-sonnet-5` OR `claude-opus-4-6` OR `claude-opus-4-7` OR `claude-opus-4-8`；按精确型号，不放宽到老的 opus-4/4-1） |
+| 30 | `gpt-6` 只支持默认 `temperature=1`，其它值 400 | `delete` `temperature`（cond: 前缀 `gpt-6` AND `temperature != 1`） |
+| 31 | `gpt-6` 的 `max_output_tokens` 低于最小值 16 会 400 | `set` `max_output_tokens = 16`（cond: 前缀 `gpt-6` AND `max_output_tokens < 16`） |
+| 32 | `gpt-6` 在 chat/completions 下 function tools 与 `reasoning_effort` 冲突 400 | `set` `reasoning_effort = "none"`（cond: 前缀 `gpt-6` AND 存在 `tools` 中 `type==function` AND `reasoning_effort != none`） |
+| 33 | `gpt-6.1-sol` 不支持 `reasoning_effort=none`（仅 low/medium/high/xhigh/max），#32 兜底置的 none 或客户端直传 none 都会 400 `'none' is not supported` | `set` `reasoning_effort = "low"`（cond: 前缀 `gpt-6.1-sol` AND `reasoning_effort==none`；置于 #32 之后，兜住自身兜底与客户端直传） |
 
 ---
 

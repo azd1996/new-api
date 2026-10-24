@@ -6,9 +6,16 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 )
+
+// errorSignatureRulesOptionKey is the Option row that persists the admin-edited
+// normalization rule set. Kept in sync with the controller constant of the same
+// value; defined here so the cross-instance poller can read it without importing
+// the controller package.
+const errorSignatureRulesOptionKey = "ErrorSignatureRules"
 
 // SignatureRule is one ordered normalization step applied to a raw error
 // message to derive its stable "signature". Each rule is a pure regexp
@@ -41,13 +48,15 @@ var (
 )
 
 // DefaultErrorSignatureRules returns the seed rule set. Order matters: whitespace
-// is collapsed first, our own request-id suffixes are stripped, then request-id
-// shaped tokens (UUID, vendor-prefixed ids, long hex, key-anchored ids) and
-// timestamps are masked.
+// is collapsed first, our own request-id suffixes are stripped, the body of an
+// "encrypted content <...> could not be verified" message is masked, then
+// request-id shaped tokens (UUID, vendor-prefixed ids, long hex, key-anchored
+// ids) and timestamps are masked.
 func DefaultErrorSignatureRules() []SignatureRule {
 	return []SignatureRule{
 		{Name: "collapse-whitespace", Pattern: `\s+`, Replacement: " ", Enabled: true},
 		{Name: "strip-newapi-request-id", Pattern: ` *\(request id: [^)]*\)`, Replacement: "", Enabled: true},
+		{Name: "encrypted-content-blob", Pattern: `(encrypted content ).*?( could not be verified)`, Replacement: "${1}*${2}", Enabled: true},
 		{Name: "uuid", Pattern: `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`, Replacement: "********-****-****-****-************", Enabled: true},
 		{Name: "vendor-prefixed-id", Pattern: `\b(toolu|rs|resp|msg|item|fc|call|chatcmpl|req)_[A-Za-z0-9_]{6,}`, Replacement: "${1}_*", Enabled: true},
 		{Name: "long-hex", Pattern: `\b[0-9a-fA-F]{16,}\b`, Replacement: "*", Enabled: true},
@@ -154,4 +163,56 @@ func ApplyErrorSignatureRulesJSON(jsonStr string) error {
 		return err
 	}
 	return SetErrorSignatureRules(rules)
+}
+
+var (
+	rulesSyncMu          sync.Mutex
+	lastAppliedRulesJSON string
+	lastAppliedRulesSet  bool
+)
+
+// SyncErrorSignatureRules periodically re-applies the persisted
+// ErrorSignatureRules option so a rule set edited on another instance
+// propagates here without a restart. Unlike plain key-value options (read from
+// common.OptionMap at use time), the normalization rules are COMPILED into an
+// in-process cache and are only (re)compiled at startup and in the editing
+// instance's HTTP handler — so other instances would otherwise keep using their
+// stale compiled rules even though they see the new option value. This mirrors
+// model.SyncOptions / SyncErrorAliasCache; frequency is the SYNC_FREQUENCY
+// interval in seconds, a non-positive value disables polling. A change guard
+// skips the regexp recompile when the option value is unchanged.
+func SyncErrorSignatureRules(frequency int) {
+	if frequency <= 0 {
+		return
+	}
+	for {
+		time.Sleep(time.Duration(frequency) * time.Second)
+		common.OptionMapRWMutex.RLock()
+		jsonStr := common.OptionMap[errorSignatureRulesOptionKey]
+		common.OptionMapRWMutex.RUnlock()
+
+		rulesSyncMu.Lock()
+		unchanged := lastAppliedRulesSet && jsonStr == lastAppliedRulesJSON
+		rulesSyncMu.Unlock()
+		if unchanged {
+			continue
+		}
+
+		var err error
+		if strings.TrimSpace(jsonStr) == "" {
+			// Option cleared or never set: fall back to the built-in defaults
+			// instead of leaving whatever was last compiled in place.
+			err = SetErrorSignatureRules(DefaultErrorSignatureRules())
+		} else {
+			err = ApplyErrorSignatureRulesJSON(jsonStr)
+		}
+		if err != nil {
+			common.SysError("failed to sync error signature rules: " + err.Error())
+			continue
+		}
+		rulesSyncMu.Lock()
+		lastAppliedRulesJSON = jsonStr
+		lastAppliedRulesSet = true
+		rulesSyncMu.Unlock()
+	}
 }

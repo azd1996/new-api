@@ -841,12 +841,13 @@ func applyAdminLogFilters(tx *gorm.DB, logType int, startTimestamp int64, endTim
 		condition, pattern := errorContentLikeCondition("logs.content", errorKeyword)
 		tx = tx.Where(condition, pattern)
 	}
-	// error_signature_hash lives in the Other JSON (reusing the existing
-	// extensible column, no schema change); it powers the "明细错误" stats
-	// drill-down (one signature) via a cross-dialect other LIKE.
+	// error_signature_hash is dual-written into a real indexed column (see the
+	// Log.ErrorSignatureHash field); the "明细错误" stats drill-down (one
+	// signature) filters on that column directly instead of a cross-dialect
+	// other LIKE, so it is indexed and fast. Note: logs written before the
+	// column existed only carry the hash in Other and won't match here.
 	if errorSignatureHash != "" {
-		cond, pat := otherFieldLikeCondition("logs.other", "error_signature_hash", errorSignatureHash)
-		tx = tx.Where(cond, pat)
+		tx = tx.Where("logs.error_signature_hash = ?", errorSignatureHash)
 	}
 	return applyTraceTagFilters(tx, "logs.other", customerId, customerName, downstreamRequestId, downstreamTraceTag), nil
 }
@@ -968,13 +969,14 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 }
 
 type Stat struct {
-	Quota int `json:"quota"`
-	Rpm   int `json:"rpm"`
-	Tpm   int `json:"tpm"`
+	Quota        int `json:"quota"`
+	Rpm          int `json:"rpm"`
+	Tpm          int `json:"tpm"`
+	RequestCount int `json:"request_count"`
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
-	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
+	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota, count(*) request_count")
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
