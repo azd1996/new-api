@@ -367,6 +367,35 @@ function ChannelsCell(props: { item: ErrorStatItem }) {
   )
 }
 
+function CustomersCell(props: { item: ErrorStatItem }) {
+  return (
+    <div className='flex flex-wrap gap-1'>
+      {props.item.customers.length === 0 && (
+        <span className='text-muted-foreground text-xs'>-</span>
+      )}
+      {props.item.customers.map((c) => {
+        // 展示格式：客户ID(客户名)；没有客户名时只展示客户ID。
+        const label = c.customer_name
+          ? `${c.customer_id}(${c.customer_name})`
+          : c.customer_id
+        return (
+          <Tooltip key={c.customer_id}>
+            <TooltipTrigger
+              render={<Badge variant='outline' className='max-w-[260px]' />}
+            >
+              <span className='truncate'>{label}</span>
+              <span className='text-muted-foreground'>×{c.count}</span>
+            </TooltipTrigger>
+            <TooltipContent className='max-w-[360px] break-words'>
+              {label} ×{c.count}
+            </TooltipContent>
+          </Tooltip>
+        )
+      })}
+    </div>
+  )
+}
+
 // GROUP_LABEL_PLACEHOLDER
 interface ErrorStatsTableProps {
   items: ErrorStatItem[]
@@ -384,7 +413,7 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
   const { t } = useTranslation()
 
   const isSignatureMode = props.viewMode === 'signature'
-  const colSpan = isSignatureMode ? 10 : 5
+  const colSpan = isSignatureMode ? 11 : 6
   const groupHeader =
     props.viewMode === 'attribution'
       ? t('Error Attribution')
@@ -424,6 +453,7 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
             )}
             <TableHead className='min-w-[180px]'>{t('Models')}</TableHead>
             <TableHead className='min-w-[450px]'>{t('Channels')}</TableHead>
+            <TableHead className='min-w-[200px]'>{t('Customers')}</TableHead>
             {isSignatureMode && (
               <TableHead className='min-w-[120px] text-right'>
                 {t('Actions')}
@@ -512,6 +542,9 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
                 <TableCell>
                   <ChannelsCell item={item} />
                 </TableCell>
+                <TableCell>
+                  <CustomersCell item={item} />
+                </TableCell>
                 <TableCell className='text-right'>
                   <Button
                     type='button'
@@ -558,6 +591,9 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
                 </TableCell>
                 <TableCell>
                   <ChannelsCell item={item} />
+                </TableCell>
+                <TableCell>
+                  <CustomersCell item={item} />
                 </TableCell>
               </TableRow>
             ))}

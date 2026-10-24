@@ -39,6 +39,9 @@ type ErrorSignatureStat struct {
 	LastSeen      int64
 	Models        map[string]int64
 	Channels      map[int]int64
+	// Customers aggregates occurrences by downstream customer id (from the
+	// log's Other JSON). Rows without a customer id are skipped.
+	Customers map[string]int64
 }
 
 // maxErrorStatScanRows caps how many error rows one stats request scans, so a
@@ -79,6 +82,7 @@ type errorStatScanRow struct {
 type errorSignatureOther struct {
 	ErrorSignature     string `json:"error_signature"`
 	ErrorSignatureHash string `json:"error_signature_hash"`
+	CustomerId         string `json:"customer_id"`
 }
 
 // scanErrorStatRows pulls the capped error-log window for the filter, newest
@@ -124,6 +128,7 @@ func GetErrorSignatureStats(f ErrorStatFilter, limit int) ([]*ErrorSignatureStat
 				LastSeen:      r.CreatedAt,
 				Models:        make(map[string]int64),
 				Channels:      make(map[int]int64),
+				Customers:     make(map[string]int64),
 			}
 			agg[o.ErrorSignatureHash] = s
 		}
@@ -139,6 +144,9 @@ func GetErrorSignatureStats(f ErrorStatFilter, limit int) ([]*ErrorSignatureStat
 		}
 		if r.ChannelId != 0 {
 			s.Channels[r.ChannelId]++
+		}
+		if o.CustomerId != "" {
+			s.Customers[o.CustomerId]++
 		}
 	}
 
@@ -171,6 +179,8 @@ type ErrorGroupStat struct {
 	LastSeen      int64
 	Models        map[string]int64
 	Channels      map[int]int64
+	// Customers aggregates occurrences by downstream customer id for the bucket.
+	Customers map[string]int64
 }
 
 // GetErrorStatsGrouped scans the error-log window (capped) and aggregates it by
@@ -204,6 +214,7 @@ func GetErrorStatsGrouped(f ErrorStatFilter, groupBy string, limit int) ([]*Erro
 				LastSeen:      s.LastSeen,
 				Models:        s.Models,
 				Channels:      s.Channels,
+				Customers:     s.Customers,
 			})
 		}
 		return out, nil
@@ -236,6 +247,7 @@ func GetErrorStatsGrouped(f ErrorStatFilter, groupBy string, limit int) ([]*Erro
 				LastSeen:   r.CreatedAt,
 				Models:     make(map[string]int64),
 				Channels:   make(map[int]int64),
+				Customers:  make(map[string]int64),
 			}
 			if groupBy == ErrorStatGroupByAttribution {
 				s.Attribution = key
@@ -256,6 +268,9 @@ func GetErrorStatsGrouped(f ErrorStatFilter, groupBy string, limit int) ([]*Erro
 		}
 		if r.ChannelId != 0 {
 			s.Channels[r.ChannelId]++
+		}
+		if o.CustomerId != "" {
+			s.Customers[o.CustomerId]++
 		}
 	}
 

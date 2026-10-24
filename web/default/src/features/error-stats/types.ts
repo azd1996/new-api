@@ -40,6 +40,14 @@ export interface ErrorStatChannel {
   count: number
 }
 
+// Per-customer breakdown of a single error signature. customer_name is the
+// configured display name, or "" when the customer id has no mapping.
+export interface ErrorStatCustomer {
+  customer_id: string
+  customer_name: string
+  count: number
+}
+
 // How /api/log/error-stats aggregates its rows. `signature` (default) returns
 // one row per distinct error signature; the grouped modes collapse rows by the
 // resolved category ("简名") or attribution ("错误归因").
@@ -81,6 +89,7 @@ export interface ErrorStatItem {
   status_code: number
   models: ErrorStatModel[]
   channels: ErrorStatChannel[]
+  customers: ErrorStatCustomer[]
 }
 
 // Query parameters accepted by /api/log/error-stats. Timestamps are unix

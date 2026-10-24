@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getRouteApi, useNavigate } from '@tanstack/react-router'
+import { getRouteApi, useNavigate, useRouter } from '@tanstack/react-router'
 import { Lightbulb, SlidersHorizontal } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -119,6 +119,7 @@ export function ErrorStats() {
   const { t } = useTranslation()
   const isAdmin = useIsAdmin()
   const navigate = useNavigate()
+  const router = useRouter()
   const queryClient = useQueryClient()
   const search = route.useSearch() as ErrorStatsSearch
 
@@ -291,7 +292,9 @@ export function ErrorStats() {
 
   const handleDrillDown = (item: ErrorStatItem) => {
     const { startMs, endMs } = resolveRange(search)
-    void navigate({
+    // Open the drill-down logs in a new browser tab instead of navigating in
+    // place, so the stats view stays put while inspecting matching logs.
+    const location = router.buildLocation({
       to: '/usage-logs/$section',
       params: { section: 'common' },
       search: {
@@ -302,6 +305,7 @@ export function ErrorStats() {
         endTime: endMs,
       },
     })
+    window.open(location.href, '_blank', 'noopener,noreferrer')
   }
 
   return (

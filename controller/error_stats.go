@@ -96,20 +96,27 @@ type errorStatChannelCount struct {
 	Count       int64  `json:"count"`
 }
 
+type errorStatCustomerCount struct {
+	CustomerId   string `json:"customer_id"`
+	CustomerName string `json:"customer_name"`
+	Count        int64  `json:"count"`
+}
+
 type errorStatItem struct {
-	GroupKey      string                  `json:"group_key"`
-	GroupLabel    string                  `json:"group_label"`
-	Signature     string                  `json:"signature"`
-	SignatureHash string                  `json:"signature_hash"`
-	ShortName     string                  `json:"short_name"`
-	Attribution   string                  `json:"attribution"`
-	Note          string                  `json:"note"`
-	Count         int64                   `json:"count"`
-	FirstSeen     int64                   `json:"first_seen"`
-	LastSeen      int64                   `json:"last_seen"`
-	StatusCode    int                     `json:"status_code"`
-	Models        []errorStatModelCount   `json:"models"`
-	Channels      []errorStatChannelCount `json:"channels"`
+	GroupKey      string                   `json:"group_key"`
+	GroupLabel    string                   `json:"group_label"`
+	Signature     string                   `json:"signature"`
+	SignatureHash string                   `json:"signature_hash"`
+	ShortName     string                   `json:"short_name"`
+	Attribution   string                   `json:"attribution"`
+	Note          string                   `json:"note"`
+	Count         int64                    `json:"count"`
+	FirstSeen     int64                    `json:"first_seen"`
+	LastSeen      int64                    `json:"last_seen"`
+	StatusCode    int                      `json:"status_code"`
+	Models        []errorStatModelCount    `json:"models"`
+	Channels      []errorStatChannelCount  `json:"channels"`
+	Customers     []errorStatCustomerCount `json:"customers"`
 }
 
 // GetErrorStats aggregates error logs in the requested window by the chosen
@@ -173,6 +180,11 @@ func buildErrorStatsResponse(c *gin.Context, stats []*model.ErrorGroupStat) {
 			channels = append(channels, errorStatChannelCount{ChannelId: id, ChannelName: channelNames[id], Count: cnt})
 		}
 		sort.Slice(channels, func(i, j int) bool { return channels[i].Count > channels[j].Count })
+		customers := make([]errorStatCustomerCount, 0, len(s.Customers))
+		for id, cnt := range s.Customers {
+			customers = append(customers, errorStatCustomerCount{CustomerId: id, CustomerName: model.CustomerName(id), Count: cnt})
+		}
+		sort.Slice(customers, func(i, j int) bool { return customers[i].Count > customers[j].Count })
 		items = append(items, errorStatItem{
 			GroupKey:      s.GroupKey,
 			GroupLabel:    s.GroupLabel,
@@ -187,6 +199,7 @@ func buildErrorStatsResponse(c *gin.Context, stats []*model.ErrorGroupStat) {
 			StatusCode:    statusCode,
 			Models:        models,
 			Channels:      channels,
+			Customers:     customers,
 		})
 	}
 	common.ApiSuccess(c, items)
