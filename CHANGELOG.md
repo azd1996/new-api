@@ -18,6 +18,9 @@
 - 通用日志筛选主行改用 24 列栅格，使时间范围与类型两项都能完整容纳（`common-logs-filter-bar`）。
 - **日志 `other` 字段「提列」首例：`error_signature_hash` 真列 + `other` 双写（Log other→column Dual-Write）**：把错误日志的归一化指纹从「仅存 `other.error_signature_hash`」改为**本机 `logs` 表真列 + 保留 `other` 双写**，为后续按列高效过滤/分组打基础。`model.Log` 新增 `ErrorSignatureHash`(`varchar(64)`，仅错误日志有值)，`RecordErrorLog` 在保留 `other` 那份的同时写入新列；本机 ClickHouse 建表 DDL 加列并在 `migrateClickHouseLogDB` 用幂等 `ALTER TABLE logs ADD COLUMN IF NOT EXISTS` 给存量实例补列（先迁列后写值），MySQL/SQLite 走 `AutoMigrate` 自动补列。**读路径不动**（`error_stats`、`GetAllLogs` 的 `error_signature_hash` 过滤仍解析 `other`），故新老行都正常、无需 backfill 或双读兼容查询。**决策：提列后不从 `other` 移除**——提列字段都很短，真列与 `other` 双份开销很小；留在 `other` 即无缝随 `logshipper.Row` 的 `other` 继续同步到远端 ClickHouse 集群，**远端表零改动**、不触碰 ck-ingest/Flink 链路。`logshipper.Row` 未加列。此策略适用于后续所有 `other`→真列的字段提升。详见 `docs/log-field-columnization.md`。
 
+### 修复 Fixed
+- **数据看板 `quota_data` 落库吞错且谎报成功（Dashboard Quota Data Silent Write Failure）**：`SaveQuotaDataCache`（`model/usedata.go`）此前把 `Create` 插入错误完全丢弃，且无论成功与否都恒打印「保存数据看板数据成功，共保存 N 条」（N 为缓存条数），导致 `quota_data` 真写不进去时在日志里完全隐身——数据看板/分流/模型调用分析静默无新数据，却看不到任何报错（本次排障一度据此误判）。现改为：`Create`、`increaseQuotaData` 的错误均检查并以 `common.SysError` 记录；`First` 查询区分 `ErrRecordNotFound`（正常「新小时桶」→插入）与真实 DB 错误（此时行是否存在未知，贸然 `Create` 可能重复计数，故记录并跳过本条）；结尾按**实际成功条数**记日志，一旦有失败改用 `SysError` 打印「成功 X 条，失败 Y 条（共 Z 条）」。`increaseQuotaData` 签名由无返回值改为返回 `error`。**仅提升可观测性**，不改写入/去重语义，也未加重试（失败条目增量仍随本轮缓存清空丢弃，与原行为一致）。
+
 ## [2026-10-23]
 
 ### 新增 Added
