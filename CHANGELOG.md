@@ -11,10 +11,12 @@
 - **明细错误新增「解释」列（Per-signature Explanation/Note）**：明细错误统计页「围绕明细错误」视图新增管理员可内联编辑的「解释」列——一段**按签名**的短文本备注，用来补充「为什么这样标注（简名/归因）」。短文本截断展示、**鼠标悬浮 tooltip 看全文**。按签名哈希与简名/归因同存于别名表（新增 `note` 列 `varchar(255) default ''`，零迁移沿用现有表、随同一缓存与多实例周期同步生效），`/api/error-alias` upsert 支持 `note`，三者（简名/归因/解释）至少其一非空，全清空则删除该行。
 
 ### 优化 Changed
+- **消耗日志「已应用参数覆盖」(`other.po`) 按数组下标折叠缩略（Param-Override Audit Line Folding）**：同一条参数覆盖规则命中数组多处时，原本会按每个下标各记一行（如 `regex_replace messages.0.role …` 一直到 `messages.55.role`，几十上百行几乎相同的摘要），既撑大消费日志 `other.po`，也拉长后端 `record consume log` 文本与 DB 存储。现在在 `relay/common/override.go` 落库前（`info.ParamOverrideAudit` 赋值处）用新增的 `foldParamOverrideAuditLines` 折叠：把「除数字数组下标外完全相同」的行用区间记法合并，如 `regex_replace messages.[1-9,11,15].role from ^developer$ to user`、连续区间 `messages.[0-55].role`。**多个下标位置同时变化**（如 `delete messages.M.content.N.endpoint_signature`）按维度逐层折叠（内层优先、逐轮迭代直到收敛），且**无损**——绝不臆造未真实出现的下标组合：例如 `messages.{0:[0-2], 1/3/7:[0-1], 2/4/5/6:[0]}` 折成 `messages.0.content.[0-2]` / `messages.[1,3,7].content.[0-1]` / `messages.[2,4-6].content.0` 三行，而非错误的笛卡尔积 `messages.[0-7].content.[0-2]`；对角集（`messages.0.content.0` + `messages.1.content.1`）因无法无损合并而原样保留。无数字下标的行原样透传。前端 `parseAuditLine`（按首个空格切分 action/content）对折叠串完全兼容，**前端零改动**；仅影响之后新写入的日志，旧日志不变。
 - **归一化默认规则新增 `vendor-prefixed-id`**：默认规则集加一条通用规则 `\b(toolu|rs|resp|msg|item|fc|call|chatcmpl|req)_[A-Za-z0-9_]{6,}` → `${1}_*`，把带下划线前缀的厂商资源 id（如 Anthropic `toolu_bdrk_…`、OpenAI Responses `rs_…`）收敛、保留前缀。置于 `uuid` 之后、`long-hex` 之前（裸 hex 规则因 `\b` 边界抓不到 `前缀_hex`，故需单独处理）。仅影响**无自定义规则集**的部署与之后新产生的签名。
 - **明细错误页工具栏布局调整**：三个「围绕…」视图切换按钮移到表格上方同一行的左侧，「推荐规则」「编辑归一化规则」并排置于该行右侧；上方仅保留筛选栏。
 - **侧边栏「明细错误统计」改名为「明细错误」**：侧边导航项复用已有 `Detailed Error` 文案（zh=明细错误），缩短占位；页面标题仍为「明细错误统计」。
 - 通用日志筛选主行改用 24 列栅格，使时间范围与类型两项都能完整容纳（`common-logs-filter-bar`）。
+- **日志 `other` 字段「提列」首例：`error_signature_hash` 真列 + `other` 双写（Log other→column Dual-Write）**：把错误日志的归一化指纹从「仅存 `other.error_signature_hash`」改为**本机 `logs` 表真列 + 保留 `other` 双写**，为后续按列高效过滤/分组打基础。`model.Log` 新增 `ErrorSignatureHash`(`varchar(64)`，仅错误日志有值)，`RecordErrorLog` 在保留 `other` 那份的同时写入新列；本机 ClickHouse 建表 DDL 加列并在 `migrateClickHouseLogDB` 用幂等 `ALTER TABLE logs ADD COLUMN IF NOT EXISTS` 给存量实例补列（先迁列后写值），MySQL/SQLite 走 `AutoMigrate` 自动补列。**读路径不动**（`error_stats`、`GetAllLogs` 的 `error_signature_hash` 过滤仍解析 `other`），故新老行都正常、无需 backfill 或双读兼容查询。**决策：提列后不从 `other` 移除**——提列字段都很短，真列与 `other` 双份开销很小；留在 `other` 即无缝随 `logshipper.Row` 的 `other` 继续同步到远端 ClickHouse 集群，**远端表零改动**、不触碰 ck-ingest/Flink 链路。`logshipper.Row` 未加列。此策略适用于后续所有 `other`→真列的字段提升。详见 `docs/log-field-columnization.md`。
 
 ## [2026-10-23]
 
