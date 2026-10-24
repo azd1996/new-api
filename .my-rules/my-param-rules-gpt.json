@@ -65,7 +65,7 @@
         },
         {
             "mode": "move",
-            "description": "chat completions的max_tokens已经弃用",
+            "description": "chat completions的max_tokens已弃用；仅当请求没有max_completion_tokens时才把max_tokens改名搬过去",
             "from": "max_tokens",
             "to": "max_completion_tokens",
             "conditions": [
@@ -73,9 +73,44 @@
                     "path": "model",
                     "mode": "prefix",
                     "value": "gpt-6"
+                },
+                {
+                    "path": "max_tokens",
+                    "mode": "gte",
+                    "value": 0
+                },
+                {
+                    "path": "max_completion_tokens",
+                    "mode": "gte",
+                    "value": 0,
+                    "invert": true,
+                    "pass_missing_key": true
                 }
             ],
-            "logic": "OR"
+            "logic": "AND"
+        },
+        {
+            "mode": "delete",
+            "description": "max_tokens与max_completion_tokens并存时，保留客户端的max_completion_tokens，删除弃用的max_tokens",
+            "path": "max_tokens",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                },
+                {
+                    "path": "max_tokens",
+                    "mode": "gte",
+                    "value": 0
+                },
+                {
+                    "path": "max_completion_tokens",
+                    "mode": "gte",
+                    "value": 0
+                }
+            ],
+            "logic": "AND"
         }
     ]
 }
