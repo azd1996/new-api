@@ -30,6 +30,7 @@ import {
 } from '@/features/dashboard/constants'
 import { processChartData } from '@/features/dashboard/lib'
 import type {
+  ConsumptionAmountCaliber,
   ConsumptionDistributionChartType,
   QuotaDataItem,
 } from '@/features/dashboard/types'
@@ -46,7 +47,30 @@ interface ConsumptionDistributionChartProps {
   loading?: boolean
   timeGranularity?: TimeGranularity
   defaultChartType?: ConsumptionDistributionChartType
+  // Admins can switch the amount caliber (real quota vs. channel/customer
+  // discounted stat amounts). Non-admins only ever see the real quota.
+  isAdmin?: boolean
 }
+
+// Amount calibers for the consumption distribution chart. The two stat amounts
+// are admin-only; labels reuse the usage-log stat wording.
+const CALIBER_OPTIONS: ReadonlyArray<{
+  value: ConsumptionAmountCaliber
+  labelKey: string
+  adminOnly: boolean
+}> = [
+  { value: 'quota', labelKey: 'Total Quota', adminOnly: false },
+  {
+    value: 'channel_stat_quota',
+    labelKey: 'Channel Discounted Amount',
+    adminOnly: true,
+  },
+  {
+    value: 'customer_stat_quota',
+    labelKey: 'Customer Discounted Amount',
+    adminOnly: true,
+  },
+]
 
 const CHART_TYPE_ICONS: Record<
   ConsumptionDistributionChartType,
@@ -69,6 +93,7 @@ export function ConsumptionDistributionChart(
   const [chartType, setChartType] = useState<ConsumptionDistributionChartType>(
     props.defaultChartType ?? 'bar'
   )
+  const [caliber, setCaliber] = useState<ConsumptionAmountCaliber>('quota')
   const [themeReady, setThemeReady] = useState(false)
   const themeManagerRef = useRef<
     (typeof import('@visactor/vchart'))['ThemeManager'] | null
@@ -98,20 +123,28 @@ export function ConsumptionDistributionChart(
     updateTheme()
   }, [resolvedTheme])
 
+  const effectiveCaliber: ConsumptionAmountCaliber =
+    props.isAdmin || caliber === 'quota' ? caliber : 'quota'
+  const caliberOptions = CALIBER_OPTIONS.filter(
+    (item) => !item.adminOnly || props.isAdmin
+  )
+
   const chartData = useMemo(
     () =>
       processChartData(
         props.loading ? [] : props.data,
         timeGranularity,
         t,
-        chartRadius
+        chartRadius,
+        effectiveCaliber
       ),
-    [props.data, props.loading, timeGranularity, t, chartRadius]
+    [props.data, props.loading, timeGranularity, t, chartRadius, effectiveCaliber]
   )
   const spec = chartType === 'bar' ? chartData.spec_line : chartData.spec_area
   const specType = typeof spec?.type === 'string' ? spec.type : chartType
   const chartKey = [
     chartType,
+    effectiveCaliber,
     specType,
     props.loading ? 'loading' : 'ready',
     props.data.length,
@@ -132,25 +165,46 @@ export function ConsumptionDistributionChart(
           </span>
         </div>
 
-        <div className='bg-muted/60 inline-flex h-7 w-full overflow-x-auto rounded-lg border p-0.5 sm:h-8 sm:w-auto'>
-          {CONSUMPTION_DISTRIBUTION_CHART_OPTIONS.map((item) => {
-            const Icon = CHART_TYPE_ICONS[item.value]
-            return (
-              <button
-                key={item.value}
-                type='button'
-                onClick={() => setChartType(item.value)}
-                className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
-                  chartType === item.value
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Icon className='size-3.5' />
-                {t(item.labelKey)}
-              </button>
-            )
-          })}
+        <div className='flex w-full flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2 lg:w-auto'>
+          {caliberOptions.length > 1 && (
+            <div className='bg-muted/60 inline-flex h-7 w-full overflow-x-auto rounded-lg border p-0.5 sm:h-8 sm:w-auto'>
+              {caliberOptions.map((item) => (
+                <button
+                  key={item.value}
+                  type='button'
+                  onClick={() => setCaliber(item.value)}
+                  className={`inline-flex shrink-0 items-center rounded-md px-3 text-xs font-medium transition-colors ${
+                    effectiveCaliber === item.value
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {t(item.labelKey)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className='bg-muted/60 inline-flex h-7 w-full overflow-x-auto rounded-lg border p-0.5 sm:h-8 sm:w-auto'>
+            {CONSUMPTION_DISTRIBUTION_CHART_OPTIONS.map((item) => {
+              const Icon = CHART_TYPE_ICONS[item.value]
+              return (
+                <button
+                  key={item.value}
+                  type='button'
+                  onClick={() => setChartType(item.value)}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
+                    chartType === item.value
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon className='size-3.5' />
+                  {t(item.labelKey)}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 

@@ -428,9 +428,20 @@ func migrateClickHouseLogDB() error {
 		return err
 	}
 	// CREATE TABLE IF NOT EXISTS does not add columns to a pre-existing table,
-	// so add newer columns explicitly for deployments created before them.
-	if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS error_signature_hash String DEFAULT ''").Error; err != nil {
-		return err
+	// so add columns introduced after a table's creation explicitly. Each
+	// ADD COLUMN IF NOT EXISTS is idempotent on ClickHouse.
+	addColumns := []string{
+		"error_signature_hash String DEFAULT ''",
+		"raw_quota Int32 DEFAULT 0",
+		"stat_quota Int32 DEFAULT 0",
+		"stat_group_ratio Float64 DEFAULT 0",
+		"customer_stat_quota Int32 DEFAULT 0",
+		"customer_discount Float64 DEFAULT 0",
+	}
+	for _, col := range addColumns {
+		if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS " + col).Error; err != nil {
+			return err
+		}
 	}
 	return syncClickHouseLogTTL(ttlDays)
 }
@@ -481,6 +492,11 @@ CREATE TABLE IF NOT EXISTS logs (
 	request_id String DEFAULT '',
 	upstream_request_id String DEFAULT '',
 	error_signature_hash String DEFAULT '',
+	raw_quota Int32 DEFAULT 0,
+	stat_quota Int32 DEFAULT 0,
+	stat_group_ratio Float64 DEFAULT 0,
+	customer_stat_quota Int32 DEFAULT 0,
+	customer_discount Float64 DEFAULT 0,
 	other String DEFAULT ''
 )
 ENGINE = MergeTree()

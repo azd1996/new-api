@@ -24,19 +24,26 @@ type QuotaData struct {
 	TokenUsed int    `json:"token_used" gorm:"default:0"`
 	Count     int    `json:"count" gorm:"default:0"`
 	Quota     int    `json:"quota" gorm:"default:0"`
+	// ChannelStatQuota / CustomerStatQuota are the reporting-only stat amounts
+	// (channel stat-group-ratio discounted / per-customer discounted), summed
+	// alongside the real Quota so the dashboard chart can switch calibers.
+	ChannelStatQuota  int `json:"channel_stat_quota" gorm:"default:0"`
+	CustomerStatQuota int `json:"customer_stat_quota" gorm:"default:0"`
 }
 
 type QuotaDataLogParams struct {
-	UserID    int
-	Username  string
-	ModelName string
-	Quota     int
-	CreatedAt int64
-	TokenUsed int
-	UseGroup  string
-	TokenID   int
-	ChannelID int
-	NodeName  string
+	UserID            int
+	Username          string
+	ModelName         string
+	Quota             int
+	CreatedAt         int64
+	TokenUsed         int
+	UseGroup          string
+	TokenID           int
+	ChannelID         int
+	NodeName          string
+	ChannelStatQuota  int
+	CustomerStatQuota int
 }
 
 func UpdateQuotaData() {
@@ -71,6 +78,8 @@ func logQuotaDataCache(quotaData *QuotaData) {
 		cachedQuotaData.Count += count
 		cachedQuotaData.Quota += quota
 		cachedQuotaData.TokenUsed += tokenUsed
+		cachedQuotaData.ChannelStatQuota += quotaData.ChannelStatQuota
+		cachedQuotaData.CustomerStatQuota += quotaData.CustomerStatQuota
 		quotaData = cachedQuotaData
 	}
 	CacheQuotaData[key] = quotaData
@@ -91,6 +100,9 @@ func LogQuotaData(params QuotaDataLogParams) {
 		Count:     1,
 		Quota:     params.Quota,
 		TokenUsed: params.TokenUsed,
+
+		ChannelStatQuota:  params.ChannelStatQuota,
+		CustomerStatQuota: params.CustomerStatQuota,
 	}
 
 	CacheQuotaDataLock.Lock()
@@ -146,9 +158,11 @@ func increaseQuotaData(quotaData *QuotaData) error {
 		Where("user_id = ? and username = ? and model_name = ? and created_at = ? and use_group = ? and token_id = ? and channel_id = ? and node_name = ?",
 			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt, quotaData.UseGroup, quotaData.TokenID, quotaData.ChannelID, quotaData.NodeName).
 		Updates(map[string]interface{}{
-			"count":      gorm.Expr("count + ?", quotaData.Count),
-			"quota":      gorm.Expr("quota + ?", quotaData.Quota),
-			"token_used": gorm.Expr("token_used + ?", quotaData.TokenUsed),
+			"count":               gorm.Expr("count + ?", quotaData.Count),
+			"quota":               gorm.Expr("quota + ?", quotaData.Quota),
+			"token_used":          gorm.Expr("token_used + ?", quotaData.TokenUsed),
+			"channel_stat_quota":  gorm.Expr("channel_stat_quota + ?", quotaData.ChannelStatQuota),
+			"customer_stat_quota": gorm.Expr("customer_stat_quota + ?", quotaData.CustomerStatQuota),
 		}).Error
 	if err != nil {
 		common.SysError(fmt.Sprintf("increaseQuotaData error: %s", err))
@@ -160,7 +174,7 @@ func GetQuotaDataByUsername(username string, startTime int64, endTime int64) (qu
 	var quotaDatas []*QuotaData
 	// 从quota_data表中查询数据
 	err = DB.Table("quota_data").
-		Select("user_id, username, model_name, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used").
+		Select("user_id, username, model_name, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, sum(channel_stat_quota) as channel_stat_quota, sum(customer_stat_quota) as customer_stat_quota").
 		Where("username = ? and created_at >= ? and created_at <= ?", username, startTime, endTime).
 		Group("user_id, username, model_name, created_at").
 		Find(&quotaDatas).Error
@@ -171,7 +185,7 @@ func GetQuotaDataByUserId(userId int, startTime int64, endTime int64) (quotaData
 	var quotaDatas []*QuotaData
 	// 从quota_data表中查询数据
 	err = DB.Table("quota_data").
-		Select("user_id, username, model_name, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used").
+		Select("user_id, username, model_name, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, sum(channel_stat_quota) as channel_stat_quota, sum(customer_stat_quota) as customer_stat_quota").
 		Where("user_id = ? and created_at >= ? and created_at <= ?", userId, startTime, endTime).
 		Group("user_id, username, model_name, created_at").
 		Find(&quotaDatas).Error
@@ -181,7 +195,7 @@ func GetQuotaDataByUserId(userId int, startTime int64, endTime int64) (quotaData
 func GetQuotaDataGroupByUser(startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
 	var quotaDatas []*QuotaData
 	err = DB.Table("quota_data").
-		Select("username, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used").
+		Select("username, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, sum(customer_stat_quota) as customer_stat_quota").
 		Where("created_at >= ? and created_at <= ?", startTime, endTime).
 		Group("username, created_at").
 		Find(&quotaDatas).Error
@@ -196,6 +210,6 @@ func GetAllQuotaDates(startTime int64, endTime int64, username string) (quotaDat
 	// 从quota_data表中查询数据
 	// only select model_name, sum(count) as count, sum(quota) as quota, model_name, created_at from quota_data group by model_name, created_at;
 	//err = DB.Table("quota_data").Where("created_at >= ? and created_at <= ?", startTime, endTime).Find(&quotaDatas).Error
-	err = DB.Table("quota_data").Select("model_name, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, created_at").Where("created_at >= ? and created_at <= ?", startTime, endTime).Group("model_name, created_at").Find(&quotaDatas).Error
+	err = DB.Table("quota_data").Select("model_name, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, sum(channel_stat_quota) as channel_stat_quota, sum(customer_stat_quota) as customer_stat_quota, created_at").Where("created_at >= ? and created_at <= ?", startTime, endTime).Group("model_name, created_at").Find(&quotaDatas).Error
 	return quotaDatas, err
 }

@@ -151,6 +151,43 @@ export function getResponseTimeColor(
 }
 
 /**
+ * Two tokens-per-second readings for a request:
+ * - `total`: completion tokens / total duration (includes the first-token
+ *   wait). This is what the UI has always shown.
+ * - `generation`: completion tokens / (duration - first-token latency), i.e.
+ *   the pure generation speed once the stream has started. Only defined for
+ *   streaming requests that recorded a first-token time; null otherwise.
+ *
+ * Note: total duration is stored as whole seconds while the first-token time
+ * is in milliseconds, so the generation figure is approximate and is omitted
+ * when the subtraction would be non-positive.
+ */
+export interface StreamThroughput {
+  total: number | null
+  generation: number | null
+}
+
+export function getStreamThroughput(
+  useTimeSec: number,
+  completionTokens: number,
+  isStream: boolean,
+  frtMs: number | undefined
+): StreamThroughput {
+  const total =
+    useTimeSec > 0 && completionTokens > 0
+      ? completionTokens / useTimeSec
+      : null
+
+  let generation: number | null = null
+  if (isStream && completionTokens > 0 && frtMs != null && frtMs > 0) {
+    const generationSec = useTimeSec - frtMs / 1000
+    if (generationSec > 0) generation = completionTokens / generationSec
+  }
+
+  return { total, generation }
+}
+
+/**
  * Format model name with mapping indicator
  */
 export function formatModelName(log: UsageLog): {

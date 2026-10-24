@@ -48,6 +48,27 @@ customer_id、统计金额、error_signature_hash 等)都为了规避「改表�
 - 读路径未动：`model/error_stats.go`、`GetAllLogs` 的 `errorSignatureHash` 过滤
   仍基于 `other`，故新老行都正常。
 
+## 4b. 第二批字段：原始/折扣金额 5 列(消耗日志)
+
+把结算时算出的「仅统计」金额从 `other` 提升为本机真列(一期同款双写)：
+
+- `model.Log` 新增 `RawQuota int`、`StatQuota int`、`StatGroupRatio float64`、
+  `CustomerStatQuota int`、`CustomerDiscount float64`(`json ...,omitempty`、`default:0`)。
+- `RecordConsumeLog` 从 `params.Other` 取 `raw_quota`/`stat_quota`/`stat_group_ratio`/
+  `customer_stat_quota`/`customer_discount` 并写入对应列，**保留** `other` 那份
+  (nil/缺键读取安全得零值;`customer_*` 仅在请求带客户 id 时才有)。源头类型见
+  `service/text_quota.go` 的 `textQuotaSummary`(两个金额 `int`、两个比率 `float64`)。
+- 本机 ClickHouse：建表 DDL 加 `raw_quota/stat_quota/customer_stat_quota Int32`、
+  `stat_group_ratio/customer_discount Float64`(都 `DEFAULT 0`)；`migrateClickHouseLogDB`
+  用一个 `ADD COLUMN IF NOT EXISTS` 列表循环给存量实例逐列补齐。
+- MySQL / SQLite：`AutoMigrate(&Log{})` 自动补列。
+- 读路径(二期已切列)：金额统计 `SumLogStatAmounts` 改为按列 `SUM`——
+  `COALESCE(SUM(stat_quota),0)` / `SUM(customer_stat_quota)` / 利润用
+  `SUM(CASE WHEN customer_discount>0 THEN customer_stat_quota-stat_quota ELSE 0 END)`
+  (`customer_discount>0` 作「有客户」判据，等价于旧逻辑按 `customer_stat_quota` 键是否存在)。
+  去掉了原先 10 万行扫描上限，改为 DB 聚合全量。**注意:列加上之前的历史消耗日志**
+  金额只在 `other`、列为空(0)，按列 `SUM` 会把它们计 0；新日志不受影响。详情弹窗仍读 `other`。
+
 ## 5. 关键决策：加真列后，不把字段从 `other` 移除
 
 **决策**：把某字段提升为本机真列后，**仍保留它在 `other` JSON 里的那份**，即长期

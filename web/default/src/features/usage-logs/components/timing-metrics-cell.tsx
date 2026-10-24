@@ -158,6 +158,7 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
 interface StreamTpsCellProps {
   isStream: boolean
   tokensPerSecond?: number | null
+  generationTokensPerSecond?: number | null
   streamStatus?: LogOtherData['stream_status']
   className?: string
 }
@@ -166,10 +167,13 @@ export function StreamTpsCell(props: StreamTpsCellProps) {
   const { t } = useTranslation()
   const showStreamError =
     props.isStream && props.streamStatus && props.streamStatus.status !== 'ok'
-  const tpsLabel =
-    props.tokensPerSecond != null
-      ? `${Math.round(props.tokensPerSecond)} t/s`
-      : '—'
+  const totalTps =
+    props.tokensPerSecond != null ? Math.round(props.tokensPerSecond) : null
+  const generationTps =
+    props.generationTokensPerSecond != null
+      ? Math.round(props.generationTokensPerSecond)
+      : null
+  const totalLabel = totalTps != null ? `${totalTps} t/s` : '—'
   const streamLabel = props.isStream ? t('Stream') : t('Non-stream')
 
   return (
@@ -209,9 +213,34 @@ export function StreamTpsCell(props: StreamTpsCellProps) {
           </TooltipProvider>
         )}
       </span>
-      <span className='text-muted-foreground/60 px-0.5 tabular-nums'>
-        {tpsLabel}
-      </span>
+      {generationTps != null ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className='text-muted-foreground/60 cursor-help px-0.5 tabular-nums'>
+                  {totalLabel} · {generationTps}
+                </span>
+              }
+            />
+            <TooltipContent>
+              <div className='space-y-0.5 text-xs'>
+                <p>
+                  {t('Throughput (incl. first token)')}: {totalLabel}
+                </p>
+                <p>
+                  {t('Pure generation (excl. first token)')}: {generationTps}{' '}
+                  t/s
+                </p>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        <span className='text-muted-foreground/60 px-0.5 tabular-nums'>
+          {totalLabel}
+        </span>
+      )}
     </div>
   )
 }

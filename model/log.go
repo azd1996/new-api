@@ -208,7 +208,16 @@ type Log struct {
 	// the hash can later back a column-based filter/group-by; reads still go
 	// through Other for now, so old rows that only have it in Other keep working.
 	ErrorSignatureHash string `json:"error_signature_hash,omitempty" gorm:"type:varchar(64);default:''"`
-	Other              string `json:"other"`
+	// RawQuota/StatQuota/StatGroupRatio/CustomerStatQuota/CustomerDiscount
+	// duplicate the reporting-only raw/discounted amounts from the Other JSON
+	// into real columns (consume logs only), written alongside the Other copy.
+	// Reads still go through Other for now; see docs/log-field-columnization.md.
+	RawQuota          int     `json:"raw_quota,omitempty" gorm:"default:0"`
+	StatQuota         int     `json:"stat_quota,omitempty" gorm:"default:0"`
+	StatGroupRatio    float64 `json:"stat_group_ratio,omitempty" gorm:"default:0"`
+	CustomerStatQuota int     `json:"customer_stat_quota,omitempty" gorm:"default:0"`
+	CustomerDiscount  float64 `json:"customer_discount,omitempty" gorm:"default:0"`
+	Other             string  `json:"other"`
 }
 
 // don't use iota, avoid change log type value
@@ -611,6 +620,14 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	createdAt := common.GetTimestamp()
 	params.Other = attachDownstreamTraceTag(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
+	// Dual-write the reporting-only raw/discounted amounts into their own columns
+	// while keeping the Other JSON copy (nil/absent map reads yield zero values;
+	// customer_* are only present when the request carried a customer id).
+	rawQuota, _ := params.Other["raw_quota"].(int)
+	statQuota, _ := params.Other["stat_quota"].(int)
+	statGroupRatio, _ := params.Other["stat_group_ratio"].(float64)
+	customerStatQuota, _ := params.Other["customer_stat_quota"].(int)
+	customerDiscount, _ := params.Other["customer_discount"].(float64)
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
@@ -642,6 +659,11 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		}(),
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
+		RawQuota:          rawQuota,
+		StatQuota:         statQuota,
+		StatGroupRatio:    statGroupRatio,
+		CustomerStatQuota: customerStatQuota,
+		CustomerDiscount:  customerDiscount,
 		Other:             otherStr,
 	}
 	err := createLog(log)
@@ -650,16 +672,18 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	}
 	if common.DataExportEnabled {
 		LogQuotaData(QuotaDataLogParams{
-			UserID:    userId,
-			Username:  username,
-			ModelName: params.ModelName,
-			Quota:     params.Quota,
-			CreatedAt: createdAt,
-			TokenUsed: params.PromptTokens + params.CompletionTokens,
-			UseGroup:  params.Group,
-			TokenID:   params.TokenId,
-			ChannelID: params.ChannelId,
-			NodeName:  common.NodeName,
+			UserID:            userId,
+			Username:          username,
+			ModelName:         params.ModelName,
+			Quota:             params.Quota,
+			CreatedAt:         createdAt,
+			TokenUsed:         params.PromptTokens + params.CompletionTokens,
+			UseGroup:          params.Group,
+			TokenID:           params.TokenId,
+			ChannelID:         params.ChannelId,
+			NodeName:          common.NodeName,
+			ChannelStatQuota:  statQuota,
+			CustomerStatQuota: customerStatQuota,
 		})
 	}
 }
@@ -852,16 +876,10 @@ func applyAdminLogFilters(tx *gorm.DB, logType int, startTimestamp int64, endTim
 	return applyTraceTagFilters(tx, "logs.other", customerId, customerName, downstreamRequestId, downstreamTraceTag), nil
 }
 
-// logStatAmountScanLimit bounds how many matching rows SumLogStatAmounts scans
-// and parses. The per-row stat amounts live in the Other JSON (no SUM-able
-// column), so the aggregation reads `other` and sums in Go; the cap keeps a
-// wide-range query from scanning unbounded rows (pair with a time range).
-const logStatAmountScanLimit = 100000
-
-// LogStatAmounts holds the reporting-only aggregate amounts derived from each
-// log's Other JSON: channel-discounted amount (sum of stat_quota), customer
+// LogStatAmounts holds the reporting-only aggregate amounts summed from the
+// per-row stat columns: channel-discounted amount (sum of stat_quota), customer
 // discounted amount (sum of customer_stat_quota) and profit (per-row
-// customer_stat_quota - stat_quota, summed only over customer-bearing logs).
+// customer_stat_quota - stat_quota, summed only over customer-bearing rows).
 type LogStatAmounts struct {
 	ChannelStatQuota  int64 `json:"channel_stat_quota"`
 	CustomerStatQuota int64 `json:"customer_stat_quota"`
@@ -869,8 +887,16 @@ type LogStatAmounts struct {
 }
 
 // SumLogStatAmounts aggregates the reporting-only stat amounts over the admin
-// log list filtered exactly like GetAllLogs. Amounts are stored per row in the
-// Other JSON, so it scans matching rows (capped) and sums in Go.
+// log list filtered exactly like GetAllLogs. The amounts are dual-written into
+// the stat_quota / customer_stat_quota / customer_discount columns, so this sums
+// them in SQL (no row scan / JSON parse). A customer-bearing row is identified
+// by customer_discount > 0: the discount is a positive multiplier written only
+// for customer requests, and absent rows default the column to 0 — this matches
+// the earlier Other-JSON logic that keyed profit off the presence of
+// customer_stat_quota.
+//
+// Note: rows written before these columns existed carry the amounts only in
+// their Other JSON (columns default to 0) and therefore contribute 0 here.
 func SumLogStatAmounts(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (LogStatAmounts, error) {
 	var result LogStatAmounts
 	var tx *gorm.DB
@@ -883,34 +909,12 @@ func SumLogStatAmounts(logType int, startTimestamp int64, endTimestamp int64, mo
 	if tx, err = applyAdminLogFilters(tx, logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash); err != nil {
 		return result, err
 	}
-	var others []string
-	if err = tx.Model(&Log{}).Limit(logStatAmountScanLimit).Pluck("logs.other", &others).Error; err != nil {
-		return result, err
-	}
-	for _, raw := range others {
-		if raw == "" {
-			continue
-		}
-		var fields struct {
-			StatQuota         *int64 `json:"stat_quota"`
-			CustomerStatQuota *int64 `json:"customer_stat_quota"`
-		}
-		if err := common.UnmarshalJsonStr(raw, &fields); err != nil {
-			continue
-		}
-		if fields.StatQuota != nil {
-			result.ChannelStatQuota += *fields.StatQuota
-		}
-		if fields.CustomerStatQuota != nil {
-			result.CustomerStatQuota += *fields.CustomerStatQuota
-			channelPart := int64(0)
-			if fields.StatQuota != nil {
-				channelPart = *fields.StatQuota
-			}
-			result.ProfitQuota += *fields.CustomerStatQuota - channelPart
-		}
-	}
-	return result, nil
+	err = tx.Model(&Log{}).
+		Select("COALESCE(SUM(stat_quota), 0) AS channel_stat_quota, " +
+			"COALESCE(SUM(customer_stat_quota), 0) AS customer_stat_quota, " +
+			"COALESCE(SUM(CASE WHEN customer_discount > 0 THEN customer_stat_quota - stat_quota ELSE 0 END), 0) AS profit_quota").
+		Scan(&result).Error
+	return result, err
 }
 
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, statusCode int, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string) (logs []*Log, total int64, err error) {

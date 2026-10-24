@@ -110,11 +110,6 @@ export function CommonLogsStats() {
       {isAdmin && (
         <>
           <StatBadge
-            label={t('Requests')}
-            value={stats?.request_count || 0}
-            accent='bg-indigo-500/70'
-          />
-          <StatBadge
             label={t('Channel Discounted Amount')}
             value={
               sensitiveVisible

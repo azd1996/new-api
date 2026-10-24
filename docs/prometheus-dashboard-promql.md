@@ -32,6 +32,7 @@ labels = { instance="$hostname", job="newapi-31525" }
 | `newapi_relay_prompt_tokens_total` | Counter | `model`, `group`, `channel` |
 | `newapi_relay_completion_tokens_total` | Counter | `model`, `group`, `channel` |
 | `newapi_relay_duration_seconds_*` | Histogram | `model`, `group`, `channel` |
+| `newapi_relay_ttft_seconds_*` | Histogram | `model`, `group`, `channel` |
 | `newapi_relay_quota_used_total` | Counter | `model`, `group`, `channel` |
 | `newapi_quota_per_unit` | Gauge | 无（配额/美元换算基数） |
 | `newapi_error_total` | Counter | `short_name`, `model`, `channel`, `status`, `protocol`, `stream`, `customer` |
@@ -41,6 +42,8 @@ labels = { instance="$hostname", job="newapi-31525" }
 - `group` 是请求所用分组（`UsingGroup`）。
 - `newapi_relay_duration_seconds` 的桶为 `0.5,1,2,5,10,20,30,60,120`（上游时延，偏长尾）；
   `newapi_http_request_duration_seconds` 用默认桶（面向网关整体 HTTP 时延）。
+- `newapi_relay_ttft_seconds` 为上游首字时延（TTFT），桶为 `0.1,0.25,0.5,1,2,5,10,20,30,60`；
+  仅流式请求且已观测到首字时才会观测该样本（非流式/未出首字不计入）。
 - `newapi_error_total` 的 `model`/`customer` 在高基数保护开启时可能为空串（见 `SetErrorHighCardLabels`）。
 - `newapi_relay_quota_used_total` 可能未出现在你的截图里：只有产生过计费配额消耗后才会有该序列。
 
@@ -159,16 +162,22 @@ sum(rate(newapi_relay_duration_seconds_sum{job="newapi-31525", instance=~"$insta
 sum(rate(newapi_relay_duration_seconds_count{job="newapi-31525", instance=~"$instance"}[$__rate_interval]))
 ```
 
-### 3.5 慢请求占比（上游中继 > 10s 的比例，%）
+### 3.6 上游首字时延 TTFT P50/P90/P99（仅流式）
 ```promql
-100 * (
-  sum(rate(newapi_relay_duration_seconds_count{job="newapi-31525", instance=~"$instance"}[$__rate_interval]))
-  -
-  sum(rate(newapi_relay_duration_seconds_bucket{job="newapi-31525", instance=~"$instance", le="10"}[$__rate_interval]))
-)
-/
-sum(rate(newapi_relay_duration_seconds_count{job="newapi-31525", instance=~"$instance"}[$__rate_interval]))
+histogram_quantile(0.50, sum by (le) (rate(newapi_relay_ttft_seconds_bucket{job="newapi-31525", instance=~"$instance"}[$__rate_interval])))
 ```
+```promql
+histogram_quantile(0.90, sum by (le) (rate(newapi_relay_ttft_seconds_bucket{job="newapi-31525", instance=~"$instance"}[$__rate_interval])))
+```
+```promql
+histogram_quantile(0.99, sum by (le) (rate(newapi_relay_ttft_seconds_bucket{job="newapi-31525", instance=~"$instance"}[$__rate_interval])))
+```
+
+### 3.7 TTFT P99 按模型分解（定位首字慢的模型）
+```promql
+histogram_quantile(0.99, sum by (le, model) (rate(newapi_relay_ttft_seconds_bucket{job="newapi-31525", instance=~"$instance"}[$__rate_interval])))
+```
+
 
 ---
 

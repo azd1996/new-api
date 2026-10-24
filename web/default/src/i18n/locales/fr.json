@@ -2072,6 +2072,8 @@
     "Finish Time": "Heure de fin",
     "First API request": "Première requête API",
     "First token": "1er token",
+    "Pure generation (excl. first token)": "纯生成速度（扣首字）",
+    "Throughput (incl. first token)": "吞吐（含首字）",
     "First/Last Frame to Video": "Première/Dernière image vers vidéo",
     "Fix Abilities": "Réparer la cohérence des canaux",
     "Fix order": "Corriger l’ordre",

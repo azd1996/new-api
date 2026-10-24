@@ -2072,6 +2072,8 @@
     "Finish Time": "完成時間",
     "First API request": "首個 API 請求",
     "First token": "首字",
+    "Pure generation (excl. first token)": "纯生成速度（扣首字）",
+    "Throughput (incl. first token)": "吞吐（含首字）",
     "First/Last Frame to Video": "首尾生影片",
     "Fix Abilities": "修復渠道一致性",
     "Fix order": "修復順序",

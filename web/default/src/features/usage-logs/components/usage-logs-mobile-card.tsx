@@ -40,7 +40,7 @@ import { cn } from '@/lib/utils'
 
 import { LOG_TYPE_ENUM } from '../constants'
 import type { UsageLog } from '../data/schema'
-import { parseLogOther } from '../lib/format'
+import { getStreamThroughput, parseLogOther } from '../lib/format'
 import {
   getLogTypeConfig,
   isDisplayableLogType,
@@ -283,10 +283,12 @@ function MobileStreamTimingField({ log }: { log: UsageLog }) {
 
   const other = parseLogOther(log.other)
   const useTime = log.use_time || 0
-  const tokensPerSecond =
-    useTime > 0 && log.completion_tokens > 0
-      ? log.completion_tokens / useTime
-      : null
+  const throughput = getStreamThroughput(
+    useTime,
+    log.completion_tokens,
+    log.is_stream,
+    other?.frt
+  )
 
   return (
     <div className='bg-muted/20 flex min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5'>
@@ -300,7 +302,8 @@ function MobileStreamTimingField({ log }: { log: UsageLog }) {
       />
       <StreamTpsCell
         isStream={log.is_stream}
-        tokensPerSecond={tokensPerSecond}
+        tokensPerSecond={throughput.total}
+        generationTokensPerSecond={throughput.generation}
         streamStatus={other?.stream_status}
         className='shrink-0'
       />

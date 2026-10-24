@@ -42,6 +42,8 @@ type FlowMetrics = {
   quota: number
   tokens: number
   requests: number
+  channelStat: number
+  customerStat: number
 }
 
 type FlowSankeyLabels = {
@@ -158,12 +160,16 @@ function rowMetrics(row: FlowQuotaDataItem): FlowMetrics {
     quota: numberValue(row.quota),
     tokens: numberValue(row.token_used),
     requests: numberValue(row.count),
+    channelStat: numberValue(row.channel_stat_quota),
+    customerStat: numberValue(row.customer_stat_quota),
   }
 }
 
 function metricValue(metrics: FlowMetrics, metric: FlowMetric): number {
   if (metric === 'requests') return metrics.requests
   if (metric === 'tokens') return metrics.tokens
+  if (metric === 'channel_stat_quota') return metrics.channelStat
+  if (metric === 'customer_stat_quota') return metrics.customerStat
   return metrics.quota
 }
 

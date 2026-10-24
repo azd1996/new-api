@@ -18,6 +18,7 @@ var (
 	promptTokens     *prometheus.CounterVec
 	completionTokens *prometheus.CounterVec
 	relayDuration    *prometheus.HistogramVec
+	relayTtft        *prometheus.HistogramVec
 	quotaUsed        *prometheus.CounterVec
 	quotaPerUnit     prometheus.Gauge
 	errorsTotal      *prometheus.CounterVec
@@ -66,6 +67,11 @@ func Init() {
 			Help:    "Upstream relay latency in seconds.",
 			Buckets: []float64{0.5, 1, 2, 5, 10, 20, 30, 60, 120},
 		}, []string{"model", "group", "channel"})
+		relayTtft = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "newapi_relay_ttft_seconds",
+			Help:    "Upstream relay time-to-first-token in seconds (streaming responses only).",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60},
+		}, []string{"model", "group", "channel"})
 		quotaUsed = prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "newapi_relay_quota_used_total",
 			Help: "Total quota (internal unit) consumed by relay requests.",
@@ -91,7 +97,7 @@ func Init() {
 			Help: "Reporting-only cumulative profit in quota units (customer-discounted minus channel-discounted) over customer-bearing requests; may decrease and resets on restart.",
 		}, []string{"model", "group", "channel"})
 		registry.MustRegister(httpRequests, httpDuration, relayRequests,
-			promptTokens, completionTokens, relayDuration, quotaUsed, quotaPerUnit, errorsTotal,
+			promptTokens, completionTokens, relayDuration, relayTtft, quotaUsed, quotaPerUnit, errorsTotal,
 			channelStatQuota, customerStatQuota, profitQuota)
 	})
 }
@@ -144,10 +150,12 @@ func SetQuotaPerUnit(v float64) {
 }
 
 // RecordRelay records one relay settlement sample. model/group/channel/tokens/
-// quota are all finalized at the billing settlement point. When metrics are
-// disabled this returns immediately with zero overhead.
+// quota are all finalized at the billing settlement point. ttftSeconds is the
+// streaming time-to-first-token (0 for non-streaming or when no response was
+// observed) and is only recorded when positive. When metrics are disabled this
+// returns immediately with zero overhead.
 func RecordRelay(model, group, channel, result string,
-	promptTk, completionTk int, durationSeconds float64, quota int) {
+	promptTk, completionTk int, durationSeconds float64, quota int, ttftSeconds float64) {
 	if registry == nil {
 		return
 	}
@@ -160,6 +168,9 @@ func RecordRelay(model, group, channel, result string,
 	}
 	if durationSeconds > 0 {
 		relayDuration.WithLabelValues(model, group, channel).Observe(durationSeconds)
+	}
+	if ttftSeconds > 0 {
+		relayTtft.WithLabelValues(model, group, channel).Observe(ttftSeconds)
 	}
 	if quota > 0 {
 		quotaUsed.WithLabelValues(model, group, channel).Add(float64(quota))

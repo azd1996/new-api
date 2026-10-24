@@ -574,7 +574,8 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 	})
 	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
-		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota)
+		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota,
+		relayInfo.FirstResponseSeconds())
 	// Reporting-only amounts (never affect billing): channel-discounted,
 	// customer-discounted and profit, mirroring the per-log stat fields.
 	prommetrics.RecordStatAmounts(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId),

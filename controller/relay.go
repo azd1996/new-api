@@ -258,7 +258,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 		prommetrics.RecordRelay(relayInfo.OriginModelName, relayInfo.UsingGroup,
-			strconv.Itoa(relayInfo.ChannelId), "failure", 0, 0, 0, 0)
+			strconv.Itoa(relayInfo.ChannelId), "failure", 0, 0, 0, 0, relayInfo.FirstResponseSeconds())
 	}
 }
 

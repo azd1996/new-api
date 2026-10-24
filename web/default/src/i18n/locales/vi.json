@@ -2072,6 +2072,8 @@
     "Finish Time": "Thời gian hoàn thành",
     "First API request": "Yêu cầu API đầu tiên",
     "First token": "Token đầu",
+    "Pure generation (excl. first token)": "纯生成速度（扣首字）",
+    "Throughput (incl. first token)": "吞吐（含首字）",
     "First/Last Frame to Video": "Khung đầu/cuối sang video",
     "Fix Abilities": "Sửa tính nhất quán kênh",
     "Fix order": "Sửa thứ tự",
