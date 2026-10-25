@@ -24,14 +24,14 @@
 | `customer_id` | 客户ID，`varchar(64)` **唯一索引**，必填 |
 | `name` | 客户名（展示用） |
 | `remark` | 备注（自由文本） |
-| `default_discount` | 客户级默认折扣倍率（没有任何前缀命中时的兜底；缺省 1） |
+| `default_discount` | 历史兼容字段，保留数据库列但不再展示或参与计算 |
 | `prefix_discounts` | `(模型名前缀 → 折扣倍率)` 映射（即「系列折扣」，如 `claude` / `gpt` / `gemini` / `grok`），序列化为 JSON 存 `TEXT` 列（API 字段 `prefix_discounts`；Go 字段 `PrefixDiscounts`/`PrefixDiscountMap`）|
 
 折扣值为**乘数**：`0.8` 表示打 8 折 / 付 80%。规范化：任何 `≤0`/`NaN`/`Inf` 的折扣一律按 `1` 处理（`normalizeDiscount`）；保存时丢弃前缀为空或非法的折扣项。
 
 折扣查询优先级（`model.CustomerModelDiscount(customerID, model)`）：
 1. 在 `prefix_discounts` 中取**命中该模型名的最长前缀**（大小写不敏感 `HasPrefix`）的折扣
-2. 无任何前缀命中 → `default_discount`（客户级默认）
+2. 无任何前缀命中 → `1`（按原始金额统计，忽略历史默认折扣）
 3. 客户ID 无映射 → `1`（不打折）
 
 > **按前缀（系列）而非精确模型**：早期设计曾用精确的 `(模型 → 折扣)` 映射（旧列 `model_discounts`），后改为按模型名前缀配置一组「系列折扣」并去掉精确模型折扣——因为同一系列（claude/gpt/…）通常共用一档折扣，前缀更省配置、也便于前端按字符串排序展示。
@@ -65,7 +65,7 @@
 
 ## 7. 前端
 
-- 管理员「客户」页面：`web/default/src/features/customers/` + 路由 `routes/_authenticated/customers/index.tsx`（admin 守卫，`role < ADMIN` 跳 `/403`）+ 侧边栏 `use-sidebar-data.ts` 的 admin 组新增「Customers」项。CRUD 列表（customer_id / name / default_discount / 系列折扣 / remark，系列折扣列按前缀字符串排序、以「N 个系列」+ 悬浮明细展示）、新建/编辑抽屉（含「系列折扣」动态行编辑：前缀 + 折扣，longest-prefix 生效 + 默认折扣 + 备注）。后端 `/api/customer`（AdminAuth）。
+- 管理员「客户」页面：`web/default/src/features/customers/` + 路由 `routes/_authenticated/customers/index.tsx`（admin 守卫，`role < ADMIN` 跳 `/403`）+ 侧边栏 `use-sidebar-data.ts` 的 admin 组新增「Customers」项。CRUD 列表（customer_id / name / 系列折扣 / remark，系列折扣列按前缀字符串排序、以「N 个系列」+ 悬浮明细展示）、新建/编辑抽屉（含「系列折扣」动态行编辑：前缀 + 折扣，longest-prefix 生效 + 未命中时按 1 统计 + 备注）。后端 `/api/customer`（AdminAuth）。
 - 日志详情 `details-dialog.tsx`：概览区在「客户ID」上方增加「客户名」行（管理员可见、有值才显示）；计费详情在「折扣后金额」之后增加「客户折扣后金额」行（`other.customer_stat_quota`）。
 - `LogOtherData` 增 `customer_name` / `customer_stat_quota`。
 - 通用日志筛选（管理员，`common-logs-filter-bar.tsx`）：新增「客户名称」下拉与「客户ID」下拉（候选取 `GET /api/customer`，均 `allowCustomValue` 可手输），并提供「其他（无客户信息）」项——选中后发送哨兵 `__none__`，后端 `applyTraceTagFilters` 据此匹配**无任何客户信息**的日志；客户名称/客户ID/下游请求ID/下游TraceTag 四项统一放到高级筛选区**最后一行**。查询参数经 route schema（`customerName`/`customerId`/…）→ `buildApiParams` 映射为后端 `customer_name`/`customer_id`。

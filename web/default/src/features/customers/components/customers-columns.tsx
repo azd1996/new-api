@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
-import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import {
   Tooltip,
@@ -60,22 +59,6 @@ export function useCustomersColumns(): ColumnDef<Customer>[] {
         <span className='font-medium'>{row.getValue('name') || '-'}</span>
       ),
       size: 160,
-    },
-    {
-      accessorKey: 'default_discount',
-      header: t('Default Discount'),
-      cell: ({ row }) => {
-        const discount = row.getValue('default_discount') as number
-        return (
-          <StatusBadge
-            label={`×${discount}`}
-            variant='neutral'
-            copyable={false}
-            className='-ml-1.5'
-          />
-        )
-      },
-      size: 120,
     },
     {
       id: 'prefix_discounts',

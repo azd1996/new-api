@@ -17,11 +17,12 @@ type Customer struct {
 	CustomerId string `json:"customer_id" gorm:"type:varchar(64);uniqueIndex"`
 	Name       string `json:"name" gorm:"type:varchar(255);default:''"`
 	Remark     string `json:"remark" gorm:"type:text"`
-	// DefaultDiscount is the fallback multiplier applied when a model matches no
-	// prefix. PrefixDiscounts maps a model-name prefix (a "series", e.g. claude /
-	// gpt / gemini / grok) to its discount; a model takes the longest matching
-	// prefix. PrefixDiscounts is the serialized JSON persisted to the DB and
-	// PrefixDiscountMap its decoded form used by the API and cache.
+	// DefaultDiscount is retained for database and API compatibility. It is no
+	// longer used for reporting calculations. PrefixDiscounts maps a model-name
+	// prefix (a "series", e.g. claude / gpt / gemini / grok) to its discount; a
+	// model takes the longest matching prefix. PrefixDiscounts is the serialized
+	// JSON persisted to the DB and PrefixDiscountMap its decoded form used by the
+	// API and cache.
 	DefaultDiscount   float64            `json:"default_discount"`
 	PrefixDiscounts   string             `json:"-" gorm:"type:text"`
 	PrefixDiscountMap map[string]float64 `json:"prefix_discounts" gorm:"-"`
@@ -122,8 +123,9 @@ func GetCustomerById(id int) (*Customer, error) {
 	return &customer, nil
 }
 
-// normalize trims the customer id and coerces the default discount into range;
-// it is shared by Insert and Update so validation stays identical.
+// normalize trims the customer id and keeps legacy default-discount data
+// normalized for API/database compatibility. DefaultDiscount is not used by
+// customer reporting calculations.
 func (c *Customer) normalize() error {
 	c.CustomerId = strings.TrimSpace(c.CustomerId)
 	if c.CustomerId == "" {
@@ -154,7 +156,8 @@ func (c *Customer) Update() error {
 	}
 	c.UpdatedTime = common.GetTimestamp()
 	// Select the columns explicitly so clearing Name/Remark/discounts persists
-	// (GORM's Updates skips zero values otherwise).
+	// (GORM's Updates skips zero values otherwise). Keep default_discount in the
+	// update for compatibility with older clients and existing schemas.
 	err := DB.Model(c).Where("id = ?", c.Id).
 		Select("customer_id", "name", "remark", "default_discount", "prefix_discounts", "updated_time").
 		Updates(c).Error

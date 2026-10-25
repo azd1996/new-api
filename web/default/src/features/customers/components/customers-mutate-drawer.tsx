@@ -187,34 +187,6 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name='default_discount'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Default Discount')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        type='number'
-                        step={0.01}
-                        min={0}
-                        placeholder='1'
-                        onChange={(e) =>
-                          field.onChange(Number.parseFloat(e.target.value) || 0)
-                        }
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Multiplier for models without a specific discount. e.g. 0.8 = 80%.'
-                      )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
               <FormItem>
                 <FormLabel>{t('Series Discounts')}</FormLabel>
                 <FormDescription>
@@ -233,7 +205,9 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
                             <FormControl>
                               <Input
                                 {...field}
-                                placeholder={t('Model name prefix (e.g. claude)')}
+                                placeholder={t(
+                                  'Model name prefix (e.g. claude)'
+                                )}
                               />
                             </FormControl>
                             <FormMessage />

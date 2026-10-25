@@ -87,8 +87,9 @@ func CustomerConfigured(customerID string) bool {
 
 // CustomerModelDiscount returns the reporting-only stat discount multiplier for
 // (customerID, modelName): the longest matching model-name prefix ("series")
-// wins, else the customer's default discount, else 1 when the customer is
-// unknown. Matching is case-insensitive. The result is always positive/finite.
+// wins. When no series matches, it returns 1; the legacy customer default
+// discount is intentionally ignored. Matching is case-insensitive. The result
+// is always positive/finite.
 func CustomerModelDiscount(customerID, modelName string) float64 {
 	c, ok := getCachedCustomer(customerID)
 	if !ok {
@@ -104,5 +105,5 @@ func CustomerModelDiscount(customerID, modelName string) float64 {
 	if best != "" {
 		return normalizeDiscount(c.PrefixDiscountMap[best])
 	}
-	return normalizeDiscount(c.DefaultDiscount)
+	return 1
 }

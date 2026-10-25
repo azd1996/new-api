@@ -19,10 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import type { TFunction } from 'i18next'
 import { z } from 'zod'
 
-import {
-  CUSTOMER_VALIDATION,
-  getCustomerFormErrorMessages,
-} from '../constants'
+import { CUSTOMER_VALIDATION, getCustomerFormErrorMessages } from '../constants'
 import type { Customer, CustomerFormData } from '../types'
 
 // ============================================================================
@@ -44,9 +41,11 @@ export function getCustomerFormSchema(t: TFunction) {
     customer_id: z
       .string()
       .trim()
-      .min(CUSTOMER_VALIDATION.CUSTOMER_ID_MIN_LENGTH, msg.CUSTOMER_ID_REQUIRED),
+      .min(
+        CUSTOMER_VALIDATION.CUSTOMER_ID_MIN_LENGTH,
+        msg.CUSTOMER_ID_REQUIRED
+      ),
     name: z.string(),
-    default_discount: z.number().positive(msg.DISCOUNT_INVALID),
     prefix_discounts: z.array(
       z.object({
         prefix: z.string(),
@@ -60,7 +59,6 @@ export function getCustomerFormSchema(t: TFunction) {
 export type CustomerFormValues = {
   customer_id: string
   name: string
-  default_discount: number
   prefix_discounts: PrefixDiscountRow[]
   remark: string
 }
@@ -72,7 +70,6 @@ export type CustomerFormValues = {
 export const CUSTOMER_FORM_DEFAULT_VALUES: CustomerFormValues = {
   customer_id: '',
   name: '',
-  default_discount: 1,
   prefix_discounts: [],
   remark: '',
 }
@@ -100,7 +97,6 @@ export function transformFormDataToPayload(
     customer_id: data.customer_id.trim(),
     name: data.name,
     remark: data.remark,
-    default_discount: data.default_discount,
     prefix_discounts: prefixDiscounts,
   }
 }
@@ -119,7 +115,6 @@ export function transformCustomerToFormDefaults(
   return {
     customer_id: customer.customer_id,
     name: customer.name,
-    default_discount: customer.default_discount || 1,
     prefix_discounts: prefixDiscounts,
     remark: customer.remark,
   }

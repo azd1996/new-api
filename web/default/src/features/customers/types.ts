@@ -27,7 +27,6 @@ export const customerSchema = z.object({
   customer_id: z.string(), // unique business id (the downstream api_key_id)
   name: z.string(),
   remark: z.string(),
-  default_discount: z.number(), // stat discount multiplier (0.8 = pay 80%)
   prefix_discounts: z.record(z.string(), z.number()), // model-name prefix -> multiplier
   created_time: z.number(),
   updated_time: z.number(),
@@ -72,7 +71,6 @@ export interface CustomerFormData {
   customer_id: string
   name: string
   remark: string
-  default_discount: number
   prefix_discounts: Record<string, number>
 }
 
