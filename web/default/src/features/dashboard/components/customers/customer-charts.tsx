@@ -37,6 +37,7 @@ import {
   processCustomerChartData,
 } from '@/features/dashboard/lib'
 import type {
+  CustomerAmountMetric,
   CustomerChartsFilters,
   CustomerGroupBy,
   ProcessedCustomerChartData,
@@ -78,6 +79,27 @@ const CUSTOMER_GROUP_BY_OPTIONS = [
   { value: 'id', labelKey: 'By customer ID' },
 ] as const
 
+const CUSTOMER_AMOUNT_OPTIONS: {
+  value: CustomerAmountMetric
+  labelKey: string
+}[] = [
+  { value: 'customer_stat_quota', labelKey: 'Customer discounted amount' },
+  { value: 'channel_stat_quota', labelKey: 'Channel discounted amount' },
+  { value: 'profit_quota', labelKey: 'Profit amount' },
+  { value: 'profit_rate', labelKey: 'Profit rate' },
+]
+
+const CUSTOMER_AMOUNT_DESCRIPTIONS: Record<CustomerAmountMetric, string> = {
+  customer_stat_quota:
+    'Customer discounted amount uses the channel discounted amount as a fallback for unconfigured customers.',
+  channel_stat_quota:
+    'Channel discounted amount is calculated using the channel discount.',
+  profit_quota:
+    'Profit amount is the customer discounted amount minus the channel discounted amount.',
+  profit_rate:
+    'Profit rate is profit amount divided by channel discounted amount.',
+}
+
 interface CustomerChartsProps {
   filters: CustomerChartsFilters
   onFiltersChange: (filters: CustomerChartsFilters) => void
@@ -97,6 +119,7 @@ export function CustomerCharts(props: CustomerChartsProps) {
   const selectedRange = props.filters.selectedRange
   const topCustomerLimit = props.filters.topCustomerLimit
   const groupBy = props.filters.groupBy
+  const amountMetric = props.filters.amountMetric
   const onFiltersChange = props.onFiltersChange
 
   const timeRange = useMemo(() => {
@@ -140,6 +163,13 @@ export function CustomerCharts(props: CustomerChartsProps) {
     [onFiltersChange, props.filters]
   )
 
+  const handleAmountMetricChange = useCallback(
+    (value: CustomerAmountMetric) => {
+      onFiltersChange({ ...props.filters, amountMetric: value })
+    },
+    [onFiltersChange, props.filters]
+  )
+
   useEffect(() => {
     const updateTheme = async () => {
       setThemeReady(false)
@@ -170,9 +200,18 @@ export function CustomerCharts(props: CustomerChartsProps) {
         timeGranularity,
         t,
         topCustomerLimit,
-        groupBy
+        groupBy,
+        amountMetric
       ),
-    [customerData, isLoading, timeGranularity, t, topCustomerLimit, groupBy]
+    [
+      customerData,
+      isLoading,
+      timeGranularity,
+      t,
+      topCustomerLimit,
+      groupBy,
+      amountMetric,
+    ]
   )
 
   return (
@@ -257,15 +296,33 @@ export function CustomerCharts(props: CustomerChartsProps) {
           </TabsList>
         </Tabs>
 
+        <Tabs
+          value={amountMetric}
+          onValueChange={(value) =>
+            handleAmountMetricChange(value as CustomerAmountMetric)
+          }
+          className='shrink-0'
+        >
+          <TabsList>
+            {CUSTOMER_AMOUNT_OPTIONS.map((opt) => (
+              <TabsTrigger
+                key={opt.value}
+                value={opt.value}
+                className='px-2.5 text-xs'
+              >
+                {t(opt.labelKey)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+
         {isLoading && (
           <Loader2 className='text-muted-foreground size-4 animate-spin' />
         )}
       </div>
 
       <p className='text-muted-foreground text-xs'>
-        {t(
-          'Amounts are the customer discounted amount. Customers without a configured discount fall back to the channel discounted amount and are marked as such.'
-        )}
+        {t(CUSTOMER_AMOUNT_DESCRIPTIONS[amountMetric])}
       </p>
 
       <div className='grid gap-3'>
@@ -291,7 +348,7 @@ export function CustomerCharts(props: CustomerChartsProps) {
                   themeReady &&
                   spec && (
                     <VChart
-                      key={`customer-${chart.value}-${topCustomerLimit}-${groupBy}-${resolvedTheme}`}
+                      key={`customer-${chart.value}-${topCustomerLimit}-${groupBy}-${amountMetric}-${resolvedTheme}`}
                       spec={{
                         ...spec,
                         theme: resolvedTheme === 'dark' ? 'dark' : 'light',

@@ -249,6 +249,12 @@ export interface CustomerQuotaDataItem {
 // raw customer id.
 export type CustomerGroupBy = 'name' | 'id'
 
+export type CustomerAmountMetric =
+  | 'customer_stat_quota'
+  | 'channel_stat_quota'
+  | 'profit_quota'
+  | 'profit_rate'
+
 // Customer analytics selections, held by the dashboard parent like the user
 // analytics filters.
 export interface CustomerChartsFilters {
@@ -256,6 +262,7 @@ export interface CustomerChartsFilters {
   selectedRange: number
   topCustomerLimit: number
   groupBy: CustomerGroupBy
+  amountMetric: CustomerAmountMetric
 }
 
 // ============================================================================

@@ -240,6 +240,7 @@ export function Dashboard() {
         selectedRange: getDefaultDays(granularity),
         topCustomerLimit: 10,
         groupBy: 'name',
+        amountMetric: 'customer_stat_quota',
       }
     })
   const [flowSensitiveVisible, setFlowSensitiveVisible] = useState(true)
