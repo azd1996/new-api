@@ -287,7 +287,8 @@ function MobileStreamTimingField({ log }: { log: UsageLog }) {
     useTime,
     log.completion_tokens,
     log.is_stream,
-    other?.frt
+    other?.frt,
+    other?.lat
   )
 
   return (

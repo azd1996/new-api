@@ -158,9 +158,11 @@ export function getResponseTimeColor(
  *   the pure generation speed once the stream has started. Only defined for
  *   streaming requests that recorded a first-token time; null otherwise.
  *
- * Note: total duration is stored as whole seconds while the first-token time
- * is in milliseconds, so the generation figure is approximate and is omitted
- * when the subtraction would be non-positive.
+ * The total duration (`useTimeSec`) is only whole-second precise, so for short
+ * requests the first-token-adjusted window can underflow to <= 0. When that
+ * happens and a precise total latency (`latMs`, same ms basis as `frtMs`) is
+ * available, we recompute the window from it so the figure still shows instead
+ * of being dropped.
  */
 export interface StreamThroughput {
   total: number | null
@@ -171,7 +173,8 @@ export function getStreamThroughput(
   useTimeSec: number,
   completionTokens: number,
   isStream: boolean,
-  frtMs: number | undefined
+  frtMs: number | undefined,
+  latMs?: number
 ): StreamThroughput {
   const total =
     useTimeSec > 0 && completionTokens > 0
@@ -180,7 +183,11 @@ export function getStreamThroughput(
 
   let generation: number | null = null
   if (isStream && completionTokens > 0 && frtMs != null && frtMs > 0) {
-    const generationSec = useTimeSec - frtMs / 1000
+    let generationSec = useTimeSec - frtMs / 1000
+    if (generationSec <= 0 && latMs != null && latMs > frtMs) {
+      // Whole-second use_time underflowed; fall back to precise total latency.
+      generationSec = (latMs - frtMs) / 1000
+    }
     if (generationSec > 0) generation = completionTokens / generationSec
   }
 

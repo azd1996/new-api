@@ -264,6 +264,12 @@ export interface LogOtherData {
   audio_ratio?: number
   audio_completion_ratio?: number
   frt?: number
+  /**
+   * Precise total request latency in milliseconds (same StartTime basis as
+   * frt). Used as a fallback when the whole-second use_time underflows the
+   * first-token-adjusted generation window.
+   */
+  lat?: number
   // Tiered (expression-based) billing fields, set by backend when
   // billing_mode === 'tiered_expr'. expr_b64 is the base64-encoded billing
   // expression and matched_tier is the label of the tier that fired.

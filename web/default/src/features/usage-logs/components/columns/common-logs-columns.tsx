@@ -659,7 +659,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           useTime,
           log.completion_tokens,
           log.is_stream,
-          other?.frt
+          other?.frt,
+          other?.lat
         )
 
         return (

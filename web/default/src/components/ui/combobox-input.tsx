@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Check, ChevronsUpDown } from 'lucide-react'
+import { Check, ChevronsUpDown, X } from 'lucide-react'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -39,6 +39,11 @@ interface ComboboxInputProps {
   id?: string
   allowCustomValue?: boolean
   openOnFocus?: boolean
+  /**
+   * When true, show a clear (X) button while a value is selected so the user
+   * can reset the field to empty. Clearing fires `onValueChange('')`.
+   */
+  clearable?: boolean
 }
 
 export function ComboboxInput({
@@ -51,6 +56,7 @@ export function ComboboxInput({
   id,
   allowCustomValue = false,
   openOnFocus = true,
+  clearable = false,
 }: ComboboxInputProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
@@ -158,6 +164,14 @@ export function ComboboxInput({
     open &&
     (filteredOptions.length > 0 || (allowCustomValue && searchValue.trim()))
 
+  const showClear = clearable && !open && value !== ''
+
+  const handleClear = () => {
+    onValueChange('')
+    setSearchValue('')
+    inputRef.current?.focus()
+  }
+
   return (
     <div ref={containerRef} className='relative'>
       <Input
@@ -194,8 +208,22 @@ export function ComboboxInput({
           pointerFocusRef.current = false
         }}
         onKeyDown={handleKeyDown}
-        className={cn('pr-9', className)}
+        className={cn(showClear ? 'pr-14' : 'pr-9', className)}
       />
+      {showClear && (
+        <button
+          type='button'
+          aria-label={t('Clear')}
+          tabIndex={-1}
+          onMouseDown={(e) => {
+            e.preventDefault() // keep focus; prevent reopening via blur
+            handleClear()
+          }}
+          className='text-muted-foreground hover:text-foreground absolute top-1/2 right-8 -translate-y-1/2 rounded-sm opacity-70 hover:opacity-100'
+        >
+          <X className='size-4 shrink-0' />
+        </button>
+      )}
       <ChevronsUpDown className='pointer-events-none absolute top-1/2 right-3 size-4 shrink-0 -translate-y-1/2 opacity-50' />
 
       {showDropdown && (

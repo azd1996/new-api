@@ -5,6 +5,16 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-10-26]
+
+### 新增 Added
+- **上游首字时延 TTFT Prometheus 直方图（Relay TTFT Histogram）**：新增 `newapi_relay_ttft_seconds`（Histogram，标签 `{model,group,channel}`，桶 `0.1,0.25,0.5,1,2,5,10,20,30,60`），在结算/失败落点按 `RelayInfo.FirstResponseSeconds()` 观测——**仅流式且已出首字**才记（非流式/未出首字不计入）。三处落点（`service/quota.go`、`service/text_quota.go`、`controller/relay.go`）统一传入 TTFT。此前中继只有总时延直方图 `newapi_relay_duration_seconds` 与平均 TTFT，首字长尾无法出分位；现可用 `histogram_quantile` 出 TTFT 的 P50/P90/P99。`docs/prometheus-dashboard-promql.md` 补了指标表、桶说明与 TTFT 分位/按模型分解 PromQL。
+- **使用日志流式列新增「纯生成速度」（扣首字）+ 精确总耗时 `other.lat`**：原 `t/s` 为 `completion/总耗时`（含首字等待），首字高时会被拖低、易误判为吐字慢。现在流式列在原总 t/s 旁**增**一个扣掉首字的纯生成速度 `completion/(耗时−首字)`，并用 tooltip 标出两种口径（含首字/扣首字）。因 `use_time` 仅整秒精度、对短请求做减法易下溢，后端在日志 `other` 新增精确总耗时 `lat`（毫秒，与 `frt` 同 `StartTime` 基准，写于 `GenerateTextOtherInfo`）；前端在整秒窗口 ≤0 时回退用 `lat` 重算，避免不显示。**仅改动后新产生的日志**带 `lat`，历史日志回退整秒逻辑。
+
+### 优化 Changed
+- **通用日志筛选主行宽度微调**：24 列栅格下时间范围 `8→7`、类型 `5→2`，腾出的宽度并入分组 `5→9`（模型保持 6），使分组下拉更宽松。
+- **模型名称 / 分组 / 客户名称 / 客户ID 下拉支持清除**：四个 `Combobox`（走 legacy `ComboboxInput`）新增可选 `clearable`——有值且未展开时显示清除（X）按钮，一键把该筛选置空；默认关闭，不影响其他下拉框。
+
 ## [2026-10-25]
 
 ### 新增 Added

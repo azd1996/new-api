@@ -561,6 +561,7 @@ export function CommonLogsFilterBar<TData>(
           searchPlaceholder={t('Model Name')}
           emptyText={t('No option found.')}
           allowCustomValue
+          clearable
           className='h-8 min-w-0 flex-1 text-sm leading-5'
         />
         <LogFilterModeButton
@@ -582,6 +583,7 @@ export function CommonLogsFilterBar<TData>(
           searchPlaceholder={t('Group')}
           emptyText={t('No option found.')}
           allowCustomValue
+          clearable
           className='h-8 min-w-0 flex-1 text-sm leading-5'
         />
         <LogFilterModeButton
@@ -748,6 +750,7 @@ export function CommonLogsFilterBar<TData>(
               searchPlaceholder={t('Customer Name')}
               emptyText={t('No option found.')}
               allowCustomValue
+              clearable
               className='h-8 min-w-0 text-sm leading-5'
             />
           </LogsFilterField>
@@ -762,6 +765,7 @@ export function CommonLogsFilterBar<TData>(
               searchPlaceholder={t('Customer ID')}
               emptyText={t('No option found.')}
               allowCustomValue
+              clearable
               className='h-8 min-w-0 text-sm leading-5'
             />
           </LogsFilterField>
@@ -822,10 +826,10 @@ export function CommonLogsFilterBar<TData>(
       actionStart={sensitiveToggle}
       primaryFilters={
         <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[repeat(24,minmax(0,1fr))]'>
-          <div className='min-w-0 sm:col-span-8'>{dateRangeFilter}</div>
+          <div className='min-w-0 sm:col-span-7'>{dateRangeFilter}</div>
           <div className='min-w-0 sm:col-span-6'>{modelFilter}</div>
-          <div className='min-w-0 sm:col-span-5'>{groupFilter}</div>
-          <div className='min-w-0 sm:col-span-5'>{typeFilter}</div>
+          <div className='min-w-0 sm:col-span-9'>{groupFilter}</div>
+          <div className='min-w-0 sm:col-span-2'>{typeFilter}</div>
         </div>
       }
       advancedFilters={advancedFilters}
