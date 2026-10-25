@@ -720,6 +720,7 @@ export function processUserChartData(
   options?: {
     formatValue?: (value: number) => string
     totalValue?: number
+    ratio?: boolean
   }
 ): ProcessedUserChartData {
   const tt: TFunction = t ?? ((x) => x)
@@ -767,11 +768,36 @@ export function processUserChartData(
   if (!data || data.length === 0) return emptyResult
 
   const userQuotaTotal = new Map<string, number>()
+  const userRatioTotals = new Map<
+    string,
+    { numerator: number; denominator: number }
+  >()
   data.forEach((item) => {
     const username = item.username || 'unknown'
+    const numerator = Number(item[quotaField]) || 0
+    if (options?.ratio) {
+      const previous = userRatioTotals.get(username) ?? {
+        numerator: 0,
+        denominator: 0,
+      }
+      userRatioTotals.set(username, {
+        numerator: previous.numerator + numerator,
+        denominator:
+          previous.denominator + (Number(item.metric_denominator) || 0),
+      })
+      return
+    }
     const prev = userQuotaTotal.get(username) || 0
-    userQuotaTotal.set(username, prev + (Number(item[quotaField]) || 0))
+    userQuotaTotal.set(username, prev + numerator)
   })
+  if (options?.ratio) {
+    for (const [username, totals] of userRatioTotals) {
+      userQuotaTotal.set(
+        username,
+        totals.denominator > 0 ? totals.numerator / totals.denominator : 0
+      )
+    }
+  }
 
   const sorted = Array.from(userQuotaTotal.entries()).sort(
     (a, b) => b[1] - a[1]
@@ -795,7 +821,10 @@ export function processUserChartData(
     {}
   )
 
-  const timeUserMap = new Map<string, Map<string, number>>()
+  const timeUserMap = new Map<
+    string,
+    Map<string, number | { numerator: number; denominator: number }>
+  >()
   const allTimePoints = new Set<string>()
 
   data.forEach((item) => {
@@ -806,7 +835,22 @@ export function processUserChartData(
     if (!topUserSet.has(user)) return
     if (!timeUserMap.has(timeKey)) timeUserMap.set(timeKey, new Map())
     const map = timeUserMap.get(timeKey)!
-    map.set(user, (map.get(user) || 0) + (Number(item[quotaField]) || 0))
+    const numerator = Number(item[quotaField]) || 0
+    if (options?.ratio) {
+      const previous = map.get(user)
+      const totals =
+        typeof previous === 'object' && previous !== null
+          ? previous
+          : { numerator: 0, denominator: 0 }
+      map.set(user, {
+        numerator: totals.numerator + numerator,
+        denominator:
+          totals.denominator + (Number(item.metric_denominator) || 0),
+      })
+    } else {
+      const previous = map.get(user)
+      map.set(user, (typeof previous === 'number' ? previous : 0) + numerator)
+    }
   })
 
   const sortedTimePoints = Array.from(allTimePoints).sort()
@@ -819,7 +863,16 @@ export function processUserChartData(
 
   sortedTimePoints.forEach((time) => {
     topUsers.forEach((user) => {
-      const q = timeUserMap.get(time)?.get(user) || 0
+      const rawValue = timeUserMap.get(time)?.get(user)
+      let q = 0
+      if (typeof rawValue === 'object' && rawValue !== null) {
+        q =
+          rawValue.denominator > 0
+            ? rawValue.numerator / rawValue.denominator
+            : 0
+      } else {
+        q = rawValue || 0
+      }
       trendValues.push({
         Time: time,
         User: user,
@@ -1011,18 +1064,45 @@ export function processCustomerChartData(
   const mapped: QuotaDataItem[] = (data ?? []).map((item) => {
     const base = groupBy === 'id' ? item.customer_id : item.customer_name
     const label = item.customer_configured ? base : `${base}${fallbackSuffix}`
+    const amounts = getCustomerAmounts(item)
     return {
       username: label,
       created_at: item.created_at,
-      quota: getCustomerAmount(item),
+      quota:
+        amountMetric === 'profit_rate'
+          ? amounts.profit
+          : getCustomerAmount(item),
+      metric_denominator:
+        amountMetric === 'profit_rate' ? amounts.channelAmount : undefined,
     }
   })
 
-  const customerTotals = mapped.reduce((totals, item) => {
-    const label = item.username ?? 'unknown'
-    totals.set(label, (totals.get(label) ?? 0) + (Number(item.quota) || 0))
-    return totals
-  }, new Map<string, number>())
+  const customerTotals = new Map<string, number>()
+  if (amountMetric === 'profit_rate') {
+    const ratioTotals = new Map<string, { profit: number; channel: number }>()
+    for (const item of mapped) {
+      const label = item.username ?? 'unknown'
+      const previous = ratioTotals.get(label) ?? { profit: 0, channel: 0 }
+      ratioTotals.set(label, {
+        profit: previous.profit + (Number(item.quota) || 0),
+        channel: previous.channel + (Number(item.metric_denominator) || 0),
+      })
+    }
+    for (const [label, totals] of ratioTotals) {
+      customerTotals.set(
+        label,
+        totals.channel > 0 ? totals.profit / totals.channel : 0
+      )
+    }
+  } else {
+    for (const item of mapped) {
+      const label = item.username ?? 'unknown'
+      customerTotals.set(
+        label,
+        (customerTotals.get(label) ?? 0) + (Number(item.quota) || 0)
+      )
+    }
+  }
   const sortedLabels = [...customerTotals]
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
@@ -1061,7 +1141,11 @@ export function processCustomerChartData(
       rankKey: 'Customer Consumption Ranking',
       trendKey: 'Customer Consumption Trend',
     },
-    { formatValue, totalValue }
+    {
+      formatValue,
+      totalValue,
+      ratio: amountMetric === 'profit_rate',
+    }
   )
   return {
     spec_customer_rank: result.spec_user_rank,

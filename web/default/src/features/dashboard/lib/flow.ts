@@ -48,6 +48,8 @@ type FlowMetrics = {
 
 type FlowSankeyLabels = {
   quota: string
+  channelStatQuota: string
+  customerStatQuota: string
   tokens: string
   requests: string
   share: string
@@ -95,6 +97,8 @@ const DEFAULT_FLOW_OVERFLOW_MODE: FlowOverflowMode = 'aggregate'
 
 const DEFAULT_FLOW_SANKEY_LABELS: FlowSankeyLabels = {
   quota: 'Quota',
+  channelStatQuota: 'Channel discounted amount',
+  customerStatQuota: 'Customer discounted amount',
   tokens: 'Tokens',
   requests: 'Requests',
   share: 'Share',
@@ -430,6 +434,8 @@ function addNode(
     value: 0,
     requests: 0,
     quota: 0,
+    channelStatQuota: 0,
+    customerStatQuota: 0,
     tokens: 0,
     color,
     colorKey,
@@ -437,6 +443,8 @@ function addNode(
   previous.value += metricValue(metrics, metric)
   previous.requests += metrics.requests
   previous.quota += metrics.quota
+  previous.channelStatQuota += metrics.channelStat
+  previous.customerStatQuota += metrics.customerStat
   previous.tokens += metrics.tokens
   map.set(pathNode.id, previous)
 }
@@ -457,6 +465,8 @@ function addLink(
     value: 0,
     requests: 0,
     quota: 0,
+    channelStatQuota: 0,
+    customerStatQuota: 0,
     tokens: 0,
     sourceLabel: source.label,
     targetLabel: target.label,
@@ -470,6 +480,8 @@ function addLink(
   previous.value += metricValue(metrics, metric)
   previous.requests += metrics.requests
   previous.quota += metrics.quota
+  previous.channelStatQuota += metrics.channelStat
+  previous.customerStatQuota += metrics.customerStat
   previous.tokens += metrics.tokens
   map.set(key, previous)
 }
@@ -1103,6 +1115,20 @@ function tooltipMetricLines(
         valueFormatter(metricValue(datum, 'quota')),
     },
     {
+      key: labels.channelStatQuota,
+      value: (datum: Record<string, unknown>) =>
+        valueFormatter(metricValue(datum, 'channelStatQuota')),
+      visible: (datum: Record<string, unknown>) =>
+        metricValue(datum, 'channelStatQuota') > 0,
+    },
+    {
+      key: labels.customerStatQuota,
+      value: (datum: Record<string, unknown>) =>
+        valueFormatter(metricValue(datum, 'customerStatQuota')),
+      visible: (datum: Record<string, unknown>) =>
+        metricValue(datum, 'customerStatQuota') > 0,
+    },
+    {
       key: labels.tokens,
       value: (datum: Record<string, unknown>) =>
         formattedNumber(datum, 'tokens'),
@@ -1142,6 +1168,8 @@ export function buildFlowSankeySpec(
               value: node.value,
               requests: node.requests,
               quota: node.quota,
+              channelStatQuota: node.channelStatQuota,
+              customerStatQuota: node.customerStatQuota,
               tokens: node.tokens,
               color: node.color,
               colorKey: node.colorKey,
@@ -1168,6 +1196,8 @@ export function buildFlowSankeySpec(
                   value: link.value,
                   requests: link.requests,
                   quota: link.quota,
+                  channelStatQuota: link.channelStatQuota,
+                  customerStatQuota: link.customerStatQuota,
                   tokens: link.tokens,
                   color: link.color,
                   linkColor: link.linkColor,

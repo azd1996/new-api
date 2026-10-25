@@ -8,6 +8,7 @@
 ## [2026-10-25]
 
 ### 新增 Added
+- **分流图悬浮提示补充金额口径**：在原有额度、Token、请求数、占比之外，新增渠道折后金额和客户折后金额；两项金额均按当前悬浮节点或链路对应的聚合数据展示。占比仍按当前分流口径的链路值除以当前筛选范围内所有首跳链路值之和计算。
 - **客户统计金额支持四种口径**：客户统计页新增「客户折后金额 / 渠道折后金额 / 利润金额 / 利润率」切换。利润金额按客户折后金额减渠道折后金额计算，利润率按汇总利润除以汇总渠道折后金额计算；未配置客户在客户折后金额口径下继续使用渠道折后金额兜底。
 - **明细错误新增「客户」列（Per-signature Customer Breakdown）**：明细错误统计页为每个签名/分组补充**按客户聚合**的次数分布列（与「模型」「渠道」同款 badge 聚合，signature 与 short_name/attribution 分组两种视图都有）。聚合依据为日志 `other.customer_id`（下游 Trace-Tag 解出，无客户信息的行不计入该列）。前端展示格式为 **`客户ID(客户名)`**，客户无对应配置名时只展示 `客户ID`；每个 badge 带该客户在本签名下的出现次数 `×N`、按次数降序、悬浮 tooltip 看全文。数据层：`errorSignatureOther` 解析 `customer_id`，`ErrorSignatureStat`/`ErrorGroupStat` 新增 `Customers map[string]int64` 在两条聚合路径累计；控制器 `errorStatItem` 新增 `customers`（`{customer_id,customer_name,count}`），客户名经 `model.CustomerName(id)` 查内存缓存解析（未配置则空）。零迁移、复用现有 `other` 字段，不新增列、不改表结构。注意：**客户名取自当前缓存**而非写时快照，且仅对带 `customer_id` 的错误日志生效。
 
@@ -35,6 +36,7 @@
 - **使用日志金额统计改用直列 `SUM`（Stat Amounts Read via Columns）**：既然金额已双写进真列，`SumLogStatAmounts` 从「扫 `other` 并 Go 累加（10 万行上限）」改为 DB 直接 `SUM` 列——`COALESCE(SUM(stat_quota),0)` / `SUM(customer_stat_quota)`，利润用 `SUM(CASE WHEN customer_discount>0 THEN customer_stat_quota-stat_quota ELSE 0 END)`（以 `customer_discount>0` 作「有客户」判据，等价旧逻辑按 `customer_stat_quota` 键是否存在）。去掉 10 万行扫描上限、改为全量聚合，跨 SQLite/MySQL/PG/ClickHouse 通用。注意：**列加上之前的历史消耗日志**金额只在 `other`、列为空(0)，按列 `SUM` 会把它们计 0；新日志不受影响。详情弹窗仍读 `other`。
 
 ### 修复 Fixed
+- **客户统计利润率排行修正**：修复客户统计按利润率排行时将多个时间桶的单桶利润率直接相加，导致出现超过 100% 的错误。现在先按客户（趋势图按客户与时间）汇总利润和渠道折后金额，再计算利润率。
 - **归一化规则集多实例不同步（Error Signature Rules Cross-Instance Sync）**：归一化规则与普通 K-V 配置不同——它被**编译进进程内缓存**（`service.signatureRules`），仅在启动时和「保存规则的那台实例」的 HTTP handler 里重新编译；其他实例虽经 `SyncOptions` 把新规则值轮询进 `OptionMap`，却从不重新编译，于是一直用旧规则。表现为：保存的那台产出新签名（如 `content.*`），其他实例仍产出旧签名（如 `content.8`），同一类错误并存两种签名。修复：`service.SyncErrorSignatureRules(frequency)` 按 `SYNC_FREQUENCY` 轮询 `OptionMap` 的 `ErrorSignatureRules`，**值变化时才**重新 `ApplyErrorSignatureRulesJSON`（带变更守卫避免无谓重编译；option 为空则回落默认规则），在 `main.go` 与 `SyncErrorAliasCache` 等并列启动。重启后在任一实例改规则，其他实例约 2×`SYNC_FREQUENCY` 内自动跟上，不再需逐台重启。
 - **数据看板 `quota_data` 落库吞错且谎报成功（Dashboard Quota Data Silent Write Failure）**：`SaveQuotaDataCache`（`model/usedata.go`）此前把 `Create` 插入错误完全丢弃，且无论成功与否都恒打印「保存数据看板数据成功，共保存 N 条」（N 为缓存条数），导致 `quota_data` 真写不进去时在日志里完全隐身——数据看板/分流/模型调用分析静默无新数据，却看不到任何报错（本次排障一度据此误判）。现改为：`Create`、`increaseQuotaData` 的错误均检查并以 `common.SysError` 记录；`First` 查询区分 `ErrRecordNotFound`（正常「新小时桶」→插入）与真实 DB 错误（此时行是否存在未知，贸然 `Create` 可能重复计数，故记录并跳过本条）；结尾按**实际成功条数**记日志，一旦有失败改用 `SysError` 打印「成功 X 条，失败 Y 条（共 Z 条）」。`increaseQuotaData` 签名由无返回值改为返回 `error`。**仅提升可观测性**，不改写入/去重语义，也未加重试（失败条目增量仍随本轮缓存清空丢弃，与原行为一致）。
 

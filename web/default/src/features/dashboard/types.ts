@@ -118,6 +118,8 @@ export interface DashboardFlowNode {
   value: number
   requests: number
   quota: number
+  channelStatQuota: number
+  customerStatQuota: number
   tokens: number
   color: string
   colorKey: string
@@ -131,6 +133,8 @@ export interface DashboardFlowLink {
   value: number
   requests: number
   quota: number
+  channelStatQuota: number
+  customerStatQuota: number
   tokens: number
   sourceLabel: string
   targetLabel: string

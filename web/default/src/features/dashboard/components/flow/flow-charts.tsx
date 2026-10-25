@@ -486,6 +486,8 @@ export function FlowCharts(props: FlowChartsProps) {
     () =>
       buildFlowSankeySpec(flowData.flow, chartTitle, formatQuota, {
         quota: t('Quota'),
+        channelStatQuota: t('Channel discounted amount'),
+        customerStatQuota: t('Customer discounted amount'),
         tokens: t('Tokens'),
         requests: t('Requests'),
         share: t('Share'),
