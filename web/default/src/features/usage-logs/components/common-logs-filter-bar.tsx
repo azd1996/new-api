@@ -195,6 +195,7 @@ function buildSearchSourceKey(values: {
 
 interface CommonLogsFilterBarProps<TData> {
   table: Table<TData>
+  showStats?: boolean
 }
 
 export function CommonLogsFilterBar<TData>(
@@ -902,7 +903,7 @@ export function CommonLogsFilterBar<TData>(
   return (
     <LogsFilterToolbar
       table={props.table}
-      stats={statsBar}
+      stats={props.showStats === false ? undefined : statsBar}
       actionStart={sensitiveToggle}
       primaryFilters={
         <div className='flex min-w-0 flex-1 flex-col gap-2 sm:flex-row'>

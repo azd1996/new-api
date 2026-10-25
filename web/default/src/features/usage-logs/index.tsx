@@ -39,6 +39,7 @@ import {
   USAGE_LOGS_DEFAULT_SECTION,
   type UsageLogsSectionId,
 } from './section-registry'
+import { LOG_TYPE_ALL_VALUE } from './constants'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 const TASK_LOG_SECTIONS = ['drawing', 'task'] as const
@@ -59,6 +60,7 @@ function UsageLogsContent() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const params = route.useParams()
+  const searchParams = route.useSearch()
   const activeCategory: UsageLogsSectionId =
     params.section && isUsageLogsSectionId(params.section)
       ? params.section
@@ -72,6 +74,10 @@ function UsageLogsContent() {
     setAffinityDialogOpen,
   } = useUsageLogsContext()
   const { canManageScope, viewScope, setViewScope } = useLogsViewScope()
+  const viewMode =
+    activeCategory === 'common' && searchParams.view === 'stats'
+      ? 'stats'
+      : 'list'
   const tabNavGroups = useMemo<NavGroup[]>(
     () => [
       {
@@ -117,6 +123,22 @@ function UsageLogsContent() {
     [setViewScope]
   )
 
+  const handleViewModeChange = useCallback(
+    (mode: string) => {
+      if (mode !== 'list' && mode !== 'stats') return
+      void navigate({
+        to: '/usage-logs/$section',
+        params: { section: 'common' },
+        search: {
+          ...searchParams,
+          view: mode,
+          type: mode === 'stats' ? [LOG_TYPE_ALL_VALUE] : searchParams.type,
+        },
+      })
+    },
+    [navigate, searchParams]
+  )
+
   const pageMeta =
     activeCategory === 'common' ? SECTION_META.common : SECTION_META.task
   const showTaskSwitcher =
@@ -128,14 +150,28 @@ function UsageLogsContent() {
         <SectionPageLayout.Title>
           {t(pageMeta.titleKey)}
         </SectionPageLayout.Title>
-        {canManageScope && (
+        {(canManageScope || activeCategory === 'common') && (
           <SectionPageLayout.Actions>
-            <Tabs value={viewScope} onValueChange={handleViewScopeChange}>
-              <TabsList>
-                <TabsTrigger value='all'>{t('All')}</TabsTrigger>
-                <TabsTrigger value='self'>{t('Only Mine')}</TabsTrigger>
-              </TabsList>
-            </Tabs>
+            <div className='flex flex-wrap items-center gap-2'>
+              {activeCategory === 'common' && (
+                <Tabs value={viewMode} onValueChange={handleViewModeChange}>
+                  <TabsList>
+                    <TabsTrigger value='list'>{t('List')}</TabsTrigger>
+                    <TabsTrigger value='stats'>
+                      {t('Statistics')}
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              )}
+              {canManageScope && (
+                <Tabs value={viewScope} onValueChange={handleViewScopeChange}>
+                  <TabsList>
+                    <TabsTrigger value='all'>{t('All')}</TabsTrigger>
+                    <TabsTrigger value='self'>{t('Only Mine')}</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              )}
+            </div>
           </SectionPageLayout.Actions>
         )}
         <SectionPageLayout.Content>
@@ -152,7 +188,10 @@ function UsageLogsContent() {
               </Tabs>
             )}
             <div className='min-h-0 flex-1'>
-              <UsageLogsTable logCategory={activeCategory} />
+              <UsageLogsTable
+                logCategory={activeCategory}
+                viewMode={viewMode}
+              />
             </div>
           </div>
         </SectionPageLayout.Content>

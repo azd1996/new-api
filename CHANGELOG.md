@@ -8,6 +8,7 @@
 ## [2026-10-26]
 
 ### 新增 Added
+- **使用日志统计模式前端原型**：在 Common 使用日志中新增「日志明细 / 统计分析」视图切换，统计模式复用现有筛选条件并默认使用所有类型（consume + error）。当前以假数据展示异步统计任务进度、按渠道指标对比、总体请求/成功率/重试率、最终状态分布、TTFT/TPOT/E2E 分布、四种缓存覆盖率和重复 consume 异常提示；渠道对比表支持按请求数、尝试次数、成功率、重试率、金额、TTFT P95、E2E P95、缓存命中 token 率和缓存命中请求率升降序排序。详细方案见 `docs/usage-log-statistics-design.md`。
 - **客户折后金额标注系列折扣兜底**：消耗日志新增明确的折扣来源标记 `other.customer_discount_fallback`，命中系列时另记录 `customer_discount_matched_prefix`；未匹配系列折扣时，详情金额旁显示「未匹配系列折扣，兜底到 1」。配置的系列折扣恰好为 `1` 仍视为正常命中，绝不按数值判断兜底；历史日志缺少来源标记时不补判。
 - **错误日志记录重试覆盖规则并支持筛选**：将触发重试覆盖的规则编号、描述、动作和改写摘要记录到对应错误日志的 `other.admin_info.retry_override`，列表与详情可查看；保留独立重试覆盖审计日志。新增 `retry_triggered` 真列与 `other` 双写，管理员高级筛选提供「触发重试：全部 / 是 / 否」，列表和统计共用筛选条件；是/否均限定错误日志，普通重试不算规则触发，历史未记录触发标记的错误归入「否」。规则信息按单次失败传递，避免串到后续重试；本机日志库自动补列，远端日志继续通过 `other` 同步。
 - **上游首字时延 TTFT Prometheus 直方图（Relay TTFT Histogram）**：新增 `newapi_relay_ttft_seconds`（Histogram，标签 `{model,group,channel}`，桶 `0.1,0.25,0.5,1,2,5,10,20,30,60`），在结算/失败落点按 `RelayInfo.FirstResponseSeconds()` 观测——**仅流式且已出首字**才记（非流式/未出首字不计入）。三处落点（`service/quota.go`、`service/text_quota.go`、`controller/relay.go`）统一传入 TTFT。此前中继只有总时延直方图 `newapi_relay_duration_seconds` 与平均 TTFT，首字长尾无法出分位；现可用 `histogram_quantile` 出 TTFT 的 P50/P90/P99。`docs/prometheus-dashboard-promql.md` 补了指标表、桶说明与 TTFT 分位/按模型分解 PromQL。

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -46,6 +46,7 @@ import { CommonLogsFilterBar } from './common-logs-filter-bar'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
 import { useLogsViewScope } from './usage-logs-provider'
+import { UsageLogsStatistics } from './usage-logs-statistics'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 
@@ -66,15 +67,26 @@ function getColumnVisibilityStorageKey(
 }
 
 function deserializeLogTypeFilter(value: unknown): unknown[] {
-  const values = Array.isArray(value) ? value : value ? [value] : []
+  let values: unknown[]
+  if (Array.isArray(value)) {
+    values = value
+  } else if (value) {
+    values = [value]
+  } else {
+    values = []
+  }
   return values.filter((item) => String(item) !== LOG_TYPE_ALL_VALUE)
 }
 
 interface UsageLogsTableProps {
   logCategory: LogCategory
+  viewMode?: 'list' | 'stats'
 }
 
-export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
+export function UsageLogsTable({
+  logCategory,
+  viewMode = 'list',
+}: UsageLogsTableProps) {
   const { t } = useTranslation()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const isMobile = useMediaQuery('(max-width: 640px)')
@@ -87,7 +99,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     logCategory === 'common' && isAdmin
       ? String(searchParams.sessionId ?? '').trim()
       : ''
-  const sessionMode = sessionId !== ''
+  const sessionMode = viewMode === 'list' && sessionId !== ''
   const sessionUsername = String(searchParams.username ?? '')
   const sessionStartSec = searchParams.startTime
     ? Math.floor(Number(searchParams.startTime) / 1000)
@@ -145,7 +157,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       searchParams,
       t,
     ],
-    enabled: !sessionMode,
+    enabled: !sessionMode && viewMode === 'list',
     queryFn: async () => {
       const result = await fetchLogsByCategory({
         logCategory,
@@ -181,7 +193,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       pagination.pageIndex,
       pagination.pageSize,
     ],
-    enabled: sessionMode,
+    enabled: sessionMode && viewMode === 'list',
     queryFn: async () => {
       const res = await getSessionLogSearch({
         session_id: sessionId,
@@ -273,6 +285,21 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const isCommon = logCategory === 'common'
+  const commonToolbar = (
+    <CommonLogsFilterBar
+      table={table}
+      showStats={viewMode !== 'stats'}
+    />
+  )
+
+  if (isCommon && viewMode === 'stats') {
+    return (
+      <div className='flex h-full min-h-0 flex-col gap-4'>
+        {commonToolbar}
+        <UsageLogsStatistics />
+      </div>
+    )
+  }
 
   return (
     <DataTablePage
@@ -297,9 +324,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
         />
       }
       toolbar={
-        isCommon ? (
-          <CommonLogsFilterBar table={table} />
-        ) : (
+        isCommon ? commonToolbar : (
           <TaskLogsFilterBar table={table} logCategory={logCategory} />
         )
       }
