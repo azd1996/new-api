@@ -24,6 +24,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import type { ComboboxInputOption } from '@/components/ui/combobox-input'
@@ -82,6 +83,20 @@ type CommonLogDraft = {
   sourceKey: string
   filters: CommonLogFilters
   logType: LogTypeValue
+}
+
+function getFilterValues(value: string | undefined): string[] {
+  return value
+    ? value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : []
+}
+
+function serializeFilterValues(values: string[]): string | undefined {
+  const normalized = values.map((value) => value.trim()).filter(Boolean)
+  return normalized.length > 0 ? normalized.join(',') : undefined
 }
 
 function isLogTypeValue(value: string): value is LogTypeValue {
@@ -215,7 +230,7 @@ export function CommonLogsFilterBar<TData>(
     enabled: canManageScope,
     staleTime: 5 * 60 * 1000,
   })
-  const modelOptions = useMemo<ComboboxInputOption[]>(
+  const modelOptions = useMemo(
     () =>
       (modelCandidatesQuery.data?.data ?? []).map((model) => ({
         value: model,
@@ -223,7 +238,7 @@ export function CommonLogsFilterBar<TData>(
       })),
     [modelCandidatesQuery.data]
   )
-  const groupOptions = useMemo<ComboboxInputOption[]>(
+  const groupOptions = useMemo(
     () =>
       (groupCandidatesQuery.data?.data ?? []).map((group) => ({
         value: group,
@@ -500,7 +515,6 @@ export function CommonLogsFilterBar<TData>(
     isAdmin ? filters.downstreamRequestId : undefined,
     isAdmin ? filters.downstreamTraceTag : undefined,
   ].filter(Boolean).length
-  const sensitiveType = sensitiveVisible ? 'text' : 'password'
   const logTypeItems = useMemo(
     () =>
       LOG_TYPE_FILTERS.map((type) => ({
@@ -553,15 +567,15 @@ export function CommonLogsFilterBar<TData>(
   const modelFilter = (
     <LogsFilterField>
       <div className='flex min-w-0 gap-1'>
-        <Combobox
+        <MultiSelect
           options={modelOptions}
-          value={filters.model || ''}
-          onValueChange={(value) => handleChange('model', value || undefined)}
+          selected={getFilterValues(filters.model)}
+          onChange={(values) =>
+            handleChange('model', serializeFilterValues(values))
+          }
           placeholder={t('Model Name')}
-          searchPlaceholder={t('Model Name')}
           emptyText={t('No option found.')}
-          allowCustomValue
-          clearable
+          allowCreate
           className='h-8 min-w-0 flex-1 text-sm leading-5'
         />
         <LogFilterModeButton
@@ -575,15 +589,15 @@ export function CommonLogsFilterBar<TData>(
   const groupFilter = (
     <LogsFilterField>
       <div className='flex min-w-0 gap-1'>
-        <Combobox
+        <MultiSelect
           options={groupOptions}
-          value={filters.group || ''}
-          onValueChange={(value) => handleChange('group', value || undefined)}
+          selected={getFilterValues(filters.group)}
+          onChange={(values) =>
+            handleChange('group', serializeFilterValues(values))
+          }
           placeholder={t('Group')}
-          searchPlaceholder={t('Group')}
           emptyText={t('No option found.')}
-          allowCustomValue
-          clearable
+          allowCreate
           className='h-8 min-w-0 flex-1 text-sm leading-5'
         />
         <LogFilterModeButton
@@ -640,12 +654,20 @@ export function CommonLogsFilterBar<TData>(
     <>
       <LogsFilterField>
         <div className='flex min-w-0 gap-1'>
-          <LogsFilterInput
+          <MultiSelect
+            options={[]}
+            selected={getFilterValues(filters.token)}
+            onChange={(values) =>
+              handleChange('token', serializeFilterValues(values))
+            }
             placeholder={t('Token Name')}
-            type={sensitiveType}
-            value={filters.token || ''}
-            onChange={(e) => handleChange('token', e.target.value)}
-            onKeyDown={handleKeyDown}
+            allowCreate
+            renderSelectedSummary={
+              sensitiveVisible
+                ? undefined
+                : (values) => '•'.repeat(Math.min(values.length * 4, 12))
+            }
+            className='h-8 min-w-0 flex-1 text-sm leading-5'
           />
           <LogFilterModeButton
             fieldLabel={t('Token Name')}
@@ -657,12 +679,20 @@ export function CommonLogsFilterBar<TData>(
       {isAdmin && (
         <LogsFilterField>
           <div className='flex min-w-0 gap-1'>
-            <LogsFilterInput
+            <MultiSelect
+              options={[]}
+              selected={getFilterValues(filters.username)}
+              onChange={(values) =>
+                handleChange('username', serializeFilterValues(values))
+              }
               placeholder={t('Username')}
-              type={sensitiveType}
-              value={filters.username || ''}
-              onChange={(e) => handleChange('username', e.target.value)}
-              onKeyDown={handleKeyDown}
+              allowCreate
+              renderSelectedSummary={
+                sensitiveVisible
+                  ? undefined
+                  : (values) => '•'.repeat(Math.min(values.length * 4, 12))
+              }
+              className='h-8 min-w-0 flex-1 text-sm leading-5'
             />
             <LogFilterModeButton
               fieldLabel={t('Username')}
@@ -675,11 +705,15 @@ export function CommonLogsFilterBar<TData>(
       {isAdmin && (
         <LogsFilterField>
           <div className='flex min-w-0 gap-1'>
-            <LogsFilterInput
+            <MultiSelect
+              options={[]}
+              selected={getFilterValues(filters.channel)}
+              onChange={(values) =>
+                handleChange('channel', serializeFilterValues(values))
+              }
               placeholder={t('Channel ID')}
-              value={filters.channel || ''}
-              onChange={(e) => handleChange('channel', e.target.value)}
-              onKeyDown={handleKeyDown}
+              allowCreate
+              className='h-8 min-w-0 flex-1 text-sm leading-5'
             />
             <LogFilterModeButton
               fieldLabel={t('Channel ID')}
@@ -825,11 +859,11 @@ export function CommonLogsFilterBar<TData>(
       stats={statsBar}
       actionStart={sensitiveToggle}
       primaryFilters={
-        <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[repeat(24,minmax(0,1fr))]'>
-          <div className='min-w-0 sm:col-span-7'>{dateRangeFilter}</div>
-          <div className='min-w-0 sm:col-span-6'>{modelFilter}</div>
-          <div className='min-w-0 sm:col-span-9'>{groupFilter}</div>
-          <div className='min-w-0 sm:col-span-2'>{typeFilter}</div>
+        <div className='flex min-w-0 flex-1 flex-col gap-2 sm:flex-row'>
+          <div className='min-w-0 flex-[7]'>{dateRangeFilter}</div>
+          <div className='min-w-0 flex-[6]'>{modelFilter}</div>
+          <div className='min-w-0 flex-[8]'>{groupFilter}</div>
+          <div className='min-w-0 flex-[3]'>{typeFilter}</div>
         </div>
       }
       advancedFilters={advancedFilters}
