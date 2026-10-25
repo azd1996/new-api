@@ -9,13 +9,92 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCustomerDiscountProvenancePropagation(t *testing.T) {
+	t.Setenv(common.TraceTagKeyEnv, "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+	require.NoError(t, model.DB.AutoMigrate(&model.Customer{}))
+	customer := &model.Customer{
+		CustomerId:        "api-key-004",
+		DefaultDiscount:   0.25,
+		PrefixDiscountMap: map[string]float64{"gpt": 0.8, "GPT-4": 1},
+	}
+	require.NoError(t, customer.Insert())
+	t.Cleanup(func() { require.NoError(t, model.DeleteCustomerById(customer.Id)) })
+
+	for _, tc := range []struct {
+		name     string
+		model    string
+		tag      string
+		discount float64
+		fallback bool
+		prefix   string
+		hasID    bool
+	}{
+		{"explicit one", "gpt-4o", "valid", 1, false, "GPT-4", true},
+		{"configured discount", "gpt-3.5", "valid", 0.8, false, "gpt", true},
+		{"no prefix", "claude-sonnet", "valid", 1, true, "", true},
+		{"no trace tag", "gpt-4o", "", 1, false, "", false},
+		{"invalid trace tag", "gpt-4o", "invalid", 1, false, "", false},
+		{"missing customer", "gpt-4o", "missing", 1, true, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.tag == "missing" {
+				require.NoError(t, model.DeleteCustomerById(customer.Id))
+			}
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest("POST", "/", nil)
+			if tc.tag != "" {
+				tag := tc.tag
+				if tag != "invalid" {
+					tag = "C7J42H35CV56G2VKWLMPH72GEKF24S72RCDZOG6KAXXIJ5Q5D2K7LNKIH3R7D5KGLDOMTOX3XGH7HBRLCWQMCZKGHY7EXQBCLVWUATI"
+				}
+				ctx.Request.Header.Set(common.TraceTagHeader, tag)
+			}
+			info := &relaycommon.RelayInfo{
+				OriginModelName: tc.model,
+				StartTime:       time.Now(),
+				PriceData: types.PriceData{
+					ModelRatio: 1, CompletionRatio: 1,
+					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+				},
+			}
+			summary := calculateTextQuotaSummary(ctx, info, &dto.Usage{PromptTokens: 100})
+			assert.Equal(t, tc.hasID, summary.HasCustomer)
+			assert.Equal(t, tc.discount, summary.CustomerDiscount)
+			assert.Equal(t, tc.fallback, summary.CustomerDiscountFallback)
+			assert.Equal(t, tc.prefix, summary.CustomerMatchedPrefix)
+
+			other := map[string]interface{}{}
+			summary.appendCustomerDiscountInfo(other)
+			encoded, err := common.Marshal(other)
+			require.NoError(t, err)
+			var logged map[string]interface{}
+			require.NoError(t, common.Unmarshal(encoded, &logged))
+			if !tc.hasID {
+				assert.Empty(t, logged)
+				return
+			}
+			assert.Equal(t, tc.discount, logged["customer_discount"])
+			assert.Equal(t, float64(summary.CustomerStatQuota), logged["customer_stat_quota"])
+			// A false flag must survive serialization for explicit prefix=1.
+			assert.Equal(t, tc.fallback, logged["customer_discount_fallback"])
+			if tc.prefix != "" {
+				assert.Equal(t, tc.prefix, logged["customer_discount_matched_prefix"])
+			} else {
+				assert.NotContains(t, logged, "customer_discount_matched_prefix")
+			}
+		})
+	}
+}
 
 func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	gin.SetMode(gin.TestMode)

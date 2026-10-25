@@ -432,6 +432,7 @@ func migrateClickHouseLogDB() error {
 	// ADD COLUMN IF NOT EXISTS is idempotent on ClickHouse.
 	addColumns := []string{
 		"error_signature_hash String DEFAULT ''",
+		"retry_triggered UInt8 DEFAULT 0",
 		"raw_quota Int32 DEFAULT 0",
 		"stat_quota Int32 DEFAULT 0",
 		"stat_group_ratio Float64 DEFAULT 0",
@@ -492,6 +493,7 @@ CREATE TABLE IF NOT EXISTS logs (
 	request_id String DEFAULT '',
 	upstream_request_id String DEFAULT '',
 	error_signature_hash String DEFAULT '',
+	retry_triggered UInt8 DEFAULT 0,
 	raw_quota Int32 DEFAULT 0,
 	stat_quota Int32 DEFAULT 0,
 	stat_group_ratio Float64 DEFAULT 0,

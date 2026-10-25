@@ -91,9 +91,23 @@ func CustomerConfigured(customerID string) bool {
 // discount is intentionally ignored. Matching is case-insensitive. The result
 // is always positive/finite.
 func CustomerModelDiscount(customerID, modelName string) float64 {
+	return ResolveCustomerModelDiscount(customerID, modelName).Discount
+}
+
+// CustomerDiscountResolution records whether a configured series matched,
+// independently of its multiplier (a configured discount of 1 is still a match).
+type CustomerDiscountResolution struct {
+	Discount      float64
+	Fallback      bool
+	MatchedPrefix string
+}
+
+// ResolveCustomerModelDiscount resolves the reporting discount and its provenance.
+// Missing customers and unmatched series fall back to 1, ignoring legacy defaults.
+func ResolveCustomerModelDiscount(customerID, modelName string) CustomerDiscountResolution {
 	c, ok := getCachedCustomer(customerID)
 	if !ok {
-		return 1
+		return CustomerDiscountResolution{Discount: 1, Fallback: true}
 	}
 	lowerModel := strings.ToLower(modelName)
 	best := ""
@@ -103,7 +117,10 @@ func CustomerModelDiscount(customerID, modelName string) float64 {
 		}
 	}
 	if best != "" {
-		return normalizeDiscount(c.PrefixDiscountMap[best])
+		return CustomerDiscountResolution{
+			Discount:      normalizeDiscount(c.PrefixDiscountMap[best]),
+			MatchedPrefix: best,
+		}
 	}
-	return 1
+	return CustomerDiscountResolution{Discount: 1, Fallback: true}
 }

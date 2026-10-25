@@ -235,11 +235,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayFormat)
-
 		// Error-triggered fallback (e.g. thinking-family 400): rewrite the request
 		// once and retry it on the same channel, bypassing the normal retry gate.
-		if maybeApplyRetryRuleFallback(c, relayInfo, channel, newAPIError, relayFormat, retryParam) {
+		retryTriggered, retryDetail := maybeApplyRetryRuleFallback(c, relayInfo, channel, newAPIError, relayFormat, retryParam)
+		// Pass this attempt's decision directly, without retaining request state.
+		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayFormat, retryDetail)
+		if retryTriggered {
 			continue
 		}
 
@@ -368,7 +369,7 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayFormat types.RelayFormat) {
+func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayFormat types.RelayFormat, retryDetails ...map[string]interface{}) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
@@ -399,6 +400,11 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		adminInfo := make(map[string]interface{})
 		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
 		adminInfo["node_name"] = common.NodeName
+		other["retry_triggered"] = false
+		if len(retryDetails) > 0 && retryDetails[0] != nil {
+			other["retry_triggered"] = true
+			adminInfo["retry_override"] = retryDetails[0]
+		}
 		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
 		if isMultiKey {
 			adminInfo["is_multi_key"] = true

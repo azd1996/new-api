@@ -107,6 +107,20 @@ function buildDetailSegments(
   isAdmin: boolean
 ): DetailSegment[] {
   const segments = buildTypeDetailSegments(log, other, t)
+  if (isAdmin && log.type === 5 && other?.admin_info?.retry_override) {
+    const retryOverride = other.admin_info.retry_override
+    segments.push({ text: t('Retry override matched'), danger: true })
+    if (retryOverride.rule_ids?.length) {
+      segments.push({
+        text: `${t('Rule')} #${retryOverride.rule_ids.join(', #')}`,
+      })
+    }
+    if (retryOverride.rule_descriptions?.some(Boolean)) {
+      segments.push({
+        text: retryOverride.rule_descriptions.filter(Boolean).join('; '),
+      })
+    }
+  }
   // Quota saturation is a rare, admin-only anomaly marker; surface it first
   // and in danger styling so it stands out on the related billing log. The
   // backend already strips admin_info for non-admins; gate on isAdmin too as

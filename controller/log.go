@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// parseAdminRetryTriggered accepts canonical boolean strings only.
+func parseAdminRetryTriggered(c *gin.Context, filters *model.LogFilterOptions) error {
+	switch c.Query("retry_triggered") {
+	case "":
+		return nil
+	case "true", "false":
+		value := c.Query("retry_triggered") == "true"
+		filters.RetryTriggered = &value
+		return nil
+	default:
+		return errors.New("retry_triggered must be true or false")
+	}
+}
 
 func parseLogFilters(c *gin.Context) model.LogFilterOptions {
 	parseValues := func(key string) []string {
@@ -52,6 +67,10 @@ func GetAllLogs(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 	filters := parseLogFilters(c)
+	if err := parseAdminRetryTriggered(c, &filters); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
 	statusCode, _ := strconv.Atoi(c.Query("status_code"))
@@ -199,6 +218,10 @@ func GetLogsStat(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 	filters := parseLogFilters(c)
+	if err := parseAdminRetryTriggered(c, &filters); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, filters)
 	if err != nil {
 		common.ApiError(c, err)

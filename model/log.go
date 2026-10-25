@@ -42,11 +42,13 @@ type LogChannelFilter struct {
 }
 
 type LogFilterOptions struct {
-	ModelName LogFieldFilter
-	Username  LogFieldFilter
-	TokenName LogFieldFilter
-	Channel   LogChannelFilter
-	Group     LogFieldFilter
+	// RetryTriggered is only applied by admin log queries.
+	RetryTriggered *bool
+	ModelName      LogFieldFilter
+	Username       LogFieldFilter
+	TokenName      LogFieldFilter
+	Channel        LogChannelFilter
+	Group          LogFieldFilter
 }
 
 func applyLogFieldFilter(tx *gorm.DB, column string, filter LogFieldFilter, allowLike bool) (*gorm.DB, error) {
@@ -295,6 +297,8 @@ type Log struct {
 	// the hash can later back a column-based filter/group-by; reads still go
 	// through Other for now, so old rows that only have it in Other keep working.
 	ErrorSignatureHash string `json:"error_signature_hash,omitempty" gorm:"type:varchar(64);default:''"`
+	// Retain the Other copy for shipping without changing the remote schema.
+	RetryTriggered bool `json:"retry_triggered" gorm:"not null;default:false;index"`
 	// RawQuota/StatQuota/StatGroupRatio/CustomerStatQuota/CustomerDiscount
 	// duplicate the reporting-only raw/discounted amounts from the Other JSON
 	// into real columns (consume logs only), written alongside the Other copy.
@@ -637,6 +641,11 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	other = attachDownstreamTraceTag(c, other)
+	if other == nil {
+		other = make(map[string]interface{})
+	}
+	retryTriggered, _ := other["retry_triggered"].(bool)
+	other["retry_triggered"] = retryTriggered
 	otherStr := common.MapToJsonStr(other)
 	// Dual-write the error signature hash into its own column while keeping the
 	// Other JSON copy (nil map reads are safe and yield "").
@@ -673,6 +682,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		RequestId:          requestId,
 		UpstreamRequestId:  upstreamRequestId,
 		ErrorSignatureHash: errorSignatureHash,
+		RetryTriggered:     retryTriggered,
 		Other:              otherStr,
 	}
 	err := createLog(log)
@@ -916,6 +926,9 @@ const logSearchCountLimit = 10000
 // the log type. Keeping it in one place ensures the stats aggregation honors
 // exactly the same filters as the visible list.
 func applyAdminLogFilters(tx *gorm.DB, logType int, startTimestamp int64, endTimestamp int64, filters LogFilterOptions, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (*gorm.DB, error) {
+	if filters.RetryTriggered != nil {
+		tx = tx.Where("logs.type = ? AND logs.retry_triggered = ?", LogTypeError, *filters.RetryTriggered)
+	}
 	var err error
 	if tx, err = applyLogFilterOptions(tx, filters, "logs."); err != nil {
 		return nil, err
@@ -1056,6 +1069,10 @@ type Stat struct {
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, filters LogFilterOptions) (stat Stat, err error) {
+	// Retry filtering selects error attempts; this aggregate counts consumption.
+	if filters.RetryTriggered != nil {
+		return stat, nil
+	}
 	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota, count(*) request_count")
 
 	// 为rpm和tpm创建单独的查询

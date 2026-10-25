@@ -49,6 +49,7 @@ export type LogFilterOperator = 'include' | 'exclude'
  * Common logs specific filters
  */
 export interface CommonLogFilters extends CommonFilters {
+  retryTriggered?: 'true' | 'false'
   model?: string
   modelOp?: LogFilterOperator
   token?: string
@@ -136,6 +137,7 @@ export type UsageBillingPath =
   (typeof USAGE_BILLING_PATH)[keyof typeof USAGE_BILLING_PATH]
 
 export interface LogOtherData {
+  retry_triggered?: boolean
   admin_info?: {
     is_multi_key?: boolean
     multi_key_index?: number
@@ -255,6 +257,8 @@ export interface LogOtherData {
   // customer_discount is the resolved (customer, model) multiplier behind it.
   customer_stat_quota?: number
   customer_discount?: number
+  // Explicit resolution provenance; absent on historical logs.
+  customer_discount_fallback?: boolean
   cache_ratio?: number
   cache_creation_ratio?: number
   cache_creation_ratio_5m?: number
@@ -400,6 +404,7 @@ export interface TaskLog {
 // ============================================================================
 
 export interface GetLogsParams {
+  retry_triggered?: 'true' | 'false'
   p?: number
   page_size?: number
   type?: number
@@ -465,6 +470,7 @@ export interface SessionLogSearchResult {
 }
 
 export interface GetLogStatsParams {
+  retry_triggered?: 'true' | 'false'
   type?: number
   username?: string
   username_op?: LogFilterOperator

@@ -62,6 +62,8 @@ type textQuotaSummary struct {
 	// was decoded, so the amount is logged only for identified downstream
 	// customers. Like RawQuota/StatQuota these are reporting-only (never billed).
 	CustomerDiscount         float64
+	CustomerDiscountFallback bool
+	CustomerMatchedPrefix    string
 	CustomerStatQuota        int
 	HasCustomer              bool
 	IsClaudeUsageSemantic    bool
@@ -75,6 +77,20 @@ type textQuotaSummary struct {
 	AudioInputPrice          float64
 	ImageGenerationCallPrice float64
 	ToolCallSurchargeQuota   decimal.Decimal
+}
+
+// appendCustomerDiscountInfo preserves resolution provenance in new consume logs.
+// Historical logs without the fallback key have unknown provenance.
+func (summary textQuotaSummary) appendCustomerDiscountInfo(other map[string]interface{}) {
+	if !summary.HasCustomer {
+		return
+	}
+	other["customer_stat_quota"] = summary.CustomerStatQuota
+	other["customer_discount"] = summary.CustomerDiscount
+	other["customer_discount_fallback"] = summary.CustomerDiscountFallback
+	if summary.CustomerMatchedPrefix != "" {
+		other["customer_discount_matched_prefix"] = summary.CustomerMatchedPrefix
+	}
 }
 
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
@@ -249,13 +265,16 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	}
 
 	// CustomerDiscount is the per-(customer, model) statistics discount resolved
-	// from the decoded trace-tag customer id (per-model override, else customer
-	// default, else 1). Reporting-only; recorded only when a customer id was
+	// from the decoded trace-tag customer id (longest series prefix, else 1).
+	// Reporting-only; recorded only when a customer id was
 	// actually decoded from the inbound trace-tag header.
 	summary.CustomerDiscount = 1
 	if _, _, customerID, decoded := common.TraceTagFromContext(ctx); decoded && customerID != "" {
 		summary.HasCustomer = true
-		summary.CustomerDiscount = model.CustomerModelDiscount(customerID, summary.ModelName)
+		resolution := model.ResolveCustomerModelDiscount(customerID, summary.ModelName)
+		summary.CustomerDiscount = resolution.Discount
+		summary.CustomerDiscountFallback = resolution.Fallback
+		summary.CustomerMatchedPrefix = resolution.MatchedPrefix
 	}
 
 	if usage == nil {
@@ -488,10 +507,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	// discount. Written only for requests whose trace-tag decoded a customer id.
 	// customer_discount is the resolved (customer, model) multiplier so the log
 	// detail can show it alongside the amount.
-	if summary.HasCustomer {
-		other["customer_stat_quota"] = summary.CustomerStatQuota
-		other["customer_discount"] = summary.CustomerDiscount
-	}
+	summary.appendCustomerDiscountInfo(other)
 	appendUsageBillingPathForLog(other, common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), originUsage)
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason

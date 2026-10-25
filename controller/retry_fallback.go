@@ -29,11 +29,11 @@ import (
 //   - fallback_next_channel: neither pin nor reset, so the loop advances to the
 //     next channel; multi-hop (not one-shot), bounded by RetryTimes and channel
 //     availability.
-func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel, apiErr *types.NewAPIError, relayFormat types.RelayFormat, retryParam *service.RetryParam) bool {
+func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel, apiErr *types.NewAPIError, relayFormat types.RelayFormat, retryParam *service.RetryParam) (bool, map[string]interface{}) {
 	if info == nil || channel == nil || apiErr == nil || info.RetryFallbackDone {
 		logger.LogDebug(c, fmt.Sprintf("retry-override: hook skipped by guard (info=%t channel=%t apiErr=%t fallbackDone=%t)",
 			info != nil, channel != nil, apiErr != nil, info != nil && info.RetryFallbackDone))
-		return false
+		return false, nil
 	}
 	chSetting := channel.GetSetting()
 	ops := chSetting.RetryOverride
@@ -55,7 +55,7 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 	}
 	logger.LogDebug(c, fmt.Sprintf("retry-override: hook reached on channel #%d, configured operations=%d", channel.Id, len(ops)))
 	if len(ops) == 0 {
-		return false
+		return false, nil
 	}
 	reqCtx := relaycommon.BuildParamOverrideContext(info)
 	if reqCtx == nil {
@@ -71,7 +71,7 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 	rewrites, matched, action, ruleIDs := retryrule.CollectRewrites(ops, reqCtx, respCtx)
 	if !matched {
 		logger.LogDebug(c, fmt.Sprintf("retry-override: no operation matched on channel #%d, not retrying", channel.Id))
-		return false
+		return false, nil
 	}
 	if data, err := common.Marshal(rewrites); err == nil {
 		logger.LogDebug(c, fmt.Sprintf("retry-override: matched (action=%s), staging %d rewrite(s) on channel #%d: %s",
@@ -81,7 +81,7 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 			action, len(rewrites), channel.Id))
 	}
 	info.PendingRetryRewrite = rewrites
-	recordRetryOverrideAudit(c, info, channel.Id, apiErr, relayFormat, action, ruleIDs, ruleDescriptions(ops, ruleIDs), rewrites)
+	detail := recordRetryOverrideAudit(c, info, channel.Id, apiErr, relayFormat, action, ruleIDs, ruleDescriptions(ops, ruleIDs), rewrites)
 	if action == retryrule.ActionFallbackNextChannel {
 		// Fallback is multi-hop: do NOT set the one-shot RetryFallbackDone, and do
 		// NOT pin or reset the budget. The normal loop's IncreaseRetry advances the
@@ -89,14 +89,14 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 		// each channel until one succeeds or channels/RetryTimes are exhausted.
 		// Returning true still bypasses the "not retryable" gate (incl. 200-body).
 		logger.LogDebug(c, fmt.Sprintf("retry-override: handing off channel #%d to next-channel fallback", channel.Id))
-		return true
+		return true, detail
 	}
 	// Same-channel retry is one-shot: pin the channel and grant a retry that does
 	// not consume budget. RetryFallbackDone prevents looping the same channel.
 	info.RetryFallbackDone = true
 	service.SetPinnedChannel(c, channel.Id)
 	retryParam.ResetRetryNextTry()
-	return true
+	return true, detail
 }
 
 // overrideAuditParams builds the request-identity for an override-audit log from
@@ -125,7 +125,7 @@ func overrideAuditParams(c *gin.Context, info *relaycommon.RelayInfo, channelId 
 // ruleIDs are the indices (into the channel's retry_override array) of every
 // matched rule; descriptions are the corresponding rule descriptions (aligned by
 // position, empty when a rule has none).
-func recordRetryOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, channelId int, apiErr *types.NewAPIError, relayFormat types.RelayFormat, action string, ruleIDs []int, descriptions []string, rewrites []map[string]any) {
+func recordRetryOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, channelId int, apiErr *types.NewAPIError, relayFormat types.RelayFormat, action string, ruleIDs []int, descriptions []string, rewrites []map[string]any) map[string]interface{} {
 	detail := map[string]interface{}{
 		"action":         action,
 		"rule_ids":       ruleIDs,
@@ -143,6 +143,7 @@ func recordRetryOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, chann
 		detail["rewrites"] = summaries
 	}
 	model.RecordRetryOverrideLog(overrideAuditParams(c, info, channelId), "retry override matched", detail)
+	return detail
 }
 
 // ruleDescriptions maps matched rule indices to their configured descriptions,

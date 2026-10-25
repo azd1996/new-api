@@ -62,6 +62,7 @@ const usageLogsSearchSchema = z.object({
   requestId: z.string().optional().catch(''),
   upstreamRequestId: z.string().optional().catch(''),
   statusCode: z.string().optional().catch(''),
+  retryTriggered: z.enum(['true', 'false']).optional().catch(undefined),
   errorKeyword: z.string().optional().catch(''),
   // Exact-match filter on the normalized error signature hash. Used by the
   // detailed error stats page drill-down to jump straight to matching logs.

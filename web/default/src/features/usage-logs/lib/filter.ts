@@ -55,6 +55,9 @@ export function buildSearchParams(
       const commonFilters = filters as CommonLogFilters
       return {
         ...baseParams,
+        ...(commonFilters.retryTriggered && {
+          retryTriggered: commonFilters.retryTriggered,
+        }),
         ...(commonFilters.model && { model: commonFilters.model }),
         ...(commonFilters.modelOp &&
         commonFilters.modelOp !== 'include' &&

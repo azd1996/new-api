@@ -153,6 +153,7 @@ function buildSearchSourceKey(values: {
   requestId?: unknown
   upstreamRequestId?: unknown
   statusCode?: unknown
+  retryTriggered?: unknown
   errorKeyword?: unknown
   errorSignatureHash?: unknown
   sessionId?: unknown
@@ -178,6 +179,7 @@ function buildSearchSourceKey(values: {
     values.requestId,
     values.upstreamRequestId,
     values.statusCode,
+    values.retryTriggered,
     values.errorKeyword,
     values.errorSignatureHash,
     values.sessionId,
@@ -293,6 +295,7 @@ export function CommonLogsFilterBar<TData>(
       requestId: searchParams.requestId,
       upstreamRequestId: searchParams.upstreamRequestId,
       statusCode: searchParams.statusCode,
+      retryTriggered: isAdmin ? searchParams.retryTriggered : undefined,
       errorKeyword: searchParams.errorKeyword,
       errorSignatureHash: searchParams.errorSignatureHash,
       sessionId: searchParams.sessionId,
@@ -320,6 +323,7 @@ export function CommonLogsFilterBar<TData>(
       requestId: searchParams.requestId || undefined,
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
       statusCode: searchParams.statusCode || undefined,
+      retryTriggered: isAdmin ? searchParams.retryTriggered : undefined,
       errorKeyword: searchParams.errorKeyword || undefined,
       errorSignatureHash: searchParams.errorSignatureHash || undefined,
       errorSignature: searchParams.errorSignature || undefined,
@@ -335,6 +339,7 @@ export function CommonLogsFilterBar<TData>(
       logType: getLogTypeValue(searchParams.type),
     }
   }, [
+    isAdmin,
     searchParams.startTime,
     searchParams.endTime,
     searchParams.channel,
@@ -350,6 +355,7 @@ export function CommonLogsFilterBar<TData>(
     searchParams.requestId,
     searchParams.upstreamRequestId,
     searchParams.statusCode,
+    searchParams.retryTriggered,
     searchParams.errorKeyword,
     searchParams.errorSignatureHash,
     searchParams.errorSignature,
@@ -487,6 +493,7 @@ export function CommonLogsFilterBar<TData>(
     !!filters.requestId ||
     !!filters.upstreamRequestId ||
     !!filters.statusCode ||
+    !!filters.retryTriggered ||
     !!filters.errorKeyword ||
     !!filters.errorSignatureHash ||
     !!filters.sessionId ||
@@ -507,6 +514,7 @@ export function CommonLogsFilterBar<TData>(
     filters.requestId,
     filters.upstreamRequestId,
     filters.statusCode,
+    isAdmin ? filters.retryTriggered : undefined,
     isErrorLogType ? filters.errorKeyword : undefined,
     isAdmin ? filters.errorSignatureHash : undefined,
     isAdmin ? filters.sessionId : undefined,
@@ -525,6 +533,15 @@ export function CommonLogsFilterBar<TData>(
   )
   const logTypeLabel =
     logTypeItems.find((type) => type.value === logType)?.label ?? t('All Types')
+  const retryTriggeredItems = [
+    { value: 'all', label: t('All') },
+    { value: 'true', label: t('Yes') },
+    { value: 'false', label: t('No') },
+  ]
+  const retryTriggeredLabel =
+    retryTriggeredItems.find(
+      (item) => item.value === (filters.retryTriggered ?? 'all')
+    )?.label ?? t('All')
 
   const statsBar = (
     <div className='flex flex-wrap items-center gap-2'>
@@ -652,6 +669,35 @@ export function CommonLogsFilterBar<TData>(
   )
   const advancedFilters = (
     <>
+      {isAdmin && (
+        <LogsFilterField>
+          <Select
+            items={retryTriggeredItems}
+            value={filters.retryTriggered ?? 'all'}
+            onValueChange={(value) =>
+              handleChange(
+                'retryTriggered',
+                value === 'true' || value === 'false' ? value : undefined
+              )
+            }
+          >
+            <SelectTrigger aria-label={t('Retry triggered')}>
+              <SelectValue>
+                {t('Retry triggered')}: {retryTriggeredLabel}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {retryTriggeredItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </LogsFilterField>
+      )}
       <LogsFilterField>
         <div className='flex min-w-0 gap-1'>
           <MultiSelect

@@ -35,7 +35,6 @@ import type { PerfModelSummary } from '@/features/performance-metrics/types'
 import { cn } from '@/lib/utils'
 
 const PERFORMANCE_WINDOW_HOURS = 24
-const TOP_MODEL_LIMIT = 6
 
 type WeightedMetric = 'avg_latency_ms' | 'avg_tps' | 'success_rate'
 
@@ -97,7 +96,6 @@ export function PerformanceOverview() {
     [metricsQuery.data]
   )
   const summary = useMemo(() => buildPerformanceSummary(models), [models])
-  const topModels = useMemo(() => models.slice(0, TOP_MODEL_LIMIT), [models])
   const loading = metricsQuery.isLoading
   const hasData = models.length > 0
 
@@ -162,10 +160,10 @@ export function PerformanceOverview() {
         {/* Separator */}
         <div className='bg-border hidden h-4 w-px lg:block' />
 
-        {/* Top models inline badges */}
+        {/* All models with traffic in the last 24 hours */}
         {!loading && hasData && (
           <div className='flex flex-wrap items-center gap-1.5'>
-            {topModels.map((model) => (
+            {models.map((model) => (
               <ModelBadge key={model.model_name} model={model} />
             ))}
           </div>
@@ -207,7 +205,10 @@ function ModelBadge(props: { model: PerfModelSummary }) {
 
   return (
     <span className='bg-muted/50 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1'>
-      <span className='max-w-[10rem] truncate font-mono text-[11px]'>
+      <span
+        className='max-w-[10rem] truncate font-mono text-[11px]'
+        title={model.model_name}
+      >
         {model.model_name}
       </span>
       <span

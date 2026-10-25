@@ -84,3 +84,60 @@ func TestLogLikeConditionClickHouseCompatibility(t *testing.T) {
 	assert.Equal(t, "model_name LIKE ? ESCAPE '!'", condition)
 	assert.Equal(t, `gpt\!_%`, pattern)
 }
+
+func TestRetryTriggeredMigrationAndAdminFilter(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	// A populated table from before the retry marker must migrate without
+	// dropping rows; historical failures have no recorded override match.
+	require.NoError(t, db.Exec("CREATE TABLE logs (id integer PRIMARY KEY, type integer, content text, other text)").Error)
+	require.NoError(t, db.Exec("INSERT INTO logs (id, type, content, other) VALUES (1, 5, 'legacy', '{}')").Error)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	assert.True(t, db.Migrator().HasIndex(&Log{}, "idx_logs_retry_triggered"))
+	var legacy Log
+	require.NoError(t, db.First(&legacy, 1).Error)
+	assert.Equal(t, "legacy", legacy.Content)
+	assert.False(t, legacy.RetryTriggered)
+	require.NoError(t, db.Create([]Log{
+		{Id: 2, Type: LogTypeError, RetryTriggered: true, RequestId: "matched"},
+		{Id: 3, Type: LogTypeError, RequestId: "ordinary"},
+		{Id: 4, Type: LogTypeRetryOverride},
+		{Id: 5, Type: LogTypeConsume},
+	}).Error)
+	oldDB, oldGroup := LOG_DB, logGroupCol
+	oldType := common.LogDatabaseType()
+	LOG_DB, logGroupCol = db, "`group`"
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+	t.Cleanup(func() {
+		LOG_DB, logGroupCol = oldDB, oldGroup
+		common.SetLogDatabaseType(oldType)
+	})
+	yes, no := true, false
+	for _, tc := range []struct {
+		name    string
+		value   *bool
+		logType int
+		wantIDs []int
+	}{
+		{"all", nil, 0, []int{5, 4, 3, 2, 1}},
+		{"matched", &yes, 0, []int{2}},
+		{"unmatched includes legacy", &no, 0, []int{3, 1}},
+		{"explicit error type", &yes, LogTypeError, []int{2}},
+		{"other type cannot match", &no, LogTypeRetryOverride, []int{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs, total, err := GetAllLogs(tc.logType, 0, 0, LogFilterOptions{RetryTriggered: tc.value}, 0, 10, "", "", 0, "", "", "", "", "", "")
+			require.NoError(t, err)
+			assert.Equal(t, int64(len(tc.wantIDs)), total)
+			ids := make([]int, 0, len(logs))
+			for _, log := range logs {
+				ids = append(ids, log.Id)
+			}
+			assert.Equal(t, tc.wantIDs, ids)
+		})
+	}
+}

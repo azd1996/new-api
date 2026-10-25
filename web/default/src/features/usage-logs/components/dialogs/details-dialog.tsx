@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -31,7 +32,6 @@ import {
   Info,
   LogIn,
 } from 'lucide-react'
-import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
@@ -179,7 +179,9 @@ function getUsageBillingPathLabel(
   }
 }
 
-function isUsageBillingPathLocal(adminInfo: LogOtherData['admin_info']): boolean {
+function isUsageBillingPathLocal(
+  adminInfo: LogOtherData['admin_info']
+): boolean {
   if (adminInfo?.usage_billing_path) {
     return adminInfo.usage_billing_path === USAGE_BILLING_PATH.LOCAL
   }
@@ -393,7 +395,10 @@ function BillingBreakdown(props: {
       label: hasCustomerDiscount
         ? `${t('Customer Discounted Amount')} (x${other.customer_discount})`
         : t('Customer Discounted Amount'),
-      value: formatLogQuota(other.customer_stat_quota),
+      value:
+        other.customer_discount_fallback === true
+          ? `${formatLogQuota(other.customer_stat_quota)} (${t('No matching series discount; fallback to 1')})`
+          : formatLogQuota(other.customer_stat_quota),
     })
     // Profit = what the customer is billed minus our channel-discounted cost.
     if (typeof other.stat_quota === 'number') {
@@ -623,8 +628,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
     useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
   // Which cluster node handled this request (admin-only). Rendered for
   // consume/error logs; topup logs show it in their own audit section.
-  const nodeName =
-    props.isAdmin && !isTopup ? adminInfo?.node_name : undefined
+  const nodeName = props.isAdmin && !isTopup ? adminInfo?.node_name : undefined
   // Proxy actually used (admin-only). Show "alias (url)" or just the url.
   const usedProxy = props.isAdmin && !isTopup ? adminInfo?.proxy : undefined
   let usedProxyLabel: string | undefined
@@ -635,7 +639,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
   }
   // Override-audit detail (admin-only): which rule (by index) fired and how.
   const retryOverride =
-    props.isAdmin && props.log.type === 8
+    props.isAdmin && (props.log.type === 8 || props.log.type === 5)
       ? other?.admin_info?.retry_override
       : undefined
   let reasoningEffortVariant: StatusBadgeProps['variant'] = 'green'
@@ -918,7 +922,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
-        {/* Retry-override audit (admin only, type=8) */}
+        {props.isAdmin &&
+          props.log.type === 5 &&
+          typeof other?.retry_triggered === 'boolean' && (
+            <DetailSection label={t('Retry triggered')}>
+              <DetailRow
+                label={t('Retry triggered')}
+                value={other.retry_triggered ? t('Yes') : t('No')}
+              />
+            </DetailSection>
+          )}
+
+        {/* Retry-override details for audits and the triggering error */}
         {retryOverride && (
           <DetailSection label={t('Retry Override')}>
             {retryOverride.rule_ids &&
@@ -939,7 +954,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 />
               ))}
             {retryOverride.action && (
-              <DetailRow label={t('Action')} value={retryOverride.action} mono />
+              <DetailRow
+                label={t('Action')}
+                value={retryOverride.action}
+                mono
+              />
             )}
             {retryOverride.status_code != null && (
               <DetailRow
