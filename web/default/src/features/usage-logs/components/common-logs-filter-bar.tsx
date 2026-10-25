@@ -576,7 +576,7 @@ export function CommonLogsFilterBar<TData>(
           placeholder={t('Model Name')}
           emptyText={t('No option found.')}
           allowCreate
-          className='h-8 min-w-0 flex-1 text-sm leading-5'
+          className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
         />
         <LogFilterModeButton
           fieldLabel={t('Model Name')}
@@ -598,7 +598,7 @@ export function CommonLogsFilterBar<TData>(
           placeholder={t('Group')}
           emptyText={t('No option found.')}
           allowCreate
-          className='h-8 min-w-0 flex-1 text-sm leading-5'
+          className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
         />
         <LogFilterModeButton
           fieldLabel={t('Group')}
@@ -667,7 +667,7 @@ export function CommonLogsFilterBar<TData>(
                 ? undefined
                 : (values) => '•'.repeat(Math.min(values.length * 4, 12))
             }
-            className='h-8 min-w-0 flex-1 text-sm leading-5'
+            className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
           />
           <LogFilterModeButton
             fieldLabel={t('Token Name')}
@@ -692,7 +692,7 @@ export function CommonLogsFilterBar<TData>(
                   ? undefined
                   : (values) => '•'.repeat(Math.min(values.length * 4, 12))
               }
-              className='h-8 min-w-0 flex-1 text-sm leading-5'
+              className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
             />
             <LogFilterModeButton
               fieldLabel={t('Username')}
@@ -713,7 +713,7 @@ export function CommonLogsFilterBar<TData>(
               }
               placeholder={t('Channel ID')}
               allowCreate
-              className='h-8 min-w-0 flex-1 text-sm leading-5'
+              className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
             />
             <LogFilterModeButton
               fieldLabel={t('Channel ID')}
