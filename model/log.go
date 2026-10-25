@@ -31,6 +31,93 @@ func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm
 	return tx.Where(column+" = ?", value), nil
 }
 
+type LogFieldFilter struct {
+	Values  []string
+	Exclude bool
+}
+
+type LogChannelFilter struct {
+	Values  []int
+	Exclude bool
+}
+
+type LogFilterOptions struct {
+	ModelName LogFieldFilter
+	Username  LogFieldFilter
+	TokenName LogFieldFilter
+	Channel   LogChannelFilter
+	Group     LogFieldFilter
+}
+
+func applyLogFieldFilter(tx *gorm.DB, column string, filter LogFieldFilter, allowLike bool) (*gorm.DB, error) {
+	if len(filter.Values) == 0 {
+		return tx, nil
+	}
+
+	conditions := make([]string, 0, len(filter.Values))
+	args := make([]interface{}, 0, len(filter.Values))
+	for _, value := range filter.Values {
+		if value == "" {
+			continue
+		}
+		if allowLike && strings.Contains(value, "%") {
+			condition, pattern, err := buildLogLikeCondition(column, value)
+			if err != nil {
+				return nil, err
+			}
+			if filter.Exclude {
+				condition = strings.Replace(condition, " LIKE ", " NOT LIKE ", 1)
+			}
+			conditions = append(conditions, condition)
+			args = append(args, pattern)
+			continue
+		}
+		if filter.Exclude {
+			conditions = append(conditions, column+" <> ?")
+		} else {
+			conditions = append(conditions, column+" = ?")
+		}
+		args = append(args, value)
+	}
+	if len(conditions) == 0 {
+		return tx, nil
+	}
+
+	joiner := " OR "
+	if filter.Exclude {
+		joiner = " AND "
+	}
+	return tx.Where("("+strings.Join(conditions, joiner)+")", args...), nil
+}
+
+func applyLogChannelFilter(tx *gorm.DB, column string, filter LogChannelFilter) *gorm.DB {
+	if len(filter.Values) == 0 {
+		return tx
+	}
+	if filter.Exclude {
+		return tx.Where(column+" NOT IN ?", filter.Values)
+	}
+	return tx.Where(column+" IN ?", filter.Values)
+}
+
+func applyLogFilterOptions(tx *gorm.DB, filters LogFilterOptions, prefix string) (*gorm.DB, error) {
+	var err error
+	if tx, err = applyLogFieldFilter(tx, prefix+"model_name", filters.ModelName, true); err != nil {
+		return nil, err
+	}
+	if tx, err = applyLogFieldFilter(tx, prefix+"username", filters.Username, true); err != nil {
+		return nil, err
+	}
+	if tx, err = applyLogFieldFilter(tx, prefix+"token_name", filters.TokenName, false); err != nil {
+		return nil, err
+	}
+	tx = applyLogChannelFilter(tx, prefix+"channel_id", filters.Channel)
+	if tx, err = applyLogFieldFilter(tx, prefix+logGroupCol, filters.Group, false); err != nil {
+		return nil, err
+	}
+	return tx, nil
+}
+
 func buildLogLikeCondition(column string, value string) (string, string, error) {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		pattern, err := sanitizeClickHouseLikePattern(value)
@@ -752,7 +839,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, filters LogFilterOptions, startIdx int, num int, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB
@@ -760,7 +847,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		tx = LOG_DB.Where("logs.type = ?", logType)
 	}
 
-	if tx, err = applyAdminLogFilters(tx, logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash); err != nil {
+	if tx, err = applyAdminLogFilters(tx, logType, startTimestamp, endTimestamp, filters, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash); err != nil {
 		return nil, 0, err
 	}
 	err = tx.Model(&Log{}).Count(&total).Error
@@ -828,16 +915,10 @@ const logSearchCountLimit = 10000
 // both GetAllLogs and SumLogStatAmounts) onto a query that has already scoped
 // the log type. Keeping it in one place ensures the stats aggregation honors
 // exactly the same filters as the visible list.
-func applyAdminLogFilters(tx *gorm.DB, logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (*gorm.DB, error) {
+func applyAdminLogFilters(tx *gorm.DB, logType int, startTimestamp int64, endTimestamp int64, filters LogFilterOptions, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (*gorm.DB, error) {
 	var err error
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
+	if tx, err = applyLogFilterOptions(tx, filters, "logs."); err != nil {
 		return nil, err
-	}
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.username", username); err != nil {
-		return nil, err
-	}
-	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
 	}
 	if requestId != "" {
 		tx = tx.Where("logs.request_id = ?", requestId)
@@ -850,12 +931,6 @@ func applyAdminLogFilters(tx *gorm.DB, logType int, startTimestamp int64, endTim
 	}
 	if endTimestamp != 0 {
 		tx = tx.Where("logs.created_at <= ?", endTimestamp)
-	}
-	if channel != 0 {
-		tx = tx.Where("logs.channel_id = ?", channel)
-	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
 	}
 	if statusCode != 0 {
 		condition, args := statusCodeOtherCondition("logs.other", statusCode)
@@ -899,7 +974,7 @@ type LogStatAmounts struct {
 //
 // Note: rows written before these columns existed carry the amounts only in
 // their Other JSON (columns default to 0) and therefore contribute 0 here.
-func SumLogStatAmounts(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (LogStatAmounts, error) {
+func SumLogStatAmounts(logType int, startTimestamp int64, endTimestamp int64, filters LogFilterOptions, requestId string, upstreamRequestId string, statusCode int, errorKeyword string, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string, errorSignatureHash string) (LogStatAmounts, error) {
 	var result LogStatAmounts
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
@@ -908,7 +983,7 @@ func SumLogStatAmounts(logType int, startTimestamp int64, endTimestamp int64, mo
 		tx = LOG_DB.Where("logs.type = ?", logType)
 	}
 	var err error
-	if tx, err = applyAdminLogFilters(tx, logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash); err != nil {
+	if tx, err = applyAdminLogFilters(tx, logType, startTimestamp, endTimestamp, filters, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash); err != nil {
 		return result, err
 	}
 	// Alias outputs with a _sum suffix so they do NOT shadow the same-named
@@ -924,7 +999,7 @@ func SumLogStatAmounts(logType int, startTimestamp int64, endTimestamp int64, mo
 	return result, err
 }
 
-func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, statusCode int, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string) (logs []*Log, total int64, err error) {
+func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, filters LogFilterOptions, startIdx int, num int, requestId string, upstreamRequestId string, statusCode int, customerId string, customerName string, downstreamRequestId string, downstreamTraceTag string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB.Where("logs.user_id = ?", userId)
@@ -934,11 +1009,8 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	// Override-audit logs (retry-override / param-override) are admin-only.
 	tx = tx.Where("logs.type NOT IN ?", adminOnlyLogTypes)
 
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
+	if tx, err = applyLogFilterOptions(tx, filters, "logs."); err != nil {
 		return nil, 0, err
-	}
-	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
 	}
 	if requestId != "" {
 		tx = tx.Where("logs.request_id = ?", requestId)
@@ -951,9 +1023,6 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	}
 	if endTimestamp != 0 {
 		tx = tx.Where("logs.created_at <= ?", endTimestamp)
-	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
 	}
 	if statusCode != 0 {
 		condition, args := statusCodeOtherCondition("logs.other", statusCode)
@@ -986,21 +1055,17 @@ type Stat struct {
 	RequestCount int `json:"request_count"`
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, filters LogFilterOptions) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota, count(*) request_count")
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
 
-	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
+	if tx, err = applyLogFilterOptions(tx, filters, ""); err != nil {
 		return stat, err
 	}
-	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "username", username); err != nil {
+	if rpmTpmQuery, err = applyLogFilterOptions(rpmTpmQuery, filters, ""); err != nil {
 		return stat, err
-	}
-	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
-		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", tokenName)
 	}
 	if startTimestamp != 0 {
 		tx = tx.Where("created_at >= ?", startTimestamp)
@@ -1008,21 +1073,6 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if endTimestamp != 0 {
 		tx = tx.Where("created_at <= ?", endTimestamp)
 	}
-	if tx, err = applyExplicitLogTextFilter(tx, "model_name", modelName); err != nil {
-		return stat, err
-	}
-	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "model_name", modelName); err != nil {
-		return stat, err
-	}
-	if channel != 0 {
-		tx = tx.Where("channel_id = ?", channel)
-		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
-	}
-	if group != "" {
-		tx = tx.Where(logGroupCol+" = ?", group)
-		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
-	}
-
 	tx = tx.Where("type = ?", LogTypeConsume)
 	rpmTpmQuery = rpmTpmQuery.Where("type = ?", LogTypeConsume)
 

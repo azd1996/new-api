@@ -1839,6 +1839,7 @@
     "Exchange rate is required": "汇率为必填项",
     "Exchange rate must be greater than 0": "汇率必须大于 0",
     "exclude": "排除",
+    "Exclude": "排除",
     "Execute code in a sandbox during the response": "在响应过程中沙箱执行代码",
     "Executor": "执行实例",
     "Exhausted": "已耗尽",

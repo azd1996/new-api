@@ -1839,6 +1839,7 @@
     "Exchange rate is required": "為替レートは必須です",
     "Exchange rate must be greater than 0": "為替レートは 0 より大きくする必要があります",
     "exclude": "exclude",
+    "Exclude": "除外",
     "Execute code in a sandbox during the response": "応答中にサンドボックスでコードを実行",
     "Executor": "実行ノード",
     "Exhausted": "使い切り",

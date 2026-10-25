@@ -44,11 +44,15 @@ import { getEnabledModels } from '@/features/channels/api'
 import { getCustomers } from '@/features/customers/api'
 import { getGroups } from '@/features/users/api'
 
-import { LOG_TYPE_ALL_VALUE, LOG_TYPE_ENUM, LOG_TYPE_FILTERS } from '../constants'
 import { startSessionLogSearch } from '../api'
+import {
+  LOG_TYPE_ALL_VALUE,
+  LOG_TYPE_ENUM,
+  LOG_TYPE_FILTERS,
+} from '../constants'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
-import type { CommonLogFilters } from '../types'
+import type { CommonLogFilters, LogFilterOperator } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
 import {
@@ -93,14 +97,44 @@ function getLogTypeValue(value: unknown): LogTypeValue {
     : LOG_TYPE_ALL_VALUE
 }
 
+function LogFilterModeButton(props: {
+  fieldLabel: string
+  operator: LogFilterOperator | undefined
+  onChange: (operator: LogFilterOperator) => void
+}) {
+  const { t } = useTranslation()
+  const isExclude = props.operator === 'exclude'
+  const nextOperator: LogFilterOperator = isExclude ? 'include' : 'exclude'
+  const modeLabel = isExclude ? t('Exclude') : t('Equals')
+  return (
+    <Button
+      type='button'
+      variant='outline'
+      size='icon'
+      className='size-8 shrink-0 font-mono text-sm'
+      onClick={() => props.onChange(nextOperator)}
+      aria-label={`${props.fieldLabel}: ${modeLabel}`}
+      title={`${props.fieldLabel}: ${modeLabel}`}
+      aria-pressed={isExclude}
+    >
+      {isExclude ? '≠' : '='}
+    </Button>
+  )
+}
+
 function buildSearchSourceKey(values: {
   startTime?: unknown
   endTime?: unknown
   channel?: unknown
+  channelOp?: unknown
   model?: unknown
+  modelOp?: unknown
   token?: unknown
+  tokenOp?: unknown
   group?: unknown
+  groupOp?: unknown
   username?: unknown
+  usernameOp?: unknown
   requestId?: unknown
   upstreamRequestId?: unknown
   statusCode?: unknown
@@ -117,10 +151,15 @@ function buildSearchSourceKey(values: {
     values.startTime,
     values.endTime,
     values.channel,
+    values.channelOp,
     values.model,
+    values.modelOp,
     values.token,
+    values.tokenOp,
     values.group,
+    values.groupOp,
     values.username,
+    values.usernameOp,
     values.requestId,
     values.upstreamRequestId,
     values.statusCode,
@@ -193,7 +232,10 @@ export function CommonLogsFilterBar<TData>(
     [groupCandidatesQuery.data]
   )
   const noneOption = useMemo<ComboboxInputOption>(
-    () => ({ value: CUSTOMER_NONE_VALUE, label: t('Other (no customer info)') }),
+    () => ({
+      value: CUSTOMER_NONE_VALUE,
+      label: t('Other (no customer info)'),
+    }),
     [t]
   )
   const customerNameOptions = useMemo<ComboboxInputOption[]>(() => {
@@ -224,10 +266,15 @@ export function CommonLogsFilterBar<TData>(
       startTime: searchParams.startTime,
       endTime: searchParams.endTime,
       channel: searchParams.channel,
+      channelOp: searchParams.channelOp,
       model: searchParams.model,
+      modelOp: searchParams.modelOp,
       token: searchParams.token,
+      tokenOp: searchParams.tokenOp,
       group: searchParams.group,
+      groupOp: searchParams.groupOp,
       username: searchParams.username,
+      usernameOp: searchParams.usernameOp,
       requestId: searchParams.requestId,
       upstreamRequestId: searchParams.upstreamRequestId,
       statusCode: searchParams.statusCode,
@@ -246,10 +293,15 @@ export function CommonLogsFilterBar<TData>(
         : start,
       endTime: searchParams.endTime ? new Date(searchParams.endTime) : end,
       channel: searchParams.channel || undefined,
+      channelOp: searchParams.channelOp || 'include',
       model: searchParams.model || undefined,
+      modelOp: searchParams.modelOp || 'include',
       token: searchParams.token || undefined,
+      tokenOp: searchParams.tokenOp || 'include',
       group: searchParams.group || undefined,
+      groupOp: searchParams.groupOp || 'include',
       username: searchParams.username || undefined,
+      usernameOp: searchParams.usernameOp || 'include',
       requestId: searchParams.requestId || undefined,
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
       statusCode: searchParams.statusCode || undefined,
@@ -271,10 +323,15 @@ export function CommonLogsFilterBar<TData>(
     searchParams.startTime,
     searchParams.endTime,
     searchParams.channel,
+    searchParams.channelOp,
     searchParams.model,
+    searchParams.modelOp,
     searchParams.token,
+    searchParams.tokenOp,
     searchParams.group,
+    searchParams.groupOp,
     searchParams.username,
+    searchParams.usernameOp,
     searchParams.requestId,
     searchParams.upstreamRequestId,
     searchParams.statusCode,
@@ -295,7 +352,10 @@ export function CommonLogsFilterBar<TData>(
   const logType = activeDraft.logType
 
   const handleChange = useCallback(
-    (field: keyof CommonLogFilters, value: Date | string | undefined) => {
+    (
+      field: keyof CommonLogFilters,
+      value: Date | string | LogFilterOperator | undefined
+    ) => {
       setDraft((current) => {
         const base =
           current.sourceKey === searchState.sourceKey ? current : searchState
@@ -492,30 +552,44 @@ export function CommonLogsFilterBar<TData>(
   )
   const modelFilter = (
     <LogsFilterField>
-      <Combobox
-        options={modelOptions}
-        value={filters.model || ''}
-        onValueChange={(value) => handleChange('model', value || undefined)}
-        placeholder={t('Model Name')}
-        searchPlaceholder={t('Model Name')}
-        emptyText={t('No option found.')}
-        allowCustomValue
-        className='h-8 min-w-0 text-sm leading-5'
-      />
+      <div className='flex min-w-0 gap-1'>
+        <Combobox
+          options={modelOptions}
+          value={filters.model || ''}
+          onValueChange={(value) => handleChange('model', value || undefined)}
+          placeholder={t('Model Name')}
+          searchPlaceholder={t('Model Name')}
+          emptyText={t('No option found.')}
+          allowCustomValue
+          className='h-8 min-w-0 flex-1 text-sm leading-5'
+        />
+        <LogFilterModeButton
+          fieldLabel={t('Model Name')}
+          operator={filters.modelOp}
+          onChange={(value) => handleChange('modelOp', value)}
+        />
+      </div>
     </LogsFilterField>
   )
   const groupFilter = (
     <LogsFilterField>
-      <Combobox
-        options={groupOptions}
-        value={filters.group || ''}
-        onValueChange={(value) => handleChange('group', value || undefined)}
-        placeholder={t('Group')}
-        searchPlaceholder={t('Group')}
-        emptyText={t('No option found.')}
-        allowCustomValue
-        className='h-8 min-w-0 text-sm leading-5'
-      />
+      <div className='flex min-w-0 gap-1'>
+        <Combobox
+          options={groupOptions}
+          value={filters.group || ''}
+          onValueChange={(value) => handleChange('group', value || undefined)}
+          placeholder={t('Group')}
+          searchPlaceholder={t('Group')}
+          emptyText={t('No option found.')}
+          allowCustomValue
+          className='h-8 min-w-0 flex-1 text-sm leading-5'
+        />
+        <LogFilterModeButton
+          fieldLabel={t('Group')}
+          operator={filters.groupOp}
+          onChange={(value) => handleChange('groupOp', value)}
+        />
+      </div>
     </LogsFilterField>
   )
   const typeFilter = (
@@ -563,33 +637,54 @@ export function CommonLogsFilterBar<TData>(
   const advancedFilters = (
     <>
       <LogsFilterField>
-        <LogsFilterInput
-          placeholder={t('Token Name')}
-          type={sensitiveType}
-          value={filters.token || ''}
-          onChange={(e) => handleChange('token', e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
+        <div className='flex min-w-0 gap-1'>
+          <LogsFilterInput
+            placeholder={t('Token Name')}
+            type={sensitiveType}
+            value={filters.token || ''}
+            onChange={(e) => handleChange('token', e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+          <LogFilterModeButton
+            fieldLabel={t('Token Name')}
+            operator={filters.tokenOp}
+            onChange={(value) => handleChange('tokenOp', value)}
+          />
+        </div>
       </LogsFilterField>
       {isAdmin && (
         <LogsFilterField>
-          <LogsFilterInput
-            placeholder={t('Username')}
-            type={sensitiveType}
-            value={filters.username || ''}
-            onChange={(e) => handleChange('username', e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
+          <div className='flex min-w-0 gap-1'>
+            <LogsFilterInput
+              placeholder={t('Username')}
+              type={sensitiveType}
+              value={filters.username || ''}
+              onChange={(e) => handleChange('username', e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+            <LogFilterModeButton
+              fieldLabel={t('Username')}
+              operator={filters.usernameOp}
+              onChange={(value) => handleChange('usernameOp', value)}
+            />
+          </div>
         </LogsFilterField>
       )}
       {isAdmin && (
         <LogsFilterField>
-          <LogsFilterInput
-            placeholder={t('Channel ID')}
-            value={filters.channel || ''}
-            onChange={(e) => handleChange('channel', e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
+          <div className='flex min-w-0 gap-1'>
+            <LogsFilterInput
+              placeholder={t('Channel ID')}
+              value={filters.channel || ''}
+              onChange={(e) => handleChange('channel', e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+            <LogFilterModeButton
+              fieldLabel={t('Channel ID')}
+              operator={filters.channelOp}
+              onChange={(value) => handleChange('channelOp', value)}
+            />
+          </div>
         </LogsFilterField>
       )}
       <LogsFilterField>

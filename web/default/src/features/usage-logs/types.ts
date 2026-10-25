@@ -43,14 +43,21 @@ export interface CommonFilters {
   channel?: string
 }
 
+export type LogFilterOperator = 'include' | 'exclude'
+
 /**
  * Common logs specific filters
  */
 export interface CommonLogFilters extends CommonFilters {
   model?: string
+  modelOp?: LogFilterOperator
   token?: string
+  tokenOp?: LogFilterOperator
   group?: string
+  groupOp?: LogFilterOperator
   username?: string
+  usernameOp?: LogFilterOperator
+  channelOp?: LogFilterOperator
   requestId?: string
   upstreamRequestId?: string
   // HTTP status code to match. Recorded only on error logs (stored in the log's
@@ -391,12 +398,17 @@ export interface GetLogsParams {
   page_size?: number
   type?: number
   username?: string
+  username_op?: LogFilterOperator
   token_name?: string
+  token_name_op?: LogFilterOperator
   model_name?: string
+  model_name_op?: LogFilterOperator
   start_timestamp?: number
   end_timestamp?: number
-  channel?: number
+  channel?: string
+  channel_op?: LogFilterOperator
   group?: string
+  group_op?: LogFilterOperator
   request_id?: string
   upstream_request_id?: string
   status_code?: number
@@ -449,12 +461,17 @@ export interface SessionLogSearchResult {
 export interface GetLogStatsParams {
   type?: number
   username?: string
+  username_op?: LogFilterOperator
   token_name?: string
+  token_name_op?: LogFilterOperator
   model_name?: string
+  model_name_op?: LogFilterOperator
   start_timestamp?: number
   end_timestamp?: number
-  channel?: number
+  channel?: string
+  channel_op?: LogFilterOperator
   group?: string
+  group_op?: LogFilterOperator
   request_id?: string
   upstream_request_id?: string
 }

@@ -8,11 +8,14 @@
 ## [2026-10-25]
 
 ### 新增 Added
+- **使用日志筛选支持多值正选/反选（Usage Log Multi-value Include/Exclude Filters）**：渠道、模型、用户名、令牌名、分组支持逗号分隔的多值筛选，并可通过 `=` / `≠` 切换正选或反选；筛选模式同步保存在 URL，列表与统计使用同一组参数。后端统一使用 `IN`/`NOT IN` 与 `LIKE`/`NOT LIKE` 条件，兼容 SQLite、MySQL、PostgreSQL 及 ClickHouse；新增后端回归测试覆盖组合筛选与 ClickHouse LIKE 转义。
+- **客户统计图表改用 SVG 渲染**：客户统计 VChart 显式使用 `renderMode: 'svg'`，提升图表在当前页面环境中的渲染稳定性；补充 `QuotaDataItem.metric_denominator` 类型定义，匹配客户统计数据结构。
 - **分流图悬浮提示补充金额口径**：在原有额度、Token、请求数、占比之外，新增渠道折后金额和客户折后金额；两项金额均按当前悬浮节点或链路对应的聚合数据展示。占比仍按当前分流口径的链路值除以当前筛选范围内所有首跳链路值之和计算。
 - **客户统计金额支持四种口径**：客户统计页新增「客户折后金额 / 渠道折后金额 / 利润金额 / 利润率」切换。利润金额按客户折后金额减渠道折后金额计算，利润率按汇总利润除以汇总渠道折后金额计算；未配置客户在客户折后金额口径下继续使用渠道折后金额兜底。
 - **明细错误新增「客户」列（Per-signature Customer Breakdown）**：明细错误统计页为每个签名/分组补充**按客户聚合**的次数分布列（与「模型」「渠道」同款 badge 聚合，signature 与 short_name/attribution 分组两种视图都有）。聚合依据为日志 `other.customer_id`（下游 Trace-Tag 解出，无客户信息的行不计入该列）。前端展示格式为 **`客户ID(客户名)`**，客户无对应配置名时只展示 `客户ID`；每个 badge 带该客户在本签名下的出现次数 `×N`、按次数降序、悬浮 tooltip 看全文。数据层：`errorSignatureOther` 解析 `customer_id`，`ErrorSignatureStat`/`ErrorGroupStat` 新增 `Customers map[string]int64` 在两条聚合路径累计；控制器 `errorStatItem` 新增 `customers`（`{customer_id,customer_name,count}`），客户名经 `model.CustomerName(id)` 查内存缓存解析（未配置则空）。零迁移、复用现有 `other` 字段，不新增列、不改表结构。注意：**客户名取自当前缓存**而非写时快照，且仅对带 `customer_id` 的错误日志生效。
 
 ### 优化 Changed
+- **明细错误分类编辑交互调整**：移除简名/归因单独的清除按钮，统一通过编辑下拉框完成修改，减少重复操作入口。
 - **明细错误「查看日志」下钻改为新标签页打开**：下钻到使用日志由原地跳转改为 `window.open(..., '_blank')` 新标签页打开，统计视图保持原位，便于对照排查（`router.buildLocation` 构造目标 URL）。
 
 ## [2026-10-24]

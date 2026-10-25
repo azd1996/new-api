@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ExternalLink, Pencil, X } from 'lucide-react'
+import { ExternalLink, Pencil } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -103,7 +103,6 @@ function AliasEditCell(props: AliasEditCellProps) {
   } else {
     editLabel = hasValue ? t('Edit attribution') : t('Set attribution')
   }
-  const clearLabel = isShortName ? t('Clear category') : t('Clear attribution')
   const placeholder = isShortName
     ? t('Select or enter a short name')
     : t('Select or enter an attribution')
@@ -118,10 +117,6 @@ function AliasEditCell(props: AliasEditCellProps) {
   const handleSave = () => {
     props.onSave(props.item, buildPayload(draft.trim()))
     setOpen(false)
-  }
-
-  const handleClear = () => {
-    props.onSave(props.item, buildPayload(''))
   }
 
   return (
@@ -180,19 +175,6 @@ function AliasEditCell(props: AliasEditCellProps) {
           </div>
         </PopoverContent>
       </Popover>
-
-      {hasValue && (
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-xs'
-          aria-label={clearLabel}
-          disabled={props.isSaving}
-          onClick={handleClear}
-        >
-          <X className='size-3' aria-hidden='true' />
-        </Button>
-      )}
     </div>
   )
 }

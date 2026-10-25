@@ -35,6 +35,7 @@ export interface QuotaDataItem {
   // per-customer discounted. Zero/absent on rows written before the columns.
   channel_stat_quota?: number
   customer_stat_quota?: number
+  metric_denominator?: number
 }
 
 // Which quota caliber the consumption distribution chart sums: the real

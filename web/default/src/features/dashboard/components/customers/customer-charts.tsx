@@ -354,7 +354,7 @@ export function CustomerCharts(props: CustomerChartsProps) {
                         theme: resolvedTheme === 'dark' ? 'dark' : 'light',
                         background: 'transparent',
                       }}
-                      option={VCHART_OPTION}
+                      option={{ ...VCHART_OPTION, renderMode: 'svg' }}
                     />
                   )
                 )}

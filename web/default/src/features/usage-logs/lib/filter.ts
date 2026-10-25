@@ -43,6 +43,11 @@ export function buildSearchParams(
     ...(filters.startTime && { startTime: filters.startTime.getTime() }),
     ...(filters.endTime && { endTime: filters.endTime.getTime() }),
     ...(filters.channel && { channel: filters.channel }),
+    ...('channelOp' in filters &&
+    filters.channelOp &&
+    filters.channelOp !== 'include'
+      ? { channelOp: filters.channelOp }
+      : {}),
   }
 
   switch (logCategory) {
@@ -51,9 +56,29 @@ export function buildSearchParams(
       return {
         ...baseParams,
         ...(commonFilters.model && { model: commonFilters.model }),
+        ...(commonFilters.modelOp &&
+        commonFilters.modelOp !== 'include' &&
+        commonFilters.model
+          ? { modelOp: commonFilters.modelOp }
+          : {}),
         ...(commonFilters.token && { token: commonFilters.token }),
+        ...(commonFilters.tokenOp &&
+        commonFilters.tokenOp !== 'include' &&
+        commonFilters.token
+          ? { tokenOp: commonFilters.tokenOp }
+          : {}),
         ...(commonFilters.group && { group: commonFilters.group }),
+        ...(commonFilters.groupOp &&
+        commonFilters.groupOp !== 'include' &&
+        commonFilters.group
+          ? { groupOp: commonFilters.groupOp }
+          : {}),
         ...(commonFilters.username && { username: commonFilters.username }),
+        ...(commonFilters.usernameOp &&
+        commonFilters.usernameOp !== 'include' &&
+        commonFilters.username
+          ? { usernameOp: commonFilters.usernameOp }
+          : {}),
         ...(commonFilters.requestId && { requestId: commonFilters.requestId }),
         ...(commonFilters.upstreamRequestId && {
           upstreamRequestId: commonFilters.upstreamRequestId,
