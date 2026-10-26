@@ -130,3 +130,28 @@ param 规则只有 set/delete/copy/move/replace/regex_replace/prune_objects/*_he
   - 方案 B（扩展 path 语法）：给 param 引擎加谓词/位置选择符（见下方讨论），让 #22/#25 能写成"只作用于非最新 assistant 的 thinking"。
 - **状态**：暂不处理（2026-10-24 登记）。待拿到真实报错请求体确认是否确为 #22/#25 改动了最新 assistant 的 thinking；若是，按方案 A 或 B 收窄。
 
+### 8. 图片单边超过 Bedrock 8000px 硬限制（param 彻底无能为力，需代码层降采样）
+
+- **报错**：`ValidationException: image dimensions exceed max allowed size: 8000 pixels`
+- **模型**：Claude（Bedrock）多模态，单边 ≤ 8000px 是 Bedrock 对 Anthropic 接口的硬限制；客户端传大图（曾伴随误写模型名如 `claude-opus-4-8`）即触发。
+- **根因**：这是**图片像素尺寸**超限，不是 JSON 字段/结构问题。网关当前把图片当不透明 base64 全程透传（唯一解码是 `service/token_counter.go`/`service/image.go` 用 `image.DecodeConfig` 只读宽高做 token 计数），不做任何 resize/re-encode，故原样把超大图发给 Bedrock → 400。
+- **为什么 param 规则搞不定**：param 只能删/改/搬移 JSON 字段，**无法缩放或重编码二进制图像**——比"结构转换"更远，根本不在 param 能力范围内。删掉图片块能让请求过，但等于丢图。
+- **可选处理**：
+  - 方案 A（止血、丢图）：`prune_objects` 删掉超限图片块。请求能过但模型看不到该图。
+  - 方案 B（保图、需代码，推荐长期）：网关侧自动降采样。注入点 `relay/channel/aws/adaptor.go` 的 `ConvertClaudeRequest`（已逐条遍历 content、url 源会 fetch 成 base64），在此取 base64 缩图后回写 `source.Data`。推荐"最小可用版"：只处理 base64 的 JPEG/PNG/GIF，超长边阈值（可配，默认 8000 或更激进的 Claude 推荐 1568）用 `golang.org/x/image/draw` 等比缩放重编码；WebP/HEIC 原样透传；带开关 + 像素上限。
+    - **难点/风险**：① WebP 无编码器、HEIC stdlib 根本不能解码（项目仅手写 header 解析尺寸），要么引 cgo 要么降级转 JPEG；② 重编码有损、media_type 变更、token 计数需与实际发送一致；③ 热路径 CPU/内存 + **decode bomb 防护**（须像素上限/超时，勿无脑 `image.Decode`）。完整版（WebP 编码 + HEIC 解码依赖）成本陡增，不建议先做。
+  - 方案 C（零代码绕过）：把带大图的请求路由到非 Bedrock 渠道（如 Anthropic 直连），或客户端自行缩图后再发。
+- **状态**：暂不处理（尚在评估，未确认实施）。详见记忆 `project_bedrock_image_downsample.md`。若推进，走方案 B 的"最小可用版"，先出具体方案（配置项位置/阈值默认/函数落点/decode bomb 防护）再动手。
+
+### 9. AWS 账号未获 Anthropic 模型访问权限
+
+- **报错**：`status_code=400, InvokeModelWithResponseStream: operation error Bedrock Runtime: InvokeModelWithResponseStream, https response error StatusCode: 400, RequestID: ..., ValidationException: Access to Anthropic models is not allowed for this account.`
+- **模型**：Claude 新旧模型均可能出现，Bedrock streaming/non-streaming 均同理
+- **根因**：当前 AWS 账号没有获得 Amazon Bedrock 中 Anthropic 模型的访问权限。请求已到达 Bedrock，但在模型调用前的账号级权限校验阶段被拒绝；这不是 Claude 模型版本、模型 ID 或请求参数问题。
+- **为什么 param 规则搞不定**：这是 AWS 账号、Region 和 IAM/Organizations 权限层面的访问控制错误，与请求 JSON 字段无关，删除或修改参数不能解决。
+- **排查与处理**：
+  - 确认实际使用的 AWS 账号、凭证和 Region，避免把权限开在了其它账号或 Region。
+  - 在实际请求 Region 的 Bedrock 控制台检查 **Model access**，确认 Anthropic/Claude 模型访问已启用或获批。
+  - 若使用 AWS Organizations 成员账号、权限边界或跨区域 inference profile，检查 SCP、IAM 策略以及目标 Region 的 Anthropic 权限。
+  - 必要时重新提交 Anthropic 模型使用场景申请，并完成相关 Marketplace/订阅或首次使用确认。
+- **状态**：非网关参数适配问题，需由 AWS 账号管理员开通或恢复 Anthropic 模型访问权限。

@@ -139,6 +139,13 @@ export type UsageBillingPath =
 export interface LogOtherData {
   retry_triggered?: boolean
   admin_info?: {
+    process_shutdown?: {
+      instance: string
+      batch_id: string
+      /** Unix timestamp in seconds. */
+      at: number
+      reason: 'shutdown_timeout'
+    }
     is_multi_key?: boolean
     multi_key_index?: number
     use_channel?: number[]

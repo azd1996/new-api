@@ -86,6 +86,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 		defer ws.Close()
+		stopShutdownClose := common.TrackRelayCloser(c.Request.Context(), ws)
+		defer stopShutdownClose()
 	}
 
 	defer func() {
@@ -234,6 +236,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		if shutdown := common.ProcessShutdownFromContext(c.Request.Context()); shutdown != nil {
+			newAPIError = types.NewErrorWithStatusCode(shutdown, types.ErrorCodeProcessShutdown, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+			relayInfo.LastError = newAPIError
+			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayFormat)
+			break
+		}
 
 		// Error-triggered fallback (e.g. thinking-family 400): rewrite the request
 		// once and retry it on the same channel, bypassing the normal retry gate.
@@ -338,6 +346,9 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
+	if c.Request != nil && common.ProcessShutdownFromContext(c.Request.Context()) != nil {
+		return false
+	}
 	if openaiErr == nil {
 		return false
 	}
@@ -373,7 +384,8 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if service.ShouldDisableChannel(err) && channelError.AutoBan {
+	shutdownInterrupted := c.Request != nil && common.ProcessShutdownFromContext(c.Request.Context()) != nil
+	if !shutdownInterrupted && service.ShouldDisableChannel(err) && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
@@ -621,6 +633,14 @@ func RelayTask(c *gin.Context) {
 			break
 		}
 
+		shutdown := common.ProcessShutdownFromContext(c.Request.Context())
+		if shutdown != nil {
+			processChannelError(c,
+				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
+					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
+				types.NewErrorWithStatusCode(shutdown, types.ErrorCodeProcessShutdown, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry()), relayInfo.RelayFormat)
+			break
+		}
 		if !taskErr.LocalError {
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
@@ -682,6 +702,9 @@ func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
 }
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {
+	if c.Request != nil && common.ProcessShutdownFromContext(c.Request.Context()) != nil {
+		return false
+	}
 	if taskErr == nil {
 		return false
 	}

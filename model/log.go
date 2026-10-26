@@ -641,6 +641,9 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	other = attachDownstreamTraceTag(c, other)
+	if c.Request != nil {
+		other = common.AttachProcessShutdownInfo(c.Request.Context(), other)
+	}
 	if other == nil {
 		other = make(map[string]interface{})
 	}
@@ -716,6 +719,9 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
 	params.Other = attachDownstreamTraceTag(c, params.Other)
+	if c.Request != nil {
+		params.Other = common.AttachProcessShutdownInfo(c.Request.Context(), params.Other)
+	}
 	otherStr := common.MapToJsonStr(params.Other)
 	// Dual-write the reporting-only raw/discounted amounts into their own columns
 	// while keeping the Other JSON copy (nil/absent map reads yield zero values;

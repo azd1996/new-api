@@ -42,7 +42,12 @@ import { Label } from '@/components/ui/label'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import {
+  formatLogQuota,
+  formatTimestampToDate,
+  formatTokens,
+  formatUseTime,
+} from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import type { UsageLog } from '../../data/schema'
@@ -521,6 +526,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
+  const processShutdown =
+    props.isAdmin && (isConsume || props.log.type === 5)
+      ? adminInfo?.process_shutdown
+      : undefined
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
       ? ([
@@ -873,6 +882,38 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 </div>
               </div>
             </div>
+          </DetailSection>
+        )}
+
+        {processShutdown && (
+          <DetailSection
+            label={t('Process Shutdown')}
+            icon={<AlertTriangle className='size-3' aria-hidden='true' />}
+            variant='danger'
+          >
+            <DetailRow
+              label={t('Interruption Reason')}
+              value={
+                processShutdown.reason === 'shutdown_timeout'
+                  ? t('Process exit / shutdown timeout')
+                  : processShutdown.reason || '-'
+              }
+            />
+            <DetailRow
+              label={t('Instance')}
+              value={processShutdown.instance || '-'}
+              mono
+            />
+            <DetailRow
+              label={t('Shutdown Batch')}
+              value={processShutdown.batch_id || '-'}
+              mono
+            />
+            <DetailRow
+              label={t('Shutdown Time')}
+              value={formatTimestampToDate(processShutdown.at, 'seconds')}
+              mono
+            />
           </DetailSection>
         )}
 

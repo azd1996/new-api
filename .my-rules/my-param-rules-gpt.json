@@ -122,6 +122,18 @@
                 }
             ],
             "logic": "AND"
+        },
+        {
+            "description": "gpt-5.6-luna: 删除OpenAI内部消息元数据，避免Unknown parameter internal_chat_message_metadata_passthrough",
+            "mode": "delete",
+            "path": "input.*.internal_chat_message_metadata_passthrough",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-5.6-luna"
+                }
+            ]
         }
     ]
 }

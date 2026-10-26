@@ -7,7 +7,11 @@
             "value": "bedrock-2023-05-31",
             "keep_origin": true,
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
             ]
         },
         {
@@ -129,9 +133,23 @@
             "value": "medium",
             "keep_origin": true,
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-4-7" },
-                { "path": "thinking", "mode": "contains", "value": "" },
-                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-4-7"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
             ],
             "logic": "AND"
         },
@@ -143,9 +161,23 @@
                 "type": "adaptive"
             },
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-4-7" },
-                { "path": "thinking", "mode": "contains", "value": "" },
-                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-4-7"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
             ],
             "logic": "AND"
         },
@@ -156,9 +188,23 @@
             "value": "medium",
             "keep_origin": true,
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-4-8" },
-                { "path": "thinking", "mode": "contains", "value": "" },
-                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-4-8"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
             ],
             "logic": "AND"
         },
@@ -170,9 +216,23 @@
                 "type": "adaptive"
             },
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-4-8" },
-                { "path": "thinking", "mode": "contains", "value": "" },
-                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-4-8"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
             ],
             "logic": "AND"
         },
@@ -183,9 +243,23 @@
             "value": "medium",
             "keep_origin": true,
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
-                { "path": "thinking", "mode": "contains", "value": "" },
-                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
             ],
             "logic": "AND"
         },
@@ -197,9 +271,23 @@
                 "type": "adaptive"
             },
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
-                { "path": "thinking", "mode": "contains", "value": "" },
-                { "path": "thinking.type", "mode": "full", "value": "adaptive", "invert": true, "pass_missing_key": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
             ],
             "logic": "AND"
         },
@@ -240,15 +328,40 @@
             ]
         },
         {
-            "description": "claude-opus-5-5: 不支持强制tool_choice(any/tool)，仅auto/none；tool_choice存在且type既非auto也非none时统一改成auto(保留想用工具的意图，而非用none禁用)，避免400 does not support forced tool_choice",
+            "description": "claude-opus-5-5/claude-sonnet-5-5: 不支持强制tool_choice(any/tool)，仅auto/none；tool_choice存在且type既非auto也非none时统一改成auto(保留想用工具的意图，而非用none禁用)，避免400 does not support forced tool_choice",
             "mode": "set",
             "path": "tool_choice",
-            "value": { "type": "auto" },
+            "value": {
+                "type": "auto"
+            },
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-5-5" },
-                { "path": "tool_choice", "mode": "contains", "value": "" },
-                { "path": "tool_choice.type", "mode": "full", "value": "auto", "invert": true },
-                { "path": "tool_choice.type", "mode": "full", "value": "none", "invert": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "-5-5"
+                },
+                {
+                    "path": "tool_choice",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "tool_choice.type",
+                    "mode": "full",
+                    "value": "auto",
+                    "invert": true
+                },
+                {
+                    "path": "tool_choice.type",
+                    "mode": "full",
+                    "value": "none",
+                    "invert": true
+                }
             ],
             "logic": "AND"
         },
@@ -258,9 +371,23 @@
             "path": "thinking.display",
             "value": "summarized",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" },
-                { "path": "thinking.display", "mode": "full", "value": "summarized", "invert": true },
-                { "path": "thinking.display", "mode": "full", "value": "omitted", "invert": true }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "thinking.display",
+                    "mode": "full",
+                    "value": "summarized",
+                    "invert": true
+                },
+                {
+                    "path": "thinking.display",
+                    "mode": "full",
+                    "value": "omitted",
+                    "invert": true
+                }
             ],
             "logic": "AND"
         },
@@ -268,10 +395,22 @@
             "description": "claude-: 存在context_management时给anthropic-beta追加context-management-2025-06-27，启用Bedrock服务端上下文管理",
             "mode": "set_header",
             "path": "anthropic-beta",
-            "value": { "$append": ["context-management-2025-06-27"] },
+            "value": {
+                "$append": [
+                    "context-management-2025-06-27"
+                ]
+            },
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" },
-                { "path": "context_management", "mode": "contains", "value": "" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "context_management",
+                    "mode": "contains",
+                    "value": ""
+                }
             ],
             "logic": "AND"
         },
@@ -300,7 +439,11 @@
                 "structured-outputs-2025-11-13": null
             },
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
             ]
         },
         {
@@ -309,8 +452,16 @@
             "path": "thinking.type",
             "value": "between_tools",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-sonnet-5-5" },
-                { "path": "thinking.type", "mode": "full", "value": "disabled" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-sonnet-5-5"
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "disabled"
+                }
             ],
             "logic": "AND"
         },
@@ -319,8 +470,16 @@
             "mode": "delete",
             "path": "thinking.display",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" },
-                { "path": "thinking.type", "mode": "full", "value": "between_tools" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "between_tools"
+                }
             ],
             "logic": "AND"
         },
@@ -331,7 +490,11 @@
             "from": "^developer$",
             "to": "user",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
             ]
         },
         {
@@ -339,7 +502,11 @@
             "mode": "delete",
             "path": "messages.*.content.*.endpoint_signature",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
             ]
         },
         {
@@ -358,14 +525,26 @@
             "mode": "prune_objects",
             "path": "messages.*.content",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
             ],
             "value": {
                 "logic": "AND",
                 "recursive": false,
                 "conditions": [
-                    { "path": "type", "mode": "full", "value": "text" },
-                    { "path": "text", "mode": "full", "value": "" }
+                    {
+                        "path": "type",
+                        "mode": "full",
+                        "value": "text"
+                    },
+                    {
+                        "path": "text",
+                        "mode": "full",
+                        "value": ""
+                    }
                 ]
             }
         },
@@ -374,14 +553,27 @@
             "mode": "prune_objects",
             "path": "messages.*.content",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
             ],
             "value": {
                 "logic": "AND",
                 "recursive": false,
                 "conditions": [
-                    { "path": "type", "mode": "full", "value": "thinking" },
-                    { "path": "thinking", "mode": "full", "value": "", "pass_missing_key": true }
+                    {
+                        "path": "type",
+                        "mode": "full",
+                        "value": "thinking"
+                    },
+                    {
+                        "path": "thinking",
+                        "mode": "full",
+                        "value": "",
+                        "pass_missing_key": true
+                    }
                 ]
             }
         },
@@ -391,8 +583,16 @@
             "path": "messages.0.content",
             "value": ".",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-" },
-                { "path": "messages.0.content.#", "mode": "full", "value": 0 }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "messages.0.content.#",
+                    "mode": "full",
+                    "value": 0
+                }
             ],
             "logic": "AND"
         },
@@ -401,8 +601,16 @@
             "mode": "delete",
             "path": "messages.-1",
             "conditions": [
-                { "path": "model", "mode": "prefix", "value": "claude-opus-5" },
-                { "path": "messages.-1.role", "mode": "full", "value": "assistant" }
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "messages.-1.role",
+                    "mode": "full",
+                    "value": "assistant"
+                }
             ],
             "logic": "AND"
         },
@@ -411,14 +619,50 @@
             "mode": "delete",
             "path": "temperature",
             "conditions": [
-                { "path": "model", "mode": "contains", "value": "claude-fable-5" },
-                { "path": "model", "mode": "contains", "value": "claude-opus-5" },
-                { "path": "model", "mode": "contains", "value": "claude-sonnet-5" },
-                { "path": "model", "mode": "contains", "value": "claude-opus-4-6" },
-                { "path": "model", "mode": "contains", "value": "claude-opus-4-7" },
-                { "path": "model", "mode": "contains", "value": "claude-opus-4-8" }
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-fable-5"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-sonnet-5"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-opus-4-6"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-opus-4-7"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-opus-4-8"
+                }
             ],
             "logic": "OR"
+        },
+        {
+            "description": "gpt-5.6-luna: 删除OpenAI内部消息元数据，避免Unknown parameter internal_chat_message_metadata_passthrough",
+            "mode": "delete",
+            "path": "input.*.internal_chat_message_metadata_passthrough",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-5.6-luna"
+                }
+            ]
         }
     ]
 }

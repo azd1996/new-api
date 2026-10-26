@@ -1,14 +1,95 @@
 package channel
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type shutdownTestAdaptor struct {
+	Adaptor
+	url string
+}
+
+func (a shutdownTestAdaptor) GetRequestURL(*relaycommon.RelayInfo) (string, error) {
+	return a.url, nil
+}
+
+func (a shutdownTestAdaptor) SetupRequestHeader(*gin.Context, *http.Header, *relaycommon.RelayInfo) error {
+	return nil
+}
+
+func TestDoApiRequestClientCancelAndProcessShutdown(t *testing.T) {
+	service.InitHttpClient()
+	require.NotNil(t, service.GetHttpClient())
+	for _, shutdown := range []bool{false, true} {
+		t.Run(map[bool]string{false: "client disconnect", true: "process shutdown"}[shutdown], func(t *testing.T) {
+			started := make(chan struct{})
+			release := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				close(started)
+				select {
+				case <-r.Context().Done():
+				case <-release:
+					_, _ = io.WriteString(w, "completed")
+				}
+			}))
+			defer server.Close()
+			defer close(release)
+
+			clientCtx, cancelClient := context.WithCancel(context.Background())
+			defer cancelClient()
+			registry := common.NewRelayRequestRegistry()
+			requestCtx, finish, ok := registry.Begin(clientCtx)
+			require.True(t, ok)
+			defer finish()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}")).WithContext(requestCtx)
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+			// The client is already gone when the upstream request starts.
+			cancelClient()
+			result := make(chan error, 1)
+			go func() {
+				resp, err := DoApiRequest(shutdownTestAdaptor{url: server.URL}, c, info, strings.NewReader("{}"))
+				if resp != nil {
+					_ = resp.Body.Close()
+				}
+				result <- err
+			}()
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("upstream request did not start after client cancellation")
+			}
+			if shutdown {
+				registry.ForceCancel(common.ProcessShutdownInfo{})
+			} else {
+				release <- struct{}{}
+			}
+			select {
+			case err := <-result:
+				if shutdown {
+					assert.Error(t, err)
+				} else {
+					assert.NoError(t, err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("upstream request did not finish")
+			}
+		})
+	}
+}
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()
