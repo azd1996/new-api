@@ -655,9 +655,11 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	errorSignatureHash, _ := other["error_signature_hash"].(string)
 	// 判断是否需要记录 IP
 	needRecordIp := false
-	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog {
-			needRecordIp = true
+	if userId > 0 {
+		if settingMap, err := GetUserSetting(userId, false); err == nil {
+			if settingMap.RecordIpLog {
+				needRecordIp = true
+			}
 		}
 	}
 	log := &Log{
