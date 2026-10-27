@@ -44,7 +44,8 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
-import type { GroupModelRule } from '../types'
+import type { DebugScopeRule, GroupModelRule } from '../types'
+import { DebugScopeRulesField } from './debug-scope-rules-field'
 import { GroupModelRulesField } from './group-model-rules-field'
 
 const behaviorSchema = z.object({
@@ -61,6 +62,7 @@ type SystemBehaviorSectionProps = {
   defaultValues: BehaviorFormValues & {
     'extended_cache_ttl_setting.rules': GroupModelRule[]
     'metadata_injection_disable_setting.rules': GroupModelRule[]
+    'debug_scope_setting.rules': DebugScopeRule[]
   }
 }
 
@@ -91,12 +93,16 @@ export function SystemBehaviorSection({
   const [metadataDisableRules, setMetadataDisableRules] = useState(
     defaultValues['metadata_injection_disable_setting.rules']
   )
+  const [debugScopeRules, setDebugScopeRules] = useState(
+    defaultValues['debug_scope_setting.rules']
+  )
 
   useEffect(() => {
     setExtendedCacheRules(defaultValues['extended_cache_ttl_setting.rules'])
     setMetadataDisableRules(
       defaultValues['metadata_injection_disable_setting.rules']
     )
+    setDebugScopeRules(defaultValues['debug_scope_setting.rules'])
   }, [defaultValues])
 
   const [confirmDisableRatioOpen, setConfirmDisableRatioOpen] = useState(false)
@@ -143,6 +149,17 @@ export function SystemBehaviorSection({
       updates.push({
         key: 'metadata_injection_disable_setting.rules',
         value: metadataSerialized,
+      })
+    }
+
+    const debugScopeSerialized = JSON.stringify(debugScopeRules)
+    if (
+      debugScopeSerialized !==
+      JSON.stringify(defaultValues['debug_scope_setting.rules'])
+    ) {
+      updates.push({
+        key: 'debug_scope_setting.rules',
+        value: debugScopeSerialized,
       })
     }
 
@@ -279,6 +296,17 @@ export function SystemBehaviorSection({
                 </FormControl>
               </SettingsSwitchItem>
             )}
+          />
+
+          <Separator />
+
+          <DebugScopeRulesField
+            label={t('Scoped Debug Logging (API Key + Model)')}
+            description={t(
+              'Log full request/response bodies only for the listed API key (token name) + model pairs, even when global Debug Mode is off. Both fields are required per rule; add multiple rows to cover more scopes. Leave empty to disable scoped debug logging.'
+            )}
+            value={debugScopeRules}
+            onChange={setDebugScopeRules}
           />
 
           <Separator />

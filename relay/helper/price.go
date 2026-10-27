@@ -176,7 +176,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		priceData.QuotaToPreConsume = quota
 	}
 
-	if common.DebugEnabled {
+	if logger.DebugActive(c) {
 		logger.LogDebug(c, "model_price_helper result: %s", priceData.ToSetting())
 	}
 	info.PriceData = priceData

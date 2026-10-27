@@ -42,6 +42,7 @@ const OPERATIONS_SECTIONS = [
             settings['extended_cache_ttl_setting.rules'],
           'metadata_injection_disable_setting.rules':
             settings['metadata_injection_disable_setting.rules'],
+          'debug_scope_setting.rules': settings['debug_scope_setting.rules'],
         }}
       />
     ),

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -104,12 +105,29 @@ func LogError(ctx context.Context, msg string) {
 }
 
 func LogDebug(ctx context.Context, msg string, args ...any) {
-	if common.DebugEnabled {
+	if DebugActive(ctx) {
 		if len(args) > 0 {
 			msg = fmt.Sprintf(msg, args...)
 		}
 		logHelper(ctx, loggerDebug, msg)
 	}
+}
+
+// DebugActive reports whether verbose debug logging should fire for ctx. The
+// global DebugEnabled switch forces it on for all traffic; otherwise logging is
+// scoped to the api-key (token name) + client-requested model rules configured
+// in debug_scope_setting. Callers without a request context (nil or non-gin
+// contexts, e.g. background tasks) only honor the global switch.
+func DebugActive(ctx context.Context) bool {
+	if common.DebugEnabled {
+		return true
+	}
+	if ctx == nil {
+		return false
+	}
+	tokenName, _ := ctx.Value("token_name").(string)
+	model, _ := ctx.Value(string(constant.ContextKeyOriginalModel)).(string)
+	return operation_setting.DebugScopeMatches(tokenName, model)
 }
 
 func logHelper(ctx context.Context, level string, msg string) {
@@ -242,7 +260,7 @@ func FormatQuota(quota int) string {
 
 // LogJson 仅供测试使用 only for test
 func LogJson(ctx context.Context, msg string, obj any) {
-	if !common.DebugEnabled {
+	if !DebugActive(ctx) {
 		return
 	}
 	jsonStr, err := common.Marshal(obj)

@@ -86,6 +86,17 @@ curl 'https://<your-host>/api/option/' \
 
 说明:请求体 `value` 直接传 JSON 布尔 `true`/`false` 即可,`controller.UpdateOption` 会自动转成 `"true"`/`"false"` 字符串存库;写库成功后 `updateOptionMap` 立即把 `common.DebugEnabled` 改为新值,**无需重启**。
 
+## 按 API Key + 模型维度开启（scoped debug）
+
+全局 `DebugEnabled` 是"全开/全关"的总开关,开启期间所有流量都会记录明文,日志量巨大。为支持"只排查某个客户的某个模型",新增了**按 `API Key 名称(令牌名) + 模型` 维度**的作用域开关,默认**全不开启**。
+
+- **配置**:`debug_scope_setting.rules`,一组 `{token_name, model}` 规则。`token_name` 是令牌名(非 `sk-` 原文),`model` 是**客户端请求的模型名**(映射前的原始模型,即 `original_model`)。
+- **匹配语义**:两个字段**都必须命中且都非空**(精确相等)。一条规则的 `token_name` 或 `model` 为空时该规则永不生效。要覆盖多个范围请**写多条规则**(规则之间是"或")。
+- **生效范围**:命中规则的请求,即使全局 `DebugEnabled=false` 也会记录该请求的转发链路明文(请求/响应体等)。系统级调试行(Redis、迁移日志等)仍只跟随全局开关。
+- **令牌名可变的取舍**:令牌名后续被改名后旧规则会失配,代价仅是"本想开 DEBUG 结果没开成",可接受;改名后按新名字补一条规则即可。
+- **实现**:判定入口 `logger.DebugActive(ctx)` = `common.DebugEnabled || operation_setting.DebugScopeMatches(tokenName, originalModel)`(从请求上下文读取 `token_name` / `original_model`)。`logger.LogDebug` / `logger.LogJson` 以及少数带 `if common.DebugEnabled` 前置守卫的转发链路日志点都改为走 `DebugActive`;其余未加守卫的 `LogDebug` 自动继承作用域判定。规则结构见 `setting/operation_setting/debug_scope_setting.go`。
+- **UI**:系统设置 →「操作设置」→「System Behavior」分区,在 Debug 开关下方,可增删 `API Key + 模型` 规则行。保存走统一的 option 接口(`debug_scope_setting.rules`),持久化与集群同步与其它 option 一致。
+
 ## 集群同步
 
 **无需逐台调用,在任意一台机器上调一次即可**,其它节点会自动同步。

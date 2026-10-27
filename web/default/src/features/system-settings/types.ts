@@ -362,6 +362,11 @@ export type GroupModelRule = {
   models: string[]
 }
 
+export type DebugScopeRule = {
+  token_name: string
+  model: string
+}
+
 export type OperationsSettings = {
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
@@ -370,6 +375,7 @@ export type OperationsSettings = {
   DebugEnabled: boolean
   'extended_cache_ttl_setting.rules': GroupModelRule[]
   'metadata_injection_disable_setting.rules': GroupModelRule[]
+  'debug_scope_setting.rules': DebugScopeRule[]
   QuotaRemindThreshold: string
   SMTPServer: string
   SMTPPort: string

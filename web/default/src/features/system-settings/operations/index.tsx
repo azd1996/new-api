@@ -34,6 +34,7 @@ const defaultOperationsSettings: OperationsSettings = {
   DebugEnabled: false,
   'extended_cache_ttl_setting.rules': [],
   'metadata_injection_disable_setting.rules': [],
+  'debug_scope_setting.rules': [],
   QuotaRemindThreshold: '',
   SMTPServer: '',
   SMTPPort: '',
