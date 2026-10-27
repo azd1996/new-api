@@ -77,6 +77,7 @@ const perfSchema = z.object({
     disk_cache_max_size_mb: z.coerce.number().min(100),
     disk_cache_path: z.string(),
     monitor_enabled: z.boolean(),
+    monitor_overload_samples: z.coerce.number().int().min(0),
     monitor_cpu_threshold: z.coerce.number().min(0),
     monitor_memory_threshold: z.coerce.number().min(0).max(100),
     monitor_disk_threshold: z.coerce.number().min(0).max(100),
@@ -92,6 +93,7 @@ type FlatPerfDefaults = {
   'performance_setting.disk_cache_max_size_mb': number
   'performance_setting.disk_cache_path': string
   'performance_setting.monitor_enabled': boolean
+  'performance_setting.monitor_overload_samples': number
   'performance_setting.monitor_cpu_threshold': number
   'performance_setting.monitor_memory_threshold': number
   'performance_setting.monitor_disk_threshold': number
@@ -106,6 +108,8 @@ const buildFormDefaults = (defaults: FlatPerfDefaults): PerfFormInput => ({
       defaults['performance_setting.disk_cache_max_size_mb'],
     disk_cache_path: defaults['performance_setting.disk_cache_path'] ?? '',
     monitor_enabled: defaults['performance_setting.monitor_enabled'],
+    monitor_overload_samples:
+      defaults['performance_setting.monitor_overload_samples'],
     monitor_cpu_threshold:
       defaults['performance_setting.monitor_cpu_threshold'],
     monitor_memory_threshold:
@@ -126,6 +130,8 @@ const normalizeFormValues = (values: PerfFormValues): FlatPerfDefaults => ({
     values.performance_setting.disk_cache_path ?? '',
   'performance_setting.monitor_enabled':
     values.performance_setting.monitor_enabled,
+  'performance_setting.monitor_overload_samples':
+    values.performance_setting.monitor_overload_samples,
   'performance_setting.monitor_cpu_threshold':
     values.performance_setting.monitor_cpu_threshold,
   'performance_setting.monitor_memory_threshold':
@@ -286,7 +292,13 @@ export function PerformanceSection(props: Props) {
   }
 
   const diskEnabled = form.watch('performance_setting.disk_cache_enabled')
-  const monitorEnabled = form.watch('performance_setting.monitor_enabled')
+  const monitorOverloadSamplesRaw = form.watch(
+    'performance_setting.monitor_overload_samples'
+  )
+  const monitorOverloadSamples =
+    typeof monitorOverloadSamplesRaw === 'number'
+      ? monitorOverloadSamplesRaw
+      : Number(monitorOverloadSamplesRaw) || 0
   const maxCacheSizeRaw = form.watch(
     'performance_setting.disk_cache_max_size_mb'
   )
@@ -443,12 +455,12 @@ export function PerformanceSection(props: Props) {
             </h4>
             <p className='text-muted-foreground mt-1 text-xs'>
               {t(
-                'When performance monitoring is enabled and system resource usage exceeds the set threshold, new Relay requests will be rejected.'
+                'Performance monitoring collects resource metrics. Overload protection is controlled separately and only rejects Relay requests after consecutive over-threshold samples.'
               )}
             </p>
           </div>
 
-          <div className='grid grid-cols-1 gap-4 md:grid-cols-4'>
+          <div className='grid grid-cols-1 gap-4 md:grid-cols-5'>
             <FormField
               control={form.control}
               name='performance_setting.monitor_enabled'
@@ -468,6 +480,27 @@ export function PerformanceSection(props: Props) {
             />
             <FormField
               control={form.control}
+              name='performance_setting.monitor_overload_samples'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Overload Protection Samples')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={0}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t('0 disables protection; positive values require consecutive 5-second samples')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
               name='performance_setting.monitor_cpu_threshold'
               render={({ field }) => (
                 <FormItem>
@@ -478,7 +511,7 @@ export function PerformanceSection(props: Props) {
                       min={0}
                       step={1}
                       {...safeNumberFieldProps(field)}
-                      disabled={!monitorEnabled}
+                      disabled={monitorOverloadSamples <= 0}
                     />
                   </FormControl>
                   <FormMessage />
@@ -498,7 +531,7 @@ export function PerformanceSection(props: Props) {
                       max={100}
                       step={1}
                       {...safeNumberFieldProps(field)}
-                      disabled={!monitorEnabled}
+                      disabled={monitorOverloadSamples <= 0}
                     />
                   </FormControl>
                   <FormMessage />
@@ -518,7 +551,7 @@ export function PerformanceSection(props: Props) {
                       max={100}
                       step={1}
                       {...safeNumberFieldProps(field)}
-                      disabled={!monitorEnabled}
+                      disabled={monitorOverloadSamples <= 0}
                     />
                   </FormControl>
                   <FormMessage />

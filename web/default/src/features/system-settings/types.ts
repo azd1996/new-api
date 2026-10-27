@@ -389,6 +389,7 @@ export type OperationsSettings = {
   'performance_setting.disk_cache_max_size_mb': number
   'performance_setting.disk_cache_path': string
   'performance_setting.monitor_enabled': boolean
+  'performance_setting.monitor_overload_samples': number
   'performance_setting.monitor_cpu_threshold': number
   'performance_setting.monitor_memory_threshold': number
   'performance_setting.monitor_disk_threshold': number

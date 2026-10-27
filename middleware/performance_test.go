@@ -37,7 +37,13 @@ func TestSystemPerformanceCheckLogsRejectionBeforeAuth(t *testing.T) {
 	model.DB, model.LOG_DB = db, db
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	common.NodeName = "overload-test-node"
-	config := common.PerformanceMonitorConfig{Enabled: true, CPUThreshold: 90, MemoryThreshold: 90, DiskThreshold: 95}
+	config := common.PerformanceMonitorConfig{
+		Enabled:                    true,
+		OverloadConsecutiveSamples: 1,
+		CPUThreshold:               90,
+		MemoryThreshold:            90,
+		DiskThreshold:              95,
+	}
 	var cpuSignature string
 	for _, tc := range []struct {
 		name         string
@@ -48,11 +54,11 @@ func TestSystemPerformanceCheckLogsRejectionBeforeAuth(t *testing.T) {
 		thresholdOff bool
 		code         string
 	}{
-		{name: "cpu", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 91.2, MemoryUsage: 99, DiskUsage: 99}, code: "system_cpu_overloaded"},
-		{name: "cpu_changed_usage", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 98.7}, code: "system_cpu_overloaded"},
-		{name: "memory_claude", path: "/v1/messages", status: common.SystemStatus{MemoryUsage: 92.3}, code: "system_memory_overloaded"},
-		{name: "disk", path: "/v1beta/models/test:generateContent", status: common.SystemStatus{DiskUsage: 96.4}, code: "system_disk_overloaded"},
-		{name: "logging_disabled", path: "/v1/messages", status: common.SystemStatus{CPUUsage: 99}, loggingOff: true, code: "system_cpu_overloaded"},
+		{name: "cpu", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 91.2, MemoryUsage: 99, DiskUsage: 99, CPUOverloaded: true}, code: "system_cpu_overloaded"},
+		{name: "cpu_changed_usage", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 98.7, CPUOverloaded: true}, code: "system_cpu_overloaded"},
+		{name: "memory_claude", path: "/v1/messages", status: common.SystemStatus{MemoryUsage: 92.3, MemoryOverloaded: true}, code: "system_memory_overloaded"},
+		{name: "disk", path: "/v1beta/models/test:generateContent", status: common.SystemStatus{DiskUsage: 96.4, DiskOverloaded: true}, code: "system_disk_overloaded"},
+		{name: "logging_disabled", path: "/v1/messages", status: common.SystemStatus{CPUUsage: 99, CPUOverloaded: true}, loggingOff: true, code: "system_cpu_overloaded"},
 		{name: "monitor_disabled", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 99}, monitorOff: true},
 		{name: "integer_threshold_boundary", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 90.9, MemoryUsage: 90.9, DiskUsage: 95.9}},
 		{name: "threshold_disabled", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 99}, thresholdOff: true},
@@ -61,6 +67,9 @@ func TestSystemPerformanceCheckLogsRejectionBeforeAuth(t *testing.T) {
 			require.NoError(t, db.Where("1 = 1").Delete(&model.Log{}).Error)
 			cfg := config
 			cfg.Enabled = !tc.monitorOff
+			if tc.monitorOff {
+				cfg.OverloadConsecutiveSamples = 0
+			}
 			if tc.thresholdOff {
 				cfg.CPUThreshold = 0
 			}

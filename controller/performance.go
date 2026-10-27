@@ -69,8 +69,10 @@ type PerformanceConfig struct {
 	// 是否在容器中运行
 	IsRunningInContainer bool `json:"is_running_in_container"`
 
-	// MonitorEnabled 是否启用性能监控
+	// MonitorEnabled 是否采集系统资源指标
 	MonitorEnabled bool `json:"monitor_enabled"`
+	// MonitorOverloadSamples 连续超限采样次数，0 表示关闭过载保护
+	MonitorOverloadSamples int `json:"monitor_overload_samples"`
 	// MonitorCPUThreshold CPU 使用率阈值（%）
 	MonitorCPUThreshold int `json:"monitor_cpu_threshold"`
 	// MonitorMemoryThreshold 内存使用率阈值（%）
@@ -102,6 +104,7 @@ func GetPerformanceStats(c *gin.Context) {
 		DiskCachePath:          diskConfig.Path,
 		IsRunningInContainer:   common.IsRunningInContainer(),
 		MonitorEnabled:         monitorConfig.Enabled,
+		MonitorOverloadSamples: monitorConfig.OverloadConsecutiveSamples,
 		MonitorCPUThreshold:    monitorConfig.CPUThreshold,
 		MonitorMemoryThreshold: monitorConfig.MemoryThreshold,
 		MonitorDiskThreshold:   monitorConfig.DiskThreshold,

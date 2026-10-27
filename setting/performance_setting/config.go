@@ -16,8 +16,10 @@ type PerformanceSetting struct {
 	// DiskCachePath 磁盘缓存目录
 	DiskCachePath string `json:"disk_cache_path"`
 
-	// MonitorEnabled 是否启用性能监控
+	// MonitorEnabled 是否采集系统资源指标
 	MonitorEnabled bool `json:"monitor_enabled"`
+	// MonitorOverloadSamples 连续超限采样次数，0 表示关闭过载保护
+	MonitorOverloadSamples int `json:"monitor_overload_samples"`
 	// MonitorCPUThreshold CPU 使用率阈值（%）
 	MonitorCPUThreshold int `json:"monitor_cpu_threshold"`
 	// MonitorMemoryThreshold 内存使用率阈值（%）
@@ -34,6 +36,7 @@ var performanceSetting = PerformanceSetting{
 	DiskCachePath:        "",   // 空表示使用系统临时目录
 
 	MonitorEnabled:         true,
+	MonitorOverloadSamples: 0,
 	MonitorCPUThreshold:    90,
 	MonitorMemoryThreshold: 90,
 	MonitorDiskThreshold:   95,
@@ -56,10 +59,11 @@ func syncToCommon() {
 	})
 
 	common.SetPerformanceMonitorConfig(common.PerformanceMonitorConfig{
-		Enabled:         performanceSetting.MonitorEnabled,
-		CPUThreshold:    performanceSetting.MonitorCPUThreshold,
-		MemoryThreshold: performanceSetting.MonitorMemoryThreshold,
-		DiskThreshold:   performanceSetting.MonitorDiskThreshold,
+		Enabled:                    performanceSetting.MonitorEnabled,
+		OverloadConsecutiveSamples: performanceSetting.MonitorOverloadSamples,
+		CPUThreshold:               performanceSetting.MonitorCPUThreshold,
+		MemoryThreshold:            performanceSetting.MonitorMemoryThreshold,
+		DiskThreshold:              performanceSetting.MonitorDiskThreshold,
 	})
 }
 

@@ -4,10 +4,11 @@ import "sync/atomic"
 
 // PerformanceMonitorConfig 性能监控配置
 type PerformanceMonitorConfig struct {
-	Enabled         bool
-	CPUThreshold    int
-	MemoryThreshold int
-	DiskThreshold   int
+	Enabled                    bool
+	OverloadConsecutiveSamples int
+	CPUThreshold               int
+	MemoryThreshold            int
+	DiskThreshold              int
 }
 
 var performanceMonitorConfig atomic.Value
