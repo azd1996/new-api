@@ -21,6 +21,8 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -1601,6 +1603,153 @@ func CopyChannel(c *gin.Context) {
 		"name":     clone.Name,
 	})
 	// success
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": clone.Id}})
+}
+
+const (
+	behindCdnAigwTag         = "behind-cdnaigw"
+	behindCdnAigwGroupPrefix = "behind-cdnaigw_"
+)
+
+type copyBehindCdnAigwRequest struct {
+	Name         string `json:"name"`
+	ResetBalance *bool  `json:"reset_balance"`
+}
+
+// POST /api/channel/copy_behind_cdnaigw/:id
+// Super-admin only (RootAuth). Clones a channel tagged "behind-cdnaigw" and, in
+// one step, provisions the matching zero-ratio group (also registered as a
+// usable group so the key can relay) and an unlimited-quota API key under the
+// operating super-admin. Group/token creation is idempotent; name/group/key all
+// share the fixed prefix. The admin only types the distinguishing part.
+func CopyBehindCdnAigwChannel(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid id"})
+		return
+	}
+
+	var req copyBehindCdnAigwRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "渠道名不能为空"})
+		return
+	}
+	fullName := behindCdnAigwGroupPrefix + name
+	if len(fullName) > 50 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "名称过长，去掉固定前缀后请控制在 35 个字符以内"})
+		return
+	}
+	resetBalance := true
+	if req.ResetBalance != nil {
+		resetBalance = *req.ResetBalance
+	}
+
+	origin, err := model.GetChannelById(id, true)
+	if err != nil {
+		common.SysError("failed to get channel by id: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道信息失败，请稍后重试"})
+		return
+	}
+	if origin.Tag == nil || *origin.Tag != behindCdnAigwTag {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "仅支持复制标签为 behind-cdnaigw 的渠道"})
+		return
+	}
+
+	// 1) ensure the zero-ratio group exists and is usable (idempotent).
+	// Mirror the group-pricing visual editor: a usable group must appear in both
+	// GroupRatio and UserUsableGroups, otherwise the key is rejected at relay time.
+	groupRatios := ratio_setting.GetGroupRatioCopy()
+	usableGroups := setting.GetUserUsableGroupsCopy()
+	optionUpdates := make(map[string]string)
+	if _, ok := groupRatios[fullName]; !ok {
+		groupRatios[fullName] = 0
+		ratioJSON, err := common.Marshal(groupRatios)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		optionUpdates["GroupRatio"] = string(ratioJSON)
+	}
+	if _, ok := usableGroups[fullName]; !ok {
+		usableGroups[fullName] = fullName
+		usableJSON, err := common.Marshal(usableGroups)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		optionUpdates["UserUsableGroups"] = string(usableJSON)
+	}
+	if len(optionUpdates) > 0 {
+		if err := model.UpdateOptionsBulk(optionUpdates); err != nil {
+			common.SysError("failed to provision group: " + err.Error())
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建分组失败，请稍后重试"})
+			return
+		}
+	}
+
+	// 2) clone the channel, pointing it at the new group.
+	clone := *origin
+	clone.Id = 0
+	clone.CreatedTime = common.GetTimestamp()
+	clone.Name = fullName
+	clone.Group = fullName
+	clone.TestTime = 0
+	clone.ResponseTime = 0
+	if resetBalance {
+		clone.Balance = 0
+		clone.UsedQuota = 0
+	}
+	if err := clone.Insert(); err != nil {
+		common.SysError("failed to clone channel: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "复制渠道失败，请稍后重试"})
+		return
+	}
+	model.InitChannelCache()
+
+	// 3) ensure a matching unlimited-quota API key exists under the operator (idempotent).
+	userId := c.GetInt("id")
+	existingToken, err := model.GetUserTokenByName(userId, fullName)
+	if err != nil {
+		common.SysError("failed to query token: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 API Key 失败，请稍后重试"})
+		return
+	}
+	if existingToken == nil {
+		key, err := common.GenerateKey()
+		if err != nil {
+			common.SysError("failed to generate token key: " + err.Error())
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "生成 API Key 失败，请稍后重试"})
+			return
+		}
+		token := model.Token{
+			UserId:         userId,
+			Name:           fullName,
+			Key:            key,
+			CreatedTime:    common.GetTimestamp(),
+			AccessedTime:   common.GetTimestamp(),
+			ExpiredTime:    -1,
+			RemainQuota:    0,
+			UnlimitedQuota: true,
+			Group:          fullName,
+		}
+		if err := token.Insert(); err != nil {
+			common.SysError("failed to create token: " + err.Error())
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建 API Key 失败，请稍后重试"})
+			return
+		}
+	}
+
+	recordManageAudit(c, "channel.copy_behind_cdnaigw", map[string]interface{}{
+		"sourceId": id,
+		"id":       clone.Id,
+		"name":     clone.Name,
+		"group":    fullName,
+	})
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": clone.Id}})
 }
 
