@@ -460,6 +460,7 @@ func InitResources() error {
 
 	// 启动系统监控
 	common.StartSystemMonitor()
+	common.StartProcessMonitor()
 
 	// Initialize i18n
 	err = i18n.Init()

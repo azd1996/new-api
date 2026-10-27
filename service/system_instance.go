@@ -49,6 +49,15 @@ type SystemInstanceResources struct {
 	CPU     SystemInstanceResourceUsage  `json:"cpu"`
 	Memory  SystemInstanceResourceUsage  `json:"memory"`
 	Storage SystemInstanceStorageMetrics `json:"storage"`
+	Process SystemInstanceProcessMetrics `json:"process"`
+}
+
+type SystemInstanceProcessMetrics struct {
+	CPUUsagePercent   *float64 `json:"cpu_usage_percent,omitempty"`
+	ActiveRequests    int64    `json:"active_requests"`
+	RequestsPerMinute int64    `json:"requests_per_minute"`
+	Threads           *int32   `json:"threads,omitempty"`
+	FileDescriptors   *int32   `json:"file_descriptors,omitempty"`
 }
 
 type SystemInstanceResourceUsage struct {
@@ -89,6 +98,8 @@ func ReportCurrentSystemInstance() error {
 		identity.ShouldConfigureManually = true
 	}
 	systemStatus := common.GetSystemStatus()
+	processStatus := common.GetProcessStatus()
+	httpStats := common.GetHTTPRuntimeStats()
 	diskInfo := common.GetDiskSpaceInfo()
 	info := SystemInstanceInfo{
 		SchemaVersion: 1,
@@ -117,6 +128,13 @@ func ReportCurrentSystemInstance() error {
 				UsedBytes:   diskInfo.Used,
 				FreeBytes:   diskInfo.Free,
 				UsedPercent: diskInfo.UsedPercent,
+			},
+			Process: SystemInstanceProcessMetrics{
+				CPUUsagePercent:   processStatus.CPUUsagePercent,
+				ActiveRequests:    httpStats.ActiveRequests,
+				RequestsPerMinute: httpStats.RequestsPerMinute,
+				Threads:           processStatus.Threads,
+				FileDescriptors:   processStatus.FileDescriptors,
 			},
 		},
 	}

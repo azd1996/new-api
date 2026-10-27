@@ -8,6 +8,7 @@
 ## [2026-10-27]
 
 ### 新增 Added
+- **系统信息页新增进程级指标（进程 CPU / 活跃请求 / RPM / 线程 / FD）**：集群「系统信息」实例表在原有机器级 CPU、内存、磁盘之外，新增 5 列进程级指标——进程 CPU（`gopsutil/process` 每 5 秒采样当前进程）、活跃 Relay 请求数、最近 60 秒完成的 Relay 请求数（RPM）、OS 线程数、文件描述符数。新增 `common/process_monitor.go`（`StartProcessMonitor` 后台 goroutine 采样，受 `monitor_enabled` 开关控制，采集失败时对应指标为 nil）与 `common/http_runtime_stats.go`（原子活跃计数 + 60 个按秒 bucket 的滑动窗统计 RPM）；`middleware/stats.go` 的活跃连接计数从本地 atomic 改为复用 `common` 共享统计。指标随 30 秒心跳写入 `system_instances.info`（JSON TEXT 字段，无需迁移），前端表格对缺失/不支持的指标显示 `-`（而非 0）。注意：**活跃请求数是进行中的 Relay 请求数，不是 TCP 连接数**；进程 CPU/线程/FD 依赖 gopsutil，平台或权限不支持时省略。新增表头文案已补齐 en/zh/fr/ja/ru/vi。
 - **明细错误筛选区升级为「下拉选择 + 手动填入」并新增 4 个筛选框**：明细错误页筛选框全部改为可下拉可手填的 `Combobox`（`allowCustomValue` + `clearable`）——模型（`getEnabledModels`）、分组（`getGroups`）、渠道（从当前统计结果出现过的渠道派生选项，可手填任意 ID）；状态码、条数仍为纯数字输入。新增一行放「客户 / 客户ID」两个筛选框（沿用「使用日志」做法，拉取已配置客户列表作候选、含「其他（无客户信息）」哨兵 `__none__`、支持手填），以及「明细错误类型 / 错误归因」两个筛选框（候选取已配置别名与当前结果派生值）。客户筛选基于日志 `other.customer_id`/`customer_name`（`__none__` 选无客户行）；明细错误类型/错误归因是按签名从别名缓存**查询时解析**的值，不落库、无法走 SQL，故在后端 Go 侧对聚合结果过滤（`matchesErrorCategoryFilter`，对 signature / 明细错误类型 / 错误归因三种视图都生效，空值不过滤）。
 
 ### 优化 Changed
