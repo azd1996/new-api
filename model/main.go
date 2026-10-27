@@ -376,6 +376,9 @@ func migrateDB() error {
 		&CasbinRule{},
 		&AuthzRole{},
 		&UserAccessToken{},
+		&XScheduleDatasource{},
+		&XScheduleRuleTemplate{},
+		&XScheduleRule{},
 	)
 	if err != nil {
 		return err
