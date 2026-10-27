@@ -13,6 +13,7 @@
 
 ### 优化 Changed
 - **客户名/客户ID 筛选下拉组件通用化**：将「使用日志」里客户名/客户ID 的下拉+手填逻辑抽为共享组件 `features/customers/components/customer-filter-combobox.tsx`（内部拉取配置客户表、构建候选、含「其他（无客户信息）」哨兵），并在「使用日志」与「明细错误」两页复用，行为保持一致。
+- **会话 ID 提升为 `logs.session_id` 真列，会话搜索改走列过滤**：此前会话 ID（Claude metadata session / OpenAI `prompt_cache_key`，无会话时为 `notfound` 哨兵）只落在消耗/错误日志 `other.session_id`，会话搜索靠跨方言 `other LIKE` 扫描。现新增 `model.Log.SessionID` 真列（`varchar(128)` + 索引，`default:''`），`RecordConsumeLog`/`RecordErrorLog` 从 `other` 取值写入新列并**保留 `other` 那份**（随 `other` 继续同步远端 ClickHouse，`logshipper.Row` 不动）；本机 CH 建表 DDL 与 `migrateClickHouseLogDB` 幂等 `ADD COLUMN IF NOT EXISTS` 补列，MySQL/SQLite 走 `AutoMigrate` 自动补列。`SearchLogsBySessionWindow` 由 `other LIKE` 改为 `session_id = ?` 精确列匹配（走索引，去掉 LIKE 转义逻辑及其测试）。前端日志详情「会话 ID」行做兼容：`UsageLog` 增加顶层 `session_id`，展示**先读列、列空回落 `other.session_id`**，来源 `session_id_source` 仍只读 `other`（未提列）。注意：**列加上之前产生的历史日志**仅在 `other` 里有会话 ID、列为空，会话搜索（时间窗查询）查不到它们；新日志不受影响。方案见 `docs/log-field-columnization.md`。
 
 ## [2026-10-26]
 

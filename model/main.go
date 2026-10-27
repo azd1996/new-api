@@ -438,6 +438,7 @@ func migrateClickHouseLogDB() error {
 		"stat_group_ratio Float64 DEFAULT 0",
 		"customer_stat_quota Int32 DEFAULT 0",
 		"customer_discount Float64 DEFAULT 0",
+		"session_id String DEFAULT ''",
 	}
 	for _, col := range addColumns {
 		if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS " + col).Error; err != nil {
@@ -499,6 +500,7 @@ CREATE TABLE IF NOT EXISTS logs (
 	stat_group_ratio Float64 DEFAULT 0,
 	customer_stat_quota Int32 DEFAULT 0,
 	customer_discount Float64 DEFAULT 0,
+	session_id String DEFAULT '',
 	other String DEFAULT ''
 )
 ENGINE = MergeTree()

@@ -733,13 +733,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DetailRow label={t('Proxy Used')} value={usedProxyLabel} mono />
           )}
 
-          {other?.session_id && (
+          {(props.log.session_id || other?.session_id) && (
             <DetailRow
               label={t('Session ID')}
               value={
                 <span>
-                  {other.session_id}
-                  {other.session_id_source && (
+                  {props.log.session_id || other?.session_id}
+                  {other?.session_id_source && (
                     <span className='text-muted-foreground'>
                       {' '}
                       ({other.session_id_source})

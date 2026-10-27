@@ -146,19 +146,6 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 	return input, nil
 }
 
-// sessionOtherLikeCondition builds a cross-dialect `other LIKE` condition that
-// matches a literal substring (e.g. `"session_id":"abc"`) anywhere in the other
-// JSON. The literal's LIKE metacharacters are escaped so a session id that
-// happens to contain %, _, or the escape char cannot alter the pattern.
-func sessionOtherLikeCondition(literal string) (string, string) {
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(literal)
-		return "other LIKE ?", "%" + esc + "%"
-	}
-	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(literal)
-	return "other LIKE ? ESCAPE '!'", "%" + esc + "%"
-}
-
 // statusCodeOtherCondition builds a cross-dialect condition matching logs whose
 // Other JSON carries the given HTTP status_code. The code is recorded only on
 // error logs (controller/relay.go writes other["status_code"]), marshaled as a
@@ -250,9 +237,11 @@ func errorContentLikeCondition(column string, keyword string) (string, string) {
 }
 
 // SearchLogsBySessionWindow returns the logs for a user within the half-open
-// window [startSec, endSec) whose other JSON carries the given session_id. It
+// window [startSec, endSec) whose session_id column matches the given value. It
 // powers the async session-search engine one time window at a time; limit caps
-// the rows pulled per window.
+// the rows pulled per window. The match is exact on the real session_id column
+// (dual-written from other.session_id), so rows written before the column
+// existed — carrying session_id only in Other — are not matched.
 func SearchLogsBySessionWindow(username string, startSec, endSec int64, sessionID string, limit int) ([]*Log, error) {
 	if username == "" || sessionID == "" || endSec <= startSec {
 		return nil, nil
@@ -260,11 +249,10 @@ func SearchLogsBySessionWindow(username string, startSec, endSec int64, sessionI
 	if limit <= 0 || limit > 10000 {
 		limit = 10000
 	}
-	condition, pattern := sessionOtherLikeCondition(`"session_id":"` + sessionID + `"`)
 	var logs []*Log
 	err := LOG_DB.Where("username = ?", username).
 		Where("created_at >= ? AND created_at < ?", startSec, endSec).
-		Where(condition, pattern).
+		Where("session_id = ?", sessionID).
 		Order("created_at desc").
 		Limit(limit).
 		Find(&logs).Error
@@ -292,6 +280,12 @@ type Log struct {
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
+	// SessionID duplicates other.session_id into a real indexed column (Claude
+	// metadata session / OpenAI prompt_cache_key; the "notfound" sentinel when a
+	// session-capable path resolved none). Written alongside the Other copy so
+	// the session-search read path can filter on this column instead of an
+	// other LIKE scan; see docs/log-field-columnization.md.
+	SessionID string `json:"session_id,omitempty" gorm:"type:varchar(128);index:idx_logs_session_id;default:''"`
 	// ErrorSignatureHash duplicates other.error_signature_hash into a real
 	// column (error logs only). It is written alongside the Other JSON copy so
 	// the hash can later back a column-based filter/group-by; reads still go
@@ -653,6 +647,8 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	// Dual-write the error signature hash into its own column while keeping the
 	// Other JSON copy (nil map reads are safe and yield "").
 	errorSignatureHash, _ := other["error_signature_hash"].(string)
+	// Dual-write session_id into its own indexed column (kept in Other too).
+	sessionID, _ := other["session_id"].(string)
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if userId > 0 {
@@ -686,6 +682,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		}(),
 		RequestId:          requestId,
 		UpstreamRequestId:  upstreamRequestId,
+		SessionID:          sessionID,
 		ErrorSignatureHash: errorSignatureHash,
 		RetryTriggered:     retryTriggered,
 		Other:              otherStr,
@@ -734,6 +731,8 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	customerStatQuota, _ := params.Other["customer_stat_quota"].(int)
 	customerDiscount, _ := params.Other["customer_discount"].(float64)
 	customerId, _ := params.Other["customer_id"].(string)
+	// Dual-write session_id into its own indexed column (kept in Other too).
+	sessionID, _ := params.Other["session_id"].(string)
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
@@ -765,6 +764,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		}(),
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
+		SessionID:         sessionID,
 		RawQuota:          rawQuota,
 		StatQuota:         statQuota,
 		StatGroupRatio:    statGroupRatio,
