@@ -135,6 +135,10 @@ func GetErrorStats(c *gin.Context) {
 		ModelName:      c.Query("model_name"),
 		Channel:        channel,
 		Group:          c.Query("group"),
+		CustomerId:     c.Query("customer_id"),
+		CustomerName:   c.Query("customer_name"),
+		ShortName:      c.Query("short_name"),
+		Attribution:    c.Query("attribution"),
 	}
 
 	groupBy := c.Query("group_by")
@@ -278,6 +282,10 @@ func GetErrorSignatureRuleSuggestions(c *gin.Context) {
 		ModelName:      c.Query("model_name"),
 		Channel:        channel,
 		Group:          c.Query("group"),
+		CustomerId:     c.Query("customer_id"),
+		CustomerName:   c.Query("customer_name"),
+		ShortName:      c.Query("short_name"),
+		Attribution:    c.Query("attribution"),
 	}
 	stats, err := model.GetErrorSignatureStats(filter, 500)
 	if err != nil {

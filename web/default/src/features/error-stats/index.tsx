@@ -72,6 +72,10 @@ interface ErrorStatsSearch {
   model?: string
   channel?: string
   group?: string
+  customerName?: string
+  customerId?: string
+  shortName?: string
+  attribution?: string
   limit?: number
 }
 
@@ -98,6 +102,10 @@ function toParams(search: ErrorStatsSearch): ErrorStatsParams {
     ...(search.model ? { model_name: search.model } : {}),
     ...(Number.isFinite(channel) && channel > 0 ? { channel } : {}),
     ...(search.group ? { group: search.group } : {}),
+    ...(search.customerName ? { customer_name: search.customerName } : {}),
+    ...(search.customerId ? { customer_id: search.customerId } : {}),
+    ...(search.shortName ? { short_name: search.shortName } : {}),
+    ...(search.attribution ? { attribution: search.attribution } : {}),
     limit: search.limit && search.limit > 0 ? search.limit : DEFAULT_LIMIT,
   }
 }
@@ -111,6 +119,10 @@ function toDraft(search: ErrorStatsSearch): ErrorStatsFilterDraft {
     model: search.model ?? '',
     channel: search.channel ?? '',
     group: search.group ?? '',
+    customerName: search.customerName ?? '',
+    customerId: search.customerId ?? '',
+    shortName: search.shortName ?? '',
+    attribution: search.attribution ?? '',
     limit: search.limit ? String(search.limit) : '',
   }
 }
@@ -149,6 +161,23 @@ export function ErrorStats() {
     () => items.reduce((sum, item) => sum + item.count, 0),
     [items]
   )
+
+  // Channel dropdown options derived from the channels that appear in the
+  // current result set (manual id entry stays available via allowCustomValue).
+  const channelOptions = useMemo(() => {
+    const seen = new Map<number, string>()
+    for (const item of items) {
+      for (const channel of item.channels) {
+        if (!seen.has(channel.channel_id)) {
+          seen.set(channel.channel_id, channel.channel_name)
+        }
+      }
+    }
+    return [...seen.entries()].map(([id, name]) => ({
+      value: String(id),
+      label: name ? `${id} (${name})` : String(id),
+    }))
+  }, [items])
 
   // Every configured alias, so the short-name / attribution dropdowns offer
   // ALL previously-saved values, not just the ones present in the current rows.
@@ -251,6 +280,10 @@ export function ErrorStats() {
         model: draft.model || undefined,
         channel: draft.channel || undefined,
         group: draft.group || undefined,
+        customerName: draft.customerName || undefined,
+        customerId: draft.customerId || undefined,
+        shortName: draft.shortName || undefined,
+        attribution: draft.attribution || undefined,
         limit: draft.limit ? Number(draft.limit) || undefined : undefined,
       },
     })
@@ -326,6 +359,9 @@ export function ErrorStats() {
                 onDraftChange={handleDraftChange}
                 onSearch={handleSearch}
                 isFetching={statsQuery.isFetching}
+                channelOptions={channelOptions}
+                shortNameOptions={shortNameOptions}
+                attributionOptions={attributionOptions}
               />
             </div>
             <div className='min-h-0 flex-1'>

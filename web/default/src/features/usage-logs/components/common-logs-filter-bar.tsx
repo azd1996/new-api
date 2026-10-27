@@ -26,8 +26,6 @@ import { toast } from 'sonner'
 
 import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
-import { Combobox } from '@/components/ui/combobox'
-import type { ComboboxInputOption } from '@/components/ui/combobox-input'
 import {
   Select,
   SelectContent,
@@ -42,7 +40,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { getEnabledModels } from '@/features/channels/api'
-import { getCustomers } from '@/features/customers/api'
+import {
+  CustomerFilterCombobox,
+} from '@/features/customers/components/customer-filter-combobox'
 import { getGroups } from '@/features/users/api'
 
 import { startSessionLogSearch } from '../api'
@@ -69,10 +69,8 @@ const route = getRouteApi('/_authenticated/usage-logs/$section')
 // content column gated on type=error), so the input is shown only for this type.
 const LOG_TYPE_ERROR_VALUE = String(LOG_TYPE_ENUM.ERROR)
 
-// Sentinel sent for the "其他 / Other (no customer info)" dropdown choice; the
-// backend (model.applyTraceTagFilters) matches logs that carry no decoded
-// customer at all.
-const CUSTOMER_NONE_VALUE = '__none__'
+// Sentinel sent for the "其他 / Other (no customer info)" dropdown choice is
+// defined alongside the shared CustomerFilterCombobox.
 
 type LogTypeValue = (typeof LOG_TYPE_FILTERS)[number]['value']
 const logTypeValueSet = new Set<string>(
@@ -226,13 +224,6 @@ export function CommonLogsFilterBar<TData>(
     enabled: canManageScope,
     staleTime: 5 * 60 * 1000,
   })
-  // Configured customers back the customer name/id dropdowns (admin-only).
-  const customerCandidatesQuery = useQuery({
-    queryKey: ['log-filter-customers'],
-    queryFn: () => getCustomers({ p: 1, page_size: 1000 }),
-    enabled: canManageScope,
-    staleTime: 5 * 60 * 1000,
-  })
   const modelOptions = useMemo(
     () =>
       (modelCandidatesQuery.data?.data ?? []).map((model) => ({
@@ -249,34 +240,6 @@ export function CommonLogsFilterBar<TData>(
       })),
     [groupCandidatesQuery.data]
   )
-  const noneOption = useMemo<ComboboxInputOption>(
-    () => ({
-      value: CUSTOMER_NONE_VALUE,
-      label: t('Other (no customer info)'),
-    }),
-    [t]
-  )
-  const customerNameOptions = useMemo<ComboboxInputOption[]>(() => {
-    const names = [
-      ...new Set(
-        (customerCandidatesQuery.data?.data?.items ?? [])
-          .map((customer) => customer.name)
-          .filter((name): name is string => !!name)
-      ),
-    ].map((name) => ({ value: name, label: name }))
-    return [...names, noneOption]
-  }, [customerCandidatesQuery.data, noneOption])
-  const customerIdOptions = useMemo<ComboboxInputOption[]>(() => {
-    const ids = (customerCandidatesQuery.data?.data?.items ?? []).map(
-      (customer) => ({
-        value: customer.customer_id,
-        label: customer.name
-          ? `${customer.customer_id} (${customer.name})`
-          : customer.customer_id,
-      })
-    )
-    return [...ids, noneOption]
-  }, [customerCandidatesQuery.data, noneOption])
 
   const searchState = useMemo<CommonLogDraft>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -821,32 +784,20 @@ export function CommonLogsFilterBar<TData>(
       {isAdmin && (
         <div className='col-span-full grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
           <LogsFilterField>
-            <Combobox
-              options={customerNameOptions}
+            <CustomerFilterCombobox
+              field='name'
               value={filters.customerName || ''}
-              onValueChange={(value) =>
-                handleChange('customerName', value || undefined)
-              }
-              placeholder={t('Customer Name')}
-              searchPlaceholder={t('Customer Name')}
-              emptyText={t('No option found.')}
-              allowCustomValue
-              clearable
+              onValueChange={(value) => handleChange('customerName', value)}
+              enabled={canManageScope}
               className='h-8 min-w-0 text-sm leading-5'
             />
           </LogsFilterField>
           <LogsFilterField>
-            <Combobox
-              options={customerIdOptions}
+            <CustomerFilterCombobox
+              field='id'
               value={filters.customerId || ''}
-              onValueChange={(value) =>
-                handleChange('customerId', value || undefined)
-              }
-              placeholder={t('Customer ID')}
-              searchPlaceholder={t('Customer ID')}
-              emptyText={t('No option found.')}
-              allowCustomValue
-              clearable
+              onValueChange={(value) => handleChange('customerId', value)}
+              enabled={canManageScope}
               className='h-8 min-w-0 text-sm leading-5'
             />
           </LogsFilterField>

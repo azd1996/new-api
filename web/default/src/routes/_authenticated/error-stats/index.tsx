@@ -28,6 +28,10 @@ const errorStatsSearchSchema = z.object({
   model: z.string().optional().catch(''),
   channel: z.string().optional().catch(''),
   group: z.string().optional().catch(''),
+  customerName: z.string().optional().catch(''),
+  customerId: z.string().optional().catch(''),
+  shortName: z.string().optional().catch(''),
+  attribution: z.string().optional().catch(''),
   limit: z.number().optional().catch(undefined),
 })
 

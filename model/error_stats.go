@@ -17,6 +17,17 @@ type ErrorStatFilter struct {
 	ModelName      string
 	Channel        int
 	Group          string
+	// CustomerId / CustomerName narrow by the downstream customer recorded in the
+	// log's Other JSON. A value of customerNoneFilter ("__none__") selects error
+	// logs that carry no decoded customer, mirroring the usage-log filters.
+	CustomerId   string
+	CustomerName string
+	// ShortName / Attribution narrow by the admin-configured category (明细错误类型)
+	// and attribution (错误归因). These are resolved per signature from the alias
+	// cache (not stored in logs), so they are applied in Go after resolution
+	// rather than in the SQL scan. Empty means no narrowing.
+	ShortName   string
+	Attribution string
 }
 
 // Error stat grouping dimensions for the stats page view toggle.
@@ -69,7 +80,33 @@ func applyErrorStatFilter(tx *gorm.DB, f ErrorStatFilter) *gorm.DB {
 		condition, args := statusCodeOtherCondition("other", f.StatusCode)
 		tx = tx.Where(condition, args...)
 	}
+	if f.CustomerId == customerNoneFilter || f.CustomerName == customerNoneFilter {
+		cond, pat := otherFieldAbsentCondition("other", "customer_id")
+		tx = tx.Where(cond, pat)
+	} else {
+		if f.CustomerId != "" {
+			cond, pat := otherFieldLikeCondition("other", "customer_id", f.CustomerId)
+			tx = tx.Where(cond, pat)
+		}
+		if f.CustomerName != "" {
+			cond, pat := otherFieldLikeCondition("other", "customer_name", f.CustomerName)
+			tx = tx.Where(cond, pat)
+		}
+	}
 	return tx
+}
+
+// matchesErrorCategoryFilter reports whether a signature hash passes the
+// short-name (明细错误类型) and attribution (错误归因) filters. Both are resolved
+// from the in-memory alias cache; an empty filter field matches everything.
+func matchesErrorCategoryFilter(f ErrorStatFilter, hash string) bool {
+	if f.ShortName != "" && ResolveErrorShortName(hash) != f.ShortName {
+		return false
+	}
+	if f.Attribution != "" && ResolveErrorAttribution(hash) != f.Attribution {
+		return false
+	}
+	return true
 }
 
 type errorStatScanRow struct {
@@ -152,6 +189,9 @@ func GetErrorSignatureStats(f ErrorStatFilter, limit int) ([]*ErrorSignatureStat
 
 	out := make([]*ErrorSignatureStat, 0, len(agg))
 	for _, s := range agg {
+		if !matchesErrorCategoryFilter(f, s.SignatureHash) {
+			continue
+		}
 		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
@@ -232,6 +272,9 @@ func GetErrorStatsGrouped(f ErrorStatFilter, groupBy string, limit int) ([]*Erro
 		}
 		var o errorSignatureOther
 		if common.Unmarshal([]byte(r.Other), &o) != nil || o.ErrorSignatureHash == "" {
+			continue
+		}
+		if !matchesErrorCategoryFilter(f, o.ErrorSignatureHash) {
 			continue
 		}
 		key := ResolveErrorShortName(o.ErrorSignatureHash)

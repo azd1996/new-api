@@ -101,6 +101,10 @@ export interface ErrorStatsParams {
   model_name?: string
   channel?: number
   group?: string
+  customer_name?: string
+  customer_id?: string
+  short_name?: string
+  attribution?: string
   group_by?: ErrorStatsGroupBy
   limit?: number
 }
