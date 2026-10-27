@@ -447,6 +447,87 @@
             ]
         },
         {
+            "description": "claude-opus-5(前缀含opus-5/opus-5-5): 顶层cache_control与block级ttl不一致会触发Bedrock 400 matching TTLs。策略=一旦请求体任意位置出现ttl='1h'，就把全部已存在的cache_control.ttl统一抬成1h，彻底消除5m/1h混用冲突并保留1h缓存收益。本条处理顶层。检测条件用gjson多路径投影messages/system/tools/顶层的全部ttl聚成一个数组再contains '1h'，即'请求体确实要求1h'才触发；第3个条件保证顶层cache_control已存在才改(contains空=存在性判断)，避免给无顶层cache_control的请求凭空造缓存断点",
+            "mode": "set",
+            "path": "cache_control.ttl",
+            "value": "1h",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "[messages.#.content.#.cache_control.ttl,system.#.cache_control.ttl,tools.#.cache_control.ttl,cache_control.ttl]",
+                    "mode": "contains",
+                    "value": "1h"
+                },
+                {
+                    "path": "cache_control",
+                    "mode": "contains",
+                    "value": ""
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 同上策略，处理messages各内容块。set路径messages.*.content.*.cache_control.ttl因cache_control是中间段，引擎仅命中已存在cache_control的块(无cache_control的纯文本块被剪枝，不会凭空新增缓存断点)，把其ttl统一改为1h",
+            "mode": "set",
+            "path": "messages.*.content.*.cache_control.ttl",
+            "value": "1h",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "[messages.#.content.#.cache_control.ttl,system.#.cache_control.ttl,tools.#.cache_control.ttl,cache_control.ttl]",
+                    "mode": "contains",
+                    "value": "1h"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 同上策略，处理system各段。仅命中已存在cache_control的system块，ttl统一改1h",
+            "mode": "set",
+            "path": "system.*.cache_control.ttl",
+            "value": "1h",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "[messages.#.content.#.cache_control.ttl,system.#.cache_control.ttl,tools.#.cache_control.ttl,cache_control.ttl]",
+                    "mode": "contains",
+                    "value": "1h"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 同上策略，处理tools各工具。仅命中已存在cache_control的工具，ttl统一改1h",
+            "mode": "set",
+            "path": "tools.*.cache_control.ttl",
+            "value": "1h",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "[messages.#.content.#.cache_control.ttl,system.#.cache_control.ttl,tools.#.cache_control.ttl,cache_control.ttl]",
+                    "mode": "contains",
+                    "value": "1h"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
             "description": "claude-sonnet-5-5: 关闭thinking需用type=between_tools而非disabled，避免Bedrock 400",
             "mode": "set",
             "path": "thinking.type",
