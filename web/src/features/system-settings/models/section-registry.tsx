@@ -23,6 +23,7 @@ import { ClaudeSettingsCard } from './claude-settings-card'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
+import { SchedulingSection } from './scheduling'
 
 function formatJsonForEditor(value: string, fallback: string) {
   const raw = (value ?? '').toString().trim()
@@ -132,6 +133,12 @@ const MODELS_SECTIONS = [
         }}
       />
     ),
+  },
+
+  {
+    id: 'scheduling',
+    titleKey: 'Auto Scheduling',
+    build: () => <SchedulingSection />,
   },
 ] as const
 
