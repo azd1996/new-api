@@ -799,6 +799,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DetailRow label={t('Retry Chain')} value={channelChain} mono />
           )}
 
+          {props.isAdmin && !isTopup && adminInfo?.node_name && (
+            <DetailRow label={t('Node Name')} value={adminInfo.node_name} mono />
+          )}
+
           {props.log.token_name && (
             <DetailRow
               label={t('Token')}

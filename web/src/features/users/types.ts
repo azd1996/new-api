@@ -128,6 +128,14 @@ export interface UserFormData {
   admin_permissions?: AdminPermissionMatrix
 }
 
+/** Data returned when creating a user, optionally with a default key */
+export interface CreateUserResult {
+  /** The ready-to-use default key (prefixed with sk-), present only when requested and created */
+  default_token_key?: string
+  /** Error detail when the default key was requested but could not be created */
+  default_token_error?: string
+}
+
 export type ManageUserAction =
   | 'promote'
   | 'demote'
