@@ -346,6 +346,15 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
 	})
 
+	// Client-disconnect behavior is opt-in per (api-key, model): by default the
+	// upstream stream is kept alive after the client goes away so the final usage
+	// frame is received and billed accurately. A configured client_disconnect rule
+	// arms the client-gone case below to abort the upstream instead (a nil channel
+	// never selects). Process-shutdown cancellation stays independent via upstreamCtx.
+	var clientGoneChan <-chan struct{}
+	if operation_setting.AbortUpstreamOnClientDisconnect(c.GetString("token_name"), info.OriginModelName) {
+		clientGoneChan = c.Request.Context().Done()
+	}
 	// 主循环等待完成或超时
 	select {
 	case <-ticker.C:
@@ -357,9 +366,10 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		// detached upstream context was cancelled, so stop relaying and record a
 		// scanner error rather than ClientGone.
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, upstreamCtx.Err())
-	case <-c.Request.Context().Done():
-		// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
-		// 避免为已放弃的请求继续消费上游 token。
+	case <-clientGoneChan:
+		// 客户端断开且该 (api-key, model) 显式配置为中止：cleanup 关闭上游 resp.Body，
+		// 解除 scanner 阻塞并让上游停止生成。未配置时此 case 为 nil channel，永不命中，
+		// 上游流继续读到底以拿到最终 usage 照实计费。
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
 	}
 

@@ -295,6 +295,14 @@ func TestStreamScannerHandler_ClientCancelAbortsUpstreamAndReturns(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Aborting the upstream on client disconnect is opt-in per (api-key, model).
+	// Configure a matching rule so this test exercises the abort path; the
+	// default (no rule) keeps the upstream alive (see the KeepAlive test below).
+	s := operation_setting.GetClientDisconnectSetting()
+	origRules := s.Rules
+	s.Rules = []operation_setting.ClientDisconnectRule{{TokenName: "k", Model: "m"}}
+	t.Cleanup(func() { s.Rules = origRules })
+
 	pr, pw := io.Pipe()
 	t.Cleanup(func() {
 		_ = pr.Close()
@@ -304,11 +312,13 @@ func TestStreamScannerHandler_ClientCancelAbortsUpstreamAndReturns(t *testing.T)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+	c.Set("token_name", "k")
 
 	resp := &http.Response{Body: pr}
 	info := &relaycommon.RelayInfo{
-		DisablePing: true,
-		ChannelMeta: &relaycommon.ChannelMeta{},
+		DisablePing:     true,
+		OriginModelName: "m",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
 	}
 
 	var count atomic.Int64
@@ -356,6 +366,73 @@ func TestStreamScannerHandler_ClientCancelAbortsUpstreamAndReturns(t *testing.T)
 	body := recorder.Body.String()
 	assert.Contains(t, body, "first")
 	assert.NotContains(t, body, "second")
+}
+
+func TestStreamScannerHandler_KeepsUpstreamAliveAfterClientDisconnectByDefault(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// No client_disconnect rule configured: the default must keep the upstream
+	// stream alive after the client goes away so the final usage frame is read
+	// and billed (the gateway's anti-escape default behavior).
+	pr, pw := io.Pipe()
+	t.Cleanup(func() {
+		_ = pr.Close()
+		_ = pw.Close()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+	c.Set("token_name", "k")
+
+	resp := &http.Response{Body: pr}
+	info := &relaycommon.RelayInfo{
+		DisablePing:     true,
+		OriginModelName: "m",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
+
+	var count atomic.Int64
+	firstHandled := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+			count.Add(1)
+			_ = StringData(c, data)
+			if data == "first" {
+				close(firstHandled)
+			}
+		})
+		close(done)
+	}()
+	// KEEPALIVE_TEST_PLACEHOLDER
+	_, err := fmt.Fprint(pw, "data: first\n")
+	require.NoError(t, err)
+	select {
+	case <-firstHandled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first chunk")
+	}
+
+	cancel()
+
+	// Client is gone but, with no matching rule, the upstream body stays open:
+	// a subsequent upstream chunk is still read and processed (not aborted).
+	_, err = fmt.Fprint(pw, "data: second\n")
+	require.NoError(t, err, "upstream body must stay open after client disconnect by default")
+	_, err = fmt.Fprint(pw, "data: [DONE]\n")
+	require.NoError(t, err)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not finish after upstream completion")
+	}
+
+	assert.Equal(t, int64(2), count.Load(), "chunk after client disconnect must still be processed")
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
 }
 
 // ---------- Ping tests ----------
