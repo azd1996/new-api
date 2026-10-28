@@ -427,9 +427,13 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
 	needRecordIp := false
-	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog {
-			needRecordIp = true
+	// userId == 0 is a pre-authentication rejection (e.g. system overload): skip
+	// the user-setting lookup so it does not spuriously query a missing user.
+	if userId > 0 {
+		if settingMap, err := GetUserSetting(userId, false); err == nil {
+			if settingMap.RecordIpLog {
+				needRecordIp = true
+			}
 		}
 	}
 	log := &Log{
