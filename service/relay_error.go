@@ -66,7 +66,10 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	}
 	upstreamURLs := common.UpstreamAddresses(c)
 	logger.LogError(c, common.LogText("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode(upstreamURLs...))))
-	if ShouldDisableChannel(err) && channelError.AutoBan {
+	// A process-shutdown force-cancel is a gateway-side interruption, not an
+	// upstream fault: never auto-ban the channel for it.
+	shutdownInterrupted := c != nil && c.Request != nil && common.ProcessShutdownFromContext(c.Request.Context()) != nil
+	if !shutdownInterrupted && ShouldDisableChannel(err) && channelError.AutoBan {
 		reason := err.MaskSensitiveErrorWithStatusCode(upstreamURLs...)
 		gopool.Go(func() {
 			DisableChannel(channelError, reason)

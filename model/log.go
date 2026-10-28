@@ -399,6 +399,17 @@ func RecordTopupLog(userId int, content *common.Message, callerIp string, paymen
 	}
 }
 
+// attachProcessShutdownOther marks a log whose request was force-cancelled by a
+// process shutdown. The marker is admin-tier only and never touches billing.
+func attachProcessShutdownOther(c *gin.Context, other *LogOther) {
+	if c == nil || c.Request == nil || other == nil {
+		return
+	}
+	if info := common.ProcessShutdownFromContext(c.Request.Context()); info != nil {
+		other.SetAdmin("process_shutdown", info)
+	}
+}
+
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other *LogOther) {
 	logger.LogInfo(c, common.LogText("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
@@ -418,6 +429,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 			other.SetAdmin("customer_id", custID)
 		}
 	}
+	attachProcessShutdownOther(c, other)
 	errorSignatureHash := ""
 	retryTriggered := false
 	if other != nil {
@@ -511,6 +523,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			other.SetAdmin("customer_id", custID)
 		}
 	}
+	attachProcessShutdownOther(c, other)
 	content := other.setContent(params.Content)
 	otherStr := other.JSONString()
 	// Dual-write the reporting-only raw/discounted amounts (set via SetAdmin in
