@@ -29,7 +29,7 @@
 
 ## 3. 存储与配置
 
-- **全局代理表**：`setting/system_setting/proxy_setting.go`，模块名 `proxy_setting`，结构 `ProxySetting{ Proxies []ProxyEntry{Alias,URL} }`。复用 `setting/config` 的反射式 option 持久化（存入 `option` 表的 `proxy_setting.proxies`，值为 JSON 数组），**无需改 model/controller、无 DB 迁移**。
+- **全局代理表**：`setting/system_setting/proxy_setting.go`，模块名 `proxy_setting`，结构 `ProxySetting{ Proxies []ProxyEntry{Alias,URL,Description} }`。复用 `setting/config` 的反射式 option 持久化（存入 `option` 表的 `proxy_setting.proxies`，值为 JSON 数组），**无需改 model/controller、无 DB 迁移**。`Description` 仅为代理备注，只在代理池配置页展示，不参与解析、不进日志/渠道多选等其他位置。
 - **渠道引用**：`dto.ChannelSettings.ProxyAliases []string`（json `proxy_aliases,omitempty`），与既有 `Proxy string` 并存，存在渠道 `setting` JSON 里。
 - **前端**：
   - 代理表编辑：`web/default/src/features/system-settings/models/proxy-pool-section.tsx`（挂在「模型」分组，别名+地址多行增删 + 状态/耗时列）。
