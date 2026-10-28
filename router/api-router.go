@@ -356,6 +356,13 @@ func SetApiRouter(router *gin.Engine) {
 		}
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)
+		logRoute.GET("/error-stats", middleware.AdminAuth(), controller.GetErrorStats)
+		logRoute.GET("/error-signature-rules", middleware.AdminAuth(), controller.GetErrorSignatureRules)
+		logRoute.PUT("/error-signature-rules", middleware.AdminAuth(), controller.UpdateErrorSignatureRules)
+		logRoute.GET("/error-signature-rules/suggestions", middleware.AdminAuth(), controller.GetErrorSignatureRuleSuggestions)
+		logRoute.GET("/error-signature-aliases", middleware.AdminAuth(), controller.GetErrorSignatureAliases)
+		logRoute.POST("/error-signature-aliases", middleware.AdminAuth(), controller.UpsertErrorSignatureAlias)
+		logRoute.DELETE("/error-signature-aliases/:hash", middleware.AdminAuth(), controller.DeleteErrorSignatureAlias)
 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
