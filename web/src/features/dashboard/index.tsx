@@ -97,6 +97,12 @@ const LazyConsumptionDistributionChart = lazy(() =>
   }))
 )
 
+const LazyConsumptionAmountCards = lazy(() =>
+  import('./components/models/consumption-amount-cards').then((m) => ({
+    default: m.ConsumptionAmountCards,
+  }))
+)
+
 const LazyPerformanceOverview = lazy(() =>
   import('./components/models/performance-overview').then((m) => ({
     default: m.PerformanceOverview,
@@ -362,6 +368,16 @@ export function Dashboard() {
                 </Suspense>
               </FadeIn>
               {isAdmin && (
+                <FadeIn delay={0.03}>
+                  <Suspense fallback={<LogStatCardsFallback />}>
+                    <LazyConsumptionAmountCards
+                      data={modelData}
+                      loading={dataLoading}
+                    />
+                  </Suspense>
+                </FadeIn>
+              )}
+              {isAdmin && (
                 <FadeIn delay={0.05}>
                   <Suspense fallback={<PerformanceOverviewFallback />}>
                     <LazyPerformanceOverview />
@@ -373,6 +389,7 @@ export function Dashboard() {
                   <LazyConsumptionDistributionChart
                     data={modelData}
                     loading={dataLoading}
+                    isAdmin={isAdmin}
                     defaultChartType={
                       chartPreferences.consumptionDistributionChart
                     }

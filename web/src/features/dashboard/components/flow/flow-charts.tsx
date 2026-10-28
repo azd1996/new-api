@@ -23,10 +23,12 @@ import {
   Activity,
   ChevronRight,
   CircleAlert,
+  Coins,
   EyeOff,
   GitBranch,
   Hash,
   Info,
+  Landmark,
   Loader2,
   Route,
   WalletCards,
@@ -103,16 +105,42 @@ interface FlowChartsProps {
 }
 
 const FLOW_METRIC_OPTIONS = [
-  { value: 'quota', labelKey: 'By quota', icon: WalletCards },
-  { value: 'tokens', labelKey: 'By tokens', icon: Hash },
-  { value: 'requests', labelKey: 'By requests', icon: Activity },
+  { value: 'quota', labelKey: 'By quota', icon: WalletCards, adminOnly: false },
+  { value: 'tokens', labelKey: 'By tokens', icon: Hash, adminOnly: false },
+  {
+    value: 'requests',
+    labelKey: 'By requests',
+    icon: Activity,
+    adminOnly: false,
+  },
+  {
+    value: 'channel_stat_quota',
+    labelKey: 'By channel discounted amount',
+    icon: Landmark,
+    adminOnly: true,
+  },
+  {
+    value: 'customer_stat_quota',
+    labelKey: 'By customer discounted amount',
+    icon: Coins,
+    adminOnly: true,
+  },
 ] as const
 
 const FLOW_METRIC_LABEL_KEYS: Record<FlowMetric, string> = {
   quota: 'Quota',
   tokens: 'Tokens',
   requests: 'Requests',
+  channel_stat_quota: 'Channel Discounted Amount',
+  customer_stat_quota: 'Customer Discounted Amount',
 }
+
+// Quota-like metrics render as money (formatQuota); tokens/requests as counts.
+const FLOW_MONEY_METRICS: ReadonlySet<FlowMetric> = new Set<FlowMetric>([
+  'quota',
+  'channel_stat_quota',
+  'customer_stat_quota',
+])
 
 const FLOW_TOP_LIMIT_OPTIONS = [10, 20, 50, 100] as const
 
@@ -398,7 +426,9 @@ export function FlowCharts(props: FlowChartsProps) {
   const metricLabel = t(FLOW_METRIC_LABEL_KEYS[metric])
   const formatNodeMetricValue = useCallback(
     (value: number) =>
-      metric === 'quota' ? formatQuota(value) : formatFlowMetricNumber(value),
+      FLOW_MONEY_METRICS.has(metric)
+        ? formatQuota(value)
+        : formatFlowMetricNumber(value),
     [metric]
   )
   // Explicit filters (the chips/dropdown control) narrow the rows that feed the
@@ -464,6 +494,8 @@ export function FlowCharts(props: FlowChartsProps) {
         formatQuota,
         {
           quota: t('Quota'),
+          channelStatQuota: t('Channel discounted amount'),
+          customerStatQuota: t('Customer discounted amount'),
           tokens: t('Tokens'),
           requests: t('Requests'),
           share: t('Share'),
@@ -574,7 +606,9 @@ export function FlowCharts(props: FlowChartsProps) {
               className='shrink-0'
             >
               <TabsList aria-label={t('Flow width metric')}>
-                {FLOW_METRIC_OPTIONS.map((option) => {
+                {FLOW_METRIC_OPTIONS.filter(
+                  (option) => !option.adminOnly || isAdmin
+                ).map((option) => {
                   const Icon = option.icon
                   return (
                     <TabsTrigger

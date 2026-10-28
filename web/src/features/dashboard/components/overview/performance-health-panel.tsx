@@ -35,7 +35,6 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 const PERFORMANCE_WINDOW_HOURS = 24
-const TOP_MODEL_LIMIT = 6
 
 export function PerformanceHealthPanel() {
   const { t } = useTranslation()
@@ -56,7 +55,6 @@ export function PerformanceHealthPanel() {
 
   const summary = metricsQuery.data?.data.summary
 
-  const topModels = useMemo(() => models.slice(0, TOP_MODEL_LIMIT), [models])
   const loading = metricsQuery.isLoading
   const hasData = models.length > 0
 
@@ -110,15 +108,18 @@ export function PerformanceHealthPanel() {
           hasData && (
             <div>
               <span className='text-muted-foreground mb-1 block text-[11px] font-medium'>
-                {t('Top models by traffic')}
+                {t('Models with traffic in the last 24 hours')}
               </span>
               <div className='grid grid-cols-1 gap-x-4 sm:grid-cols-2'>
-                {topModels.map((model) => (
+                {models.map((model) => (
                   <div
                     key={model.model_name}
                     className='flex items-center justify-between gap-2 rounded px-1.5 py-1'
                   >
-                    <span className='min-w-0 flex-1 truncate font-mono text-[11px]'>
+                    <span
+                      className='min-w-0 flex-1 truncate font-mono text-[11px]'
+                      title={model.model_name}
+                    >
                       {model.model_name}
                     </span>
                     <span className='inline-flex shrink-0 items-center gap-1'>

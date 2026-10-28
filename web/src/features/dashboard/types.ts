@@ -33,7 +33,18 @@ export interface QuotaDataItem {
   token_used?: number
   count?: number
   quota?: number
+  // Reporting-only stat amounts (admin): channel stat-group-ratio discounted /
+  // per-customer discounted. Zero/absent on rows written before the columns.
+  channel_stat_quota?: number
+  customer_stat_quota?: number
 }
+
+// Which quota caliber the consumption distribution chart sums: the real
+// group-discounted quota, or the two reporting-only stat amounts.
+export type ConsumptionAmountCaliber =
+  | 'quota'
+  | 'channel_stat_quota'
+  | 'customer_stat_quota'
 
 export interface FlowQuotaDataItem {
   user_id?: number
@@ -48,9 +59,17 @@ export interface FlowQuotaDataItem {
   token_used?: number
   count?: number
   quota?: number
+  // Reporting-only stat amounts (admin flow metrics).
+  channel_stat_quota?: number
+  customer_stat_quota?: number
 }
 
-export type FlowMetric = 'quota' | 'tokens' | 'requests'
+export type FlowMetric =
+  | 'quota'
+  | 'tokens'
+  | 'requests'
+  | 'channel_stat_quota'
+  | 'customer_stat_quota'
 
 export type FlowOverflowMode = 'aggregate' | 'hide'
 
@@ -101,6 +120,8 @@ export interface DashboardFlowNode {
   value: number
   requests: number
   quota: number
+  channelStatQuota: number
+  customerStatQuota: number
   tokens: number
   color: string
   colorKey: string
@@ -114,6 +135,8 @@ export interface DashboardFlowLink {
   value: number
   requests: number
   quota: number
+  channelStatQuota: number
+  customerStatQuota: number
   tokens: number
   sourceLabel: string
   targetLabel: string

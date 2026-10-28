@@ -67,6 +67,15 @@ const USER_CHARTS: {
 
 const TOP_USER_LIMIT_OPTIONS = [5, 10, 20, 50]
 
+// User-consumption amount caliber: real group-discounted quota (default) or the
+// per-customer discounted stat amount. User stats is already admin-only.
+const USER_AMOUNT_METRIC_OPTIONS = [
+  { value: 'quota', labelKey: 'By quota' },
+  { value: 'customer_stat_quota', labelKey: 'By customer discounted amount' },
+] as const
+
+type UserAmountMetric = (typeof USER_AMOUNT_METRIC_OPTIONS)[number]['value']
+
 interface UserChartsProps {
   filters: UserChartsFilters
   onFiltersChange: (filters: UserChartsFilters) => void
@@ -76,6 +85,7 @@ export function UserCharts(props: UserChartsProps) {
   const { t } = useTranslation()
   const { resolvedTheme } = useTheme()
   const [themeReady, setThemeReady] = useState(false)
+  const [amountMetric, setAmountMetric] = useState<UserAmountMetric>('quota')
   const themeManagerRef = useRef<
     (typeof import('@visactor/vchart'))['ThemeManager'] | null
   >(null)
@@ -151,9 +161,10 @@ export function UserCharts(props: UserChartsProps) {
         isLoading ? [] : (userData ?? []),
         timeGranularity,
         t,
-        topUserLimit
+        topUserLimit,
+        amountMetric
       ),
-    [userData, isLoading, timeGranularity, t, topUserLimit]
+    [userData, isLoading, timeGranularity, t, topUserLimit, amountMetric]
   )
 
   return (
@@ -218,6 +229,24 @@ export function UserCharts(props: UserChartsProps) {
           </TabsList>
         </Tabs>
 
+        <Tabs
+          value={amountMetric}
+          onValueChange={(value) => setAmountMetric(value as UserAmountMetric)}
+          className='shrink-0'
+        >
+          <TabsList>
+            {USER_AMOUNT_METRIC_OPTIONS.map((opt) => (
+              <TabsTrigger
+                key={opt.value}
+                value={opt.value}
+                className='px-2.5 text-xs'
+              >
+                {t(opt.labelKey)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+
         {isLoading && (
           <Loader2 className='text-muted-foreground size-4 animate-spin' />
         )}
@@ -246,7 +275,7 @@ export function UserCharts(props: UserChartsProps) {
                   themeReady &&
                   spec && (
                     <VChart
-                      key={`user-${chart.value}-${topUserLimit}-${resolvedTheme}`}
+                      key={`user-${chart.value}-${topUserLimit}-${amountMetric}-${resolvedTheme}`}
                       spec={{
                         ...spec,
                         theme: resolvedTheme === 'dark' ? 'dark' : 'light',

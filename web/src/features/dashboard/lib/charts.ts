@@ -20,6 +20,7 @@ import { dataScheme as vchartDefaultDataScheme } from '@visactor/vchart/esm/them
 
 import { MAX_CHART_TREND_POINTS } from '@/features/dashboard/constants'
 import type {
+  ConsumptionAmountCaliber,
   QuotaDataItem,
   ProcessedChartData,
   ProcessedUserChartData,
@@ -71,7 +72,8 @@ export function processChartData(
   data: QuotaDataItem[],
   timeGranularity: TimeGranularity = 'day',
   t?: TFunction,
-  chartCornerRadius?: number
+  chartCornerRadius?: number,
+  quotaField: ConsumptionAmountCaliber = 'quota'
 ): ProcessedChartData {
   const tt: TFunction = t ?? ((x) => x)
   const otherLabel = tt('Other')
@@ -234,7 +236,7 @@ export function processChartData(
       Math.min(timeTimestamps.get(timeKey) ?? timestamp, timestamp)
     )
     const model = item.model_name || 'Unknown'
-    const quota = Number(item.quota) || 0
+    const quota = Number(item[quotaField]) || 0
     const count = Number(item.count) || 0
     const tokens = Number(item.token_used) || 0
 
@@ -710,7 +712,8 @@ export function processUserChartData(
   data: QuotaDataItem[],
   timeGranularity: TimeGranularity = 'day',
   t?: TFunction,
-  limit = 10
+  limit = 10,
+  quotaField: 'quota' | 'customer_stat_quota' = 'quota'
 ): ProcessedUserChartData {
   const tt: TFunction = t ?? ((x) => x)
   const { config } = getCurrencyDisplay()
@@ -759,7 +762,7 @@ export function processUserChartData(
   data.forEach((item) => {
     const username = item.username || 'unknown'
     const prev = userQuotaTotal.get(username) || 0
-    userQuotaTotal.set(username, prev + (Number(item.quota) || 0))
+    userQuotaTotal.set(username, prev + (Number(item[quotaField]) || 0))
   })
 
   const sorted = [...userQuotaTotal.entries()].sort((a, b) => b[1] - a[1])
@@ -795,7 +798,7 @@ export function processUserChartData(
       map = new Map()
       timeUserMap.set(timeKey, map)
     }
-    map.set(user, (map.get(user) || 0) + (Number(item.quota) || 0))
+    map.set(user, (map.get(user) || 0) + (Number(item[quotaField]) || 0))
   })
 
   const sortedTimePoints = [...timeTimestamps]
