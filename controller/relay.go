@@ -156,9 +156,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		// settlement point (service/{text_quota,quota}.go) where exact tokens
 		// and quota are known; here we only record the failure outcome. No-op
 		// when metrics export is disabled.
-		if resultErr != nil {
+		if resultErr != nil && relayInfo != nil {
+			// ChannelId is promoted from the embedded *ChannelMeta, which is nil on
+			// early-failure paths (no channel selected yet); guard before reading it.
+			channelLabel := "0"
+			if relayInfo.ChannelMeta != nil {
+				channelLabel = strconv.Itoa(relayInfo.ChannelId)
+			}
 			prommetrics.RecordRelay(relayInfo.OriginModelName, relayInfo.UsingGroup,
-				strconv.Itoa(relayInfo.ChannelId), "failure", 0, 0, 0, 0)
+				channelLabel, "failure", 0, 0, 0, 0)
 		}
 		if recovered != nil {
 			panic(recovered)
