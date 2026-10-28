@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/pkg/logshipper"
 	"github.com/QuantumNous/new-api/types"
@@ -76,6 +77,7 @@ type Log struct {
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
+	SessionID         string `json:"session_id,omitempty" gorm:"type:varchar(128);index:idx_logs_session_id;default:''"`
 	Other             string `json:"other"`
 }
 
@@ -321,6 +323,10 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
+	sessionID := common.GetContextKeyString(c, constant.ContextKeySessionID)
+	if sessionID != "" && other != nil {
+		other.SetPublic("session_id", sessionID)
+	}
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -334,6 +340,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		Username:         username,
 		CreatedAt:        common.GetTimestamp(),
 		Type:             LogTypeError,
+		SessionID:        sessionID,
 		Content:          content,
 		PromptTokens:     0,
 		CompletionTokens: 0,
@@ -386,6 +393,10 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
 	other := params.Other
+	sessionID := common.GetContextKeyString(c, constant.ContextKeySessionID)
+	if sessionID != "" && other != nil {
+		other.SetPublic("session_id", sessionID)
+	}
 	content := other.setContent(params.Content)
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
@@ -400,6 +411,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		Username:         username,
 		CreatedAt:        createdAt,
 		Type:             LogTypeConsume,
+		SessionID:        sessionID,
 		Content:          content,
 		PromptTokens:     params.PromptTokens,
 		CompletionTokens: params.CompletionTokens,
