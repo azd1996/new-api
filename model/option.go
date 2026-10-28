@@ -61,6 +61,7 @@ func InitOptionMap() {
 	common.OptionMap[setting.TaskPluginDisabledFactoryKeysKey] = "[]"
 	jsplugin.DefaultRegistry.SetDisabledFactoryKeys(nil)
 	common.OptionMap["DataExportEnabled"] = strconv.FormatBool(common.DataExportEnabled)
+	common.OptionMap["DebugEnabled"] = strconv.FormatBool(common.DebugEnabled)
 	common.OptionMap["ChannelDisableThreshold"] = strconv.FormatFloat(common.ChannelDisableThreshold, 'f', -1, 64)
 	common.OptionMap["EmailDomainRestrictionEnabled"] = strconv.FormatBool(common.EmailDomainRestrictionEnabled)
 	common.OptionMap["EmailAliasRestrictionEnabled"] = strconv.FormatBool(common.EmailAliasRestrictionEnabled)
@@ -455,6 +456,8 @@ func updateOptionMap(key string, value string) (err error) {
 			jsplugin.DefaultRegistry.SetEnabled(boolValue)
 		case "DataExportEnabled":
 			common.DataExportEnabled = boolValue
+		case "DebugEnabled":
+			common.DebugEnabled = boolValue
 		case "DefaultCollapseSidebar":
 			common.DefaultCollapseSidebar = boolValue
 		case "MjNotifyEnabled":
