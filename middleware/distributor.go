@@ -616,6 +616,9 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	logTaskPluginChannelDecision(c, channel, modelName, "channel_selected", "")
 	paramOverride := channel.GetParamOverride()
 	headerOverride := channel.GetHeaderOverride()
+	if refs := channel.GetSetting().ParamOverrideTemplateRefs; len(refs) > 0 {
+		paramOverride = service.MergeParamOverrideTemplates(refs, paramOverride)
+	}
 	if mergedParam, applied := service.ApplyChannelAffinityOverrideTemplate(c, paramOverride); applied {
 		paramOverride = mergedParam
 	}
