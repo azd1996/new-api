@@ -744,6 +744,10 @@ func handleConfigUpdate(key, value string) bool {
 	} else if configName == "billing_setting" {
 		InvalidatePricingCache()
 		ratio_setting.InvalidateExposedDataCache()
+	} else if configName == "proxy_setting" {
+		// The global proxy table changed; drop cached proxy HTTP clients so a
+		// changed alias address does not keep serving a stale endpoint.
+		system_setting.NotifyProxyPoolChanged()
 	}
 
 	return true // 已处理

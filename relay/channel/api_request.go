@@ -1,10 +1,12 @@
 package channel
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"regexp"
 	"strings"
@@ -455,23 +457,58 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
-	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
+	proxyURL, proxyAlias := service.ResolveChannelProxy(info.ChannelId, info.ChannelSetting.ProxyAliases, info.ChannelSetting.Proxy)
+	// Feed the proxy-pool-resolved URL into the upstream transport-policy-aware
+	// client builder so HTTP/2 shards, protocol and TLS settings still apply to
+	// proxied requests. proxyURL == "" means direct / no proxy.
+	client, err := service.GetHttpClientWithProxySettings(proxyURL, info.ChannelSetting)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
 	}
+	if proxyURL != "" {
+		info.UsedProxyURL = proxyURL
+		info.UsedProxyAlias = proxyAlias
+		// Expose on the gin context so the generic error-log path (no relayInfo
+		// in scope) can record the proxy actually used.
+		c.Set("used_proxy_url", proxyURL)
+		if proxyAlias != "" {
+			c.Set("used_proxy_alias", proxyAlias)
+		}
+	}
 	// Clients are cached and shared across channels, so override redirect
-	// behavior on a shallow copy instead of mutating the cached client. This
-	// still reuses its transport and connection pools, including HTTP/2's
-	// transparent stream retries.
+	// behavior on a shallow copy instead of mutating the cached client.
 	relayClient := *client
 	relayClient.CheckRedirect = keepUpstreamRedirectResponse
 	if common2.DebugEnabled && req != nil && req.URL != nil {
 		policy := service.NormalizeHTTPTransportPolicy(info.ChannelSetting)
 		logger.LogDebug(c, "http transport select: host=%s protocol=%s shards=%d policy=%s",
-			req.URL.Host,
-			policy.Protocol,
-			policy.Shards,
-			policy.String())
+			req.URL.Host, policy.Protocol, policy.Shards, policy.String())
+	}
+
+	// Passive proxy health: when a named proxy (alias) is used, trace connection
+	// establishment to sample connect latency and detect connection-level
+	// failures. proxyAlias == "" (direct fallback or no proxy) is not tracked.
+	var (
+		proxyConnectStart time.Time
+		proxyConnectDur   time.Duration
+		proxyGotConn      bool
+	)
+	if proxyAlias != "" {
+		trace := &httptrace.ClientTrace{
+			ConnectStart: func(_, _ string) { proxyConnectStart = time.Now() },
+			TLSHandshakeDone: func(tls.ConnectionState, error) {
+				if !proxyConnectStart.IsZero() {
+					proxyConnectDur = time.Since(proxyConnectStart)
+				}
+			},
+			GotConn: func(gci httptrace.GotConnInfo) {
+				proxyGotConn = true
+				if !gci.Reused && proxyConnectDur == 0 && !proxyConnectStart.IsZero() {
+					proxyConnectDur = time.Since(proxyConnectStart)
+				}
+			},
+		}
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	}
 
 	if info.IsStream {
@@ -488,11 +525,22 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	common2.SetContextKey(c, appconstant.ContextKeyUpstreamRequestOrigin, req.URL.Scheme+"://"+req.URL.Host)
 	resp, err := relayClient.Do(req)
 	if err != nil {
+		if proxyAlias != "" {
+			// Connection-level failure only when no usable connection was obtained;
+			// an error after GotConn is an upstream/transport read issue, not the proxy.
+			service.RecordProxyConnectResult(info.ChannelId, proxyAlias, 0, !proxyGotConn)
+		}
 		logger.LogError(c, common2.LogText("do request failed: %s", err.Error()))
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
+		if proxyAlias != "" {
+			service.RecordProxyConnectResult(info.ChannelId, proxyAlias, 0, !proxyGotConn)
+		}
 		return nil, errors.New("resp is nil")
+	}
+	if proxyAlias != "" {
+		service.RecordProxyConnectResult(info.ChannelId, proxyAlias, proxyConnectDur, false)
 	}
 	if common2.DebugEnabled {
 		policy := service.NormalizeHTTPTransportPolicy(info.ChannelSetting)

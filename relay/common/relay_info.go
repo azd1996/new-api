@@ -70,6 +70,11 @@ type ChannelMeta struct {
 	HeadersOverride      map[string]any
 	ChannelSetting       dto.ChannelSettings
 	ChannelOtherSettings dto.ChannelOtherSettings
+	// UsedProxyURL / UsedProxyAlias record the proxy actually used for the
+	// upstream request (set by relay/channel.doRequest). UsedProxyAlias is empty
+	// when the direct fallback proxy (channel's Proxy string) or no proxy was used.
+	UsedProxyURL         string
+	UsedProxyAlias       string
 	UpstreamModelName    string
 	IsModelMapped        bool
 	SupportStreamOptions bool // 是否支持流式选项
