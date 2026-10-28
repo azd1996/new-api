@@ -39,6 +39,7 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 		filter.Channel, _ = strconv.Atoi(c.Query("channel"))
 		filter.DownstreamRequestId = c.Query("downstream_request_id")
 		filter.CustomerId = c.Query("customer_id")
+		filter.ErrorSignatureHash = c.Query("error_signature_hash")
 	}
 	return filter
 }

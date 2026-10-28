@@ -100,6 +100,9 @@ type Log struct {
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
 	SessionID         string `json:"session_id,omitempty" gorm:"type:varchar(128);index:idx_logs_session_id;default:''"`
+	// ErrorSignatureHash duplicates other.error_signature_hash into a real indexed
+	// column so the detailed-error stats drill-down is a fast exact match.
+	ErrorSignatureHash string `json:"error_signature_hash,omitempty" gorm:"type:varchar(64);index:idx_logs_error_signature_hash;default:''"`
 	// DownstreamRequestId / CustomerId are decoded from the downstream gateway
 	// trace-tag header and duplicated into real indexed columns for fast search.
 	DownstreamRequestId string `json:"downstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_downstream_request_id;default:''"`
@@ -362,6 +365,10 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 			other.SetAdmin("customer_id", custID)
 		}
 	}
+	errorSignatureHash := ""
+	if other != nil {
+		errorSignatureHash, _ = other.adminInfo["error_signature_hash"].(string)
+	}
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -378,6 +385,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		SessionID:           sessionID,
 		DownstreamRequestId: downstreamRequestID,
 		CustomerId:          customerID,
+		ErrorSignatureHash:  errorSignatureHash,
 		Content:             content,
 		PromptTokens:        0,
 		CompletionTokens:    0,
@@ -591,6 +599,7 @@ type LogFilter struct {
 	CustomerId          string
 	StatusCode          int
 	ErrorKeyword        string
+	ErrorSignatureHash  string
 }
 
 func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
@@ -629,6 +638,9 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	if f.Type == LogTypeError && f.ErrorKeyword != "" {
 		cond, pat := errorContentLikeCondition("logs.content", f.ErrorKeyword)
 		tx = tx.Where(cond, pat)
+	}
+	if f.ErrorSignatureHash != "" {
+		tx = tx.Where("logs.error_signature_hash = ?", f.ErrorSignatureHash)
 	}
 	if f.StartTimestamp != 0 {
 		tx = tx.Where("logs.created_at >= ?", f.StartTimestamp)
