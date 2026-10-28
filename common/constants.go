@@ -36,6 +36,13 @@ var SessionSecret = uuid.New().String()
 var CryptoSecret = uuid.New().String()
 var SessionCookieSecure = false
 
+// SessionCookiePrefix is the optional SESSION_COOKIE_PREFIX value prepended to
+// browser auth cookie names so multiple instances sharing one host but
+// different ports do not clobber each other's login state (browser cookies are
+// scoped by host+path and ignore the port, per RFC 6265). Empty by default, in
+// which case cookie names are byte-identical to the historical values.
+var SessionCookiePrefix string
+
 // DefaultLanguage is the DEFAULT_LANGUAGE environment variable: the language of
 // server log lines and of text for a reader who states no language: en, zh-CN
 // or zh-TW. English when empty.

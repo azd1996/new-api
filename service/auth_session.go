@@ -13,11 +13,25 @@ import (
 	"github.com/google/uuid"
 )
 
-const RefreshCookieName = "new_api_refresh"
+const baseRefreshCookieName = "new_api_refresh"
 
-// SessionHintCookieName is the script-readable companion to RefreshCookieName.
-// See writeSessionHintCookie for why it exists and what it is not.
-const SessionHintCookieName = "new_api_has_session"
+// baseSessionHintCookieName is the script-readable companion to the refresh
+// cookie. See writeSessionHintCookie for why it exists and what it is not.
+const baseSessionHintCookieName = "new_api_has_session"
+
+// RefreshCookieName returns the effective refresh-cookie name. When
+// SESSION_COOKIE_PREFIX is unset it is byte-identical to the historical
+// "new_api_refresh"; a non-empty prefix isolates instances that share a host.
+// Only the name changes; all cookie security attributes are unaffected.
+func RefreshCookieName() string {
+	return common.SessionCookiePrefix + baseRefreshCookieName
+}
+
+// SessionHintCookieName returns the effective session-hint cookie name, with
+// the same optional SESSION_COOKIE_PREFIX applied as RefreshCookieName.
+func SessionHintCookieName() string {
+	return common.SessionCookiePrefix + baseSessionHintCookieName
+}
 
 // SessionHintCookieValue is the only value the hint ever carries.
 const SessionHintCookieValue = "1"
@@ -331,7 +345,7 @@ func WriteRefreshCookie(c *gin.Context, rawToken string) {
 	}
 	maxAge := max(int(time.Until(expiresAt)/time.Second), 1)
 	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     RefreshCookieName,
+		Name:     RefreshCookieName(),
 		Value:    rawToken,
 		Path:     "/api/user/auth",
 		MaxAge:   maxAge,
@@ -345,7 +359,7 @@ func WriteRefreshCookie(c *gin.Context, rawToken string) {
 
 func ClearRefreshCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     RefreshCookieName,
+		Name:     RefreshCookieName(),
 		Value:    "",
 		Path:     "/api/user/auth",
 		MaxAge:   -1,
@@ -376,7 +390,7 @@ func ClearRefreshCookie(c *gin.Context) {
 // can set one without the other.
 func writeSessionHintCookie(c *gin.Context, maxAge int, expiresAt time.Time) {
 	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     SessionHintCookieName,
+		Name:     SessionHintCookieName(),
 		Value:    SessionHintCookieValue,
 		Path:     "/",
 		MaxAge:   maxAge,
@@ -389,7 +403,7 @@ func writeSessionHintCookie(c *gin.Context, maxAge int, expiresAt time.Time) {
 
 func clearSessionHintCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     SessionHintCookieName,
+		Name:     SessionHintCookieName(),
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,

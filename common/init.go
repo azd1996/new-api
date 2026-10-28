@@ -64,6 +64,7 @@ func InitEnv() {
 	} else {
 		CryptoSecret = SessionSecret
 	}
+	SessionCookiePrefix = strings.TrimSpace(os.Getenv("SESSION_COOKIE_PREFIX"))
 	if err := InitSessionCookieSettings(); err != nil {
 		log.Fatal(err)
 	}

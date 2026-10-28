@@ -16,7 +16,7 @@ import (
 
 func RefreshAuth(c *gin.Context) {
 	setAuthNoStore(c)
-	rawRefreshToken, err := c.Cookie(service.RefreshCookieName)
+	rawRefreshToken, err := c.Cookie(service.RefreshCookieName())
 	if err != nil || rawRefreshToken == "" {
 		service.ClearRefreshCookie(c)
 		writeAuthSessionError(c, service.ErrRefreshTokenInvalid)
@@ -47,7 +47,7 @@ func RefreshAuth(c *gin.Context) {
 func AuthLogout(c *gin.Context) {
 	setAuthNoStore(c)
 	expectedSID := strings.TrimSpace(c.GetHeader("X-Auth-Session"))
-	rawRefreshToken, cookieErr := c.Cookie(service.RefreshCookieName)
+	rawRefreshToken, cookieErr := c.Cookie(service.RefreshCookieName())
 	cookieSID, hasCookieSID := service.RefreshTokenSID(rawRefreshToken)
 	if expectedSID != "" && cookieErr == nil && hasCookieSID && cookieSID != expectedSID {
 		writeAuthSessionError(c, service.ErrLoginSessionMismatch)
@@ -126,7 +126,7 @@ func DeleteLoginSession(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "code": "AUTH_SESSION_NOT_FOUND", "message": "session not found"})
 		return
 	}
-	if rawRefreshToken, cookieErr := c.Cookie(service.RefreshCookieName); cookieErr == nil {
+	if rawRefreshToken, cookieErr := c.Cookie(service.RefreshCookieName()); cookieErr == nil {
 		cookieSID, ok := service.RefreshTokenSID(rawRefreshToken)
 		if ok && cookieSID == sid {
 			service.ClearRefreshCookie(c)
