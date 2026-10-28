@@ -106,6 +106,7 @@ func main() {
 			}()
 			model.InitChannelCache()
 		}()
+		model.InitErrorAliasCache()
 
 		go model.SyncChannelCache(common.SyncFrequency)
 	}
@@ -117,6 +118,9 @@ func main() {
 
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)
+	go model.SyncCustomerCache(common.SyncFrequency)
+	go model.SyncErrorAliasCache(common.SyncFrequency)
+	go service.SyncErrorSignatureRules(common.SyncFrequency)
 	go controller.SyncTaskPlugins()
 
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
