@@ -57,7 +57,12 @@ const (
 	ContextKeyUserEmail   ContextKey = "user_email"
 	ContextKeyUserGroup   ContextKey = "user_group"
 	ContextKeyUsingGroup  ContextKey = "group"
-	ContextKeyUserName    ContextKey = "username"
+	// ContextKeySessionID stores the request's resolved session identifier for
+	// the consume/error log (dual-written to the real session_id column).
+	ContextKeySessionID ContextKey = "session_id"
+	// ContextKeySessionIDSource labels where the session id came from.
+	ContextKeySessionIDSource ContextKey = "session_id_source"
+	ContextKeyUserName        ContextKey = "username"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 
