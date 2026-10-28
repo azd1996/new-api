@@ -186,6 +186,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		service.AppendUsedChannel(c, channel.Id)
+		// A soft pin from a previous iteration's retry-override is single-use: it was
+		// just consumed by getChannel above, so clear it before the next attempt.
+		service.ClearPinnedChannel(c)
 		if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
 			newAPIError = billingErr
 			break
@@ -223,10 +226,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
+		// Error-triggered retry-override: stage a one-shot request rewrite and retry
+		// on the same channel (or hand off to next-channel fallback), bypassing the
+		// normal retry gate below. Must run before the gate decision.
+		retryTriggered, _ := maybeApplyRetryRuleFallback(c, relayInfo, channel, newAPIError, relayFormat, retryParam)
+
 		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 
+		if retryTriggered {
+			continue
+		}
 		if decision.Action != "retry" {
 			break
 		}
