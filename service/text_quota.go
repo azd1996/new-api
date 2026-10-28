@@ -3,6 +3,7 @@ package service
 import (
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	prommetrics "github.com/QuantumNous/new-api/pkg/prom_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -674,4 +676,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		Other:            other,
 	})
 	relayInfo.PerformanceOutputTokens = int64(summary.CompletionTokens)
+	// Prometheus relay settlement sample (success). No-op when metrics disabled.
+	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
+		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota)
 }

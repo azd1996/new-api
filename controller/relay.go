@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	prommetrics "github.com/QuantumNous/new-api/pkg/prom_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -145,6 +147,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		if relayFormat != types.RelayFormatOpenAIRealtime {
 			perfmetrics.RecordRelayResult(c.Request.Context(), relayInfo, resultErr)
+		}
+		// Prometheus failure sample. Success is recorded at the billing
+		// settlement point (service/{text_quota,quota}.go) where exact tokens
+		// and quota are known; here we only record the failure outcome. No-op
+		// when metrics export is disabled.
+		if resultErr != nil {
+			prommetrics.RecordRelay(relayInfo.OriginModelName, relayInfo.UsingGroup,
+				strconv.Itoa(relayInfo.ChannelId), "failure", 0, 0, 0, 0)
 		}
 		if recovered != nil {
 			panic(recovered)
