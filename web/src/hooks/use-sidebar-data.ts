@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  AlertTriangle,
   Box,
   ClipboardList,
   Contact,
@@ -105,6 +106,12 @@ export function useSidebarData(): SidebarData {
             activeUrls: ['/usage-logs/drawing'],
             configUrls: ['/usage-logs/drawing', '/usage-logs/task'],
             icon: ListTodo,
+          },
+          {
+            title: t('Detailed Error'),
+            url: '/error-stats',
+            icon: AlertTriangle,
+            requiredRole: ROLE.ADMIN,
           },
         ],
       },

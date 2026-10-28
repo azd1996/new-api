@@ -45,6 +45,11 @@ const usageLogsSearchSchema = z.object({
   username: z.string().optional().catch(''),
   requestId: z.string().optional().catch(''),
   upstreamRequestId: z.string().optional().catch(''),
+  // Drill-down params carried by the detailed-error-stats page (module K). The
+  // usage-logs filter bar will consume these once module J lands its
+  // error-signature filter; until then they are accepted and ignored.
+  errorSignatureHash: z.string().optional().catch(''),
+  errorSignature: z.string().optional().catch(''),
   startTime: z.number().optional(),
   endTime: z.number().optional(),
 })
