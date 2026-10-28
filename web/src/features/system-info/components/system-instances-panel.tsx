@@ -136,6 +136,13 @@ function formatBytes(bytes?: number): string {
   }).format(value)} ${units[index]}`
 }
 
+function formatCount(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-'
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(
+    value
+  )
+}
+
 function ringColorClass(percent: number | null) {
   if (percent === null) return 'text-muted-foreground/40'
   if (percent >= 90) return 'text-red-500'
@@ -239,7 +246,7 @@ function SystemInstancesList(props: SystemInstancesTableProps) {
 
   return (
     <div className='overflow-x-auto rounded-md border'>
-      <Table className='min-w-[1230px]'>
+      <Table className='min-w-[1580px]'>
         <TableHeader>
           <TableRow className='bg-muted/40 hover:bg-muted/40'>
             <TableHead className='h-9 min-w-[240px] px-4 text-xs'>
@@ -256,6 +263,17 @@ function SystemInstancesList(props: SystemInstancesTableProps) {
             <TableHead className='h-9 w-[96px] text-xs'>
               {t('Storage')}
             </TableHead>
+            <TableHead className='h-9 w-[100px] text-xs'>
+              {t('Process CPU')}
+            </TableHead>
+            <TableHead className='h-9 w-[100px] text-xs'>
+              {t('Active Requests')}
+            </TableHead>
+            <TableHead className='h-9 w-[80px] text-xs'>{t('RPM')}</TableHead>
+            <TableHead className='h-9 w-[90px] text-xs'>
+              {t('Threads')}
+            </TableHead>
+            <TableHead className='h-9 w-[90px] text-xs'>{t('FDs')}</TableHead>
             <TableHead className='h-9 w-[100px] text-xs'>
               {t('Version')}
             </TableHead>
@@ -279,6 +297,7 @@ function SystemInstancesList(props: SystemInstancesTableProps) {
               instance.info?.node?.should_configure_manually === true
             const resources = instance.info?.resources
             const storage = resources?.storage
+            const process = resources?.process
             const isDeletingThisInstance =
               props.isDeletingInstance &&
               props.deletingNodeName === instance.node_name
@@ -419,6 +438,21 @@ function SystemInstancesList(props: SystemInstancesTableProps) {
                       ) : undefined
                     }
                   />
+                </TableCell>
+                <TableCell className='font-mono text-xs tabular-nums'>
+                  {formatPercent(process?.cpu_usage_percent)}
+                </TableCell>
+                <TableCell className='font-mono text-xs tabular-nums'>
+                  {formatCount(process?.active_requests)}
+                </TableCell>
+                <TableCell className='font-mono text-xs tabular-nums'>
+                  {formatCount(process?.requests_per_minute)}
+                </TableCell>
+                <TableCell className='font-mono text-xs tabular-nums'>
+                  {formatCount(process?.threads)}
+                </TableCell>
+                <TableCell className='font-mono text-xs tabular-nums'>
+                  {formatCount(process?.file_descriptors)}
                 </TableCell>
                 <TableCell className='py-2.5 align-middle'>
                   <div className='truncate font-mono text-xs'>

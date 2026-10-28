@@ -58,6 +58,14 @@ export type SystemInstanceInfo = {
       used_percent?: number
       [key: string]: unknown
     }
+    process?: {
+      cpu_usage_percent?: number
+      active_requests?: number
+      requests_per_minute?: number
+      threads?: number
+      file_descriptors?: number
+      [key: string]: unknown
+    }
     [key: string]: unknown
   }
   [key: string]: unknown
