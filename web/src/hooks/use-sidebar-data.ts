@@ -20,6 +20,7 @@ import {
   Activity,
   Box,
   ClipboardList,
+  Contact,
   CreditCard,
   FileText,
   FlaskConical,
@@ -146,6 +147,11 @@ export function useSidebarData(): SidebarData {
             title: t('Users'),
             url: '/users',
             icon: Users,
+          },
+          {
+            title: t('Customers'),
+            url: '/customers',
+            icon: Contact,
           },
           {
             title: t('Redemption Codes'),
