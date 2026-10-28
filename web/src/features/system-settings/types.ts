@@ -266,8 +266,11 @@ export type ModelSettings = {
   MaxTokenAutoGroups: number
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
+  'override_template_setting.param_templates': string
+  'override_template_setting.retry_templates': string
   'model_deployment.ionet.api_key': string
   'model_deployment.ionet.enabled': boolean
+  'proxy_setting.proxies': ProxyPoolEntry[]
 }
 
 export type BillingSettings = {
@@ -357,10 +360,49 @@ export type BillingSettings = {
   'checkin_setting.max_quota': number
 }
 
+export type ProxyPoolEntry = {
+  alias: string
+  url: string
+  description?: string
+}
+
+export type ProxyHealthStatus = 'healthy' | 'unknown' | 'unhealthy'
+
+export type ProxyHealthEntry = {
+  alias: string
+  status: ProxyHealthStatus
+  p50_ms: number
+  p90_ms: number
+  p99_ms: number
+  samples: number
+  last_checked_unix: number
+}
+
+export type ProxyHealthResponse = {
+  success: boolean
+  message: string
+  data: ProxyHealthEntry[]
+}
+
+export type GroupModelRule = {
+  group: string
+  models: string[]
+}
+
+export type ClientDisconnectRule = {
+  token_name: string
+  model: string
+}
+
 export type OperationsSettings = {
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
   SelfUseModeEnabled: boolean
+  AllowUnsetModelRatio: boolean
+  DebugEnabled: boolean
+  'extended_cache_ttl_setting.rules': GroupModelRule[]
+  'metadata_injection_disable_setting.rules': GroupModelRule[]
+  'client_disconnect_setting.rules': ClientDisconnectRule[]
   QuotaRemindEnabled: boolean
   QuotaRemindThreshold: string
   EmailProvider: 'smtp' | 'resend'

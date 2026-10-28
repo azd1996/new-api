@@ -22,6 +22,7 @@ import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
+  ProxyHealthResponse,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskFilters,
@@ -36,6 +37,11 @@ import type {
 
 export async function getSystemOptions() {
   const res = await api.get<SystemOptionsResponse>('/api/option/')
+  return res.data
+}
+
+export async function getProxyHealth() {
+  const res = await api.get<ProxyHealthResponse>('/api/option/proxy_health')
   return res.data
 }
 

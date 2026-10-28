@@ -36,6 +36,14 @@ const OPERATIONS_SECTIONS = [
           DefaultCollapseSidebar: settings.DefaultCollapseSidebar,
           DemoSiteEnabled: settings.DemoSiteEnabled,
           SelfUseModeEnabled: settings.SelfUseModeEnabled,
+          AllowUnsetModelRatio: settings.AllowUnsetModelRatio,
+          DebugEnabled: settings.DebugEnabled,
+          'extended_cache_ttl_setting.rules':
+            settings['extended_cache_ttl_setting.rules'],
+          'metadata_injection_disable_setting.rules':
+            settings['metadata_injection_disable_setting.rules'],
+          'client_disconnect_setting.rules':
+            settings['client_disconnect_setting.rules'],
         }}
       />
     ),

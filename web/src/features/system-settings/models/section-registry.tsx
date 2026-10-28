@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { OverrideTemplatesSection } from '../general/override-templates'
 import { IoNetDeploymentSettingsSection } from '../integrations/ionet-deployment-settings-section'
 import type { ModelSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
@@ -23,6 +24,7 @@ import { ClaudeSettingsCard } from './claude-settings-card'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
+import { ProxyPoolSection } from './proxy-pool-section'
 import { SchedulingSection } from './scheduling'
 
 function formatJsonForEditor(value: string, fallback: string) {
@@ -131,6 +133,31 @@ const MODELS_SECTIONS = [
           enabled: settings['model_deployment.ionet.enabled'],
           apiKey: settings['model_deployment.ionet.api_key'],
         }}
+      />
+    ),
+  },
+
+  {
+    id: 'override-templates',
+    titleKey: 'Override Templates',
+    build: (settings: ModelSettings) => (
+      <OverrideTemplatesSection
+        defaultValues={{
+          'override_template_setting.param_templates':
+            settings['override_template_setting.param_templates'],
+          'override_template_setting.retry_templates':
+            settings['override_template_setting.retry_templates'],
+        }}
+      />
+    ),
+  },
+
+  {
+    id: 'proxy-pool',
+    titleKey: 'Proxy Pool',
+    build: (settings: ModelSettings) => (
+      <ProxyPoolSection
+        defaultValues={{ proxies: settings['proxy_setting.proxies'] }}
       />
     ),
   },

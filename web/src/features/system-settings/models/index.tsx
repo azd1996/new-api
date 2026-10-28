@@ -66,6 +66,9 @@ const defaultModelSettings: ModelSettings = {
   'group_ratio_setting.group_special_usable_group': '{}',
   'model_deployment.ionet.api_key': '',
   'model_deployment.ionet.enabled': false,
+  'override_template_setting.param_templates': '[]',
+  'override_template_setting.retry_templates': '[]',
+  'proxy_setting.proxies': [],
 }
 
 export function ModelSettings() {

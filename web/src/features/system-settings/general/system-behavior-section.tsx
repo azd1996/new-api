@@ -17,10 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import * as z from 'zod'
 
+import { Dialog } from '@/components/dialog'
+import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -28,6 +31,7 @@ import {
   FormField,
   FormLabel,
 } from '@/components/ui/form'
+import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 
 import {
@@ -39,114 +43,306 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
+import type { ClientDisconnectRule, GroupModelRule } from '../types'
+import { ClientDisconnectRulesField } from './client-disconnect-rules-field'
+import { GroupModelRulesField } from './group-model-rules-field'
 
 const behaviorSchema = z.object({
   DefaultCollapseSidebar: z.boolean(),
   DemoSiteEnabled: z.boolean(),
   SelfUseModeEnabled: z.boolean(),
+  AllowUnsetModelRatio: z.boolean(),
+  DebugEnabled: z.boolean(),
 })
 
 type BehaviorFormValues = z.infer<typeof behaviorSchema>
 
 type SystemBehaviorSectionProps = {
-  defaultValues: BehaviorFormValues
+  defaultValues: BehaviorFormValues & {
+    'extended_cache_ttl_setting.rules': GroupModelRule[]
+    'metadata_injection_disable_setting.rules': GroupModelRule[]
+    'client_disconnect_setting.rules': ClientDisconnectRule[]
+  }
 }
 
-export function SystemBehaviorSection({
-  defaultValues,
-}: SystemBehaviorSectionProps) {
+export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
 
+  const booleanDefaults: BehaviorFormValues = {
+    DefaultCollapseSidebar: props.defaultValues.DefaultCollapseSidebar,
+    DemoSiteEnabled: props.defaultValues.DemoSiteEnabled,
+    SelfUseModeEnabled: props.defaultValues.SelfUseModeEnabled,
+    AllowUnsetModelRatio: props.defaultValues.AllowUnsetModelRatio,
+    DebugEnabled: props.defaultValues.DebugEnabled,
+  }
+
   const form = useForm({
     resolver: zodResolver(behaviorSchema),
-    defaultValues,
+    defaultValues: booleanDefaults,
   })
 
-  useResetForm(form, defaultValues)
+  useResetForm(form, booleanDefaults)
+
+  const [extendedCacheRules, setExtendedCacheRules] = useState(
+    props.defaultValues['extended_cache_ttl_setting.rules']
+  )
+  const [metadataDisableRules, setMetadataDisableRules] = useState(
+    props.defaultValues['metadata_injection_disable_setting.rules']
+  )
+  const [clientDisconnectRules, setClientDisconnectRules] = useState(
+    props.defaultValues['client_disconnect_setting.rules']
+  )
+
+  useEffect(() => {
+    setExtendedCacheRules(props.defaultValues['extended_cache_ttl_setting.rules'])
+    setMetadataDisableRules(
+      props.defaultValues['metadata_injection_disable_setting.rules']
+    )
+    setClientDisconnectRules(
+      props.defaultValues['client_disconnect_setting.rules']
+    )
+  }, [props.defaultValues])
+
+  const [confirmDisableRatioOpen, setConfirmDisableRatioOpen] = useState(false)
+
+  const confirmDisableAllowUnsetModelRatio = () => {
+    form.setValue('AllowUnsetModelRatio', false, { shouldDirty: true })
+    setConfirmDisableRatioOpen(false)
+  }
 
   const onSubmit = async (data: BehaviorFormValues) => {
-    const updates = Object.entries(data).filter(
-      ([key, value]) => value !== defaultValues[key as keyof BehaviorFormValues]
+    const updates: { key: string; value: string | boolean }[] = (
+      Object.entries(data) as [keyof BehaviorFormValues, boolean][]
     )
+      .filter(([key, value]) => value !== booleanDefaults[key])
+      .map(([key, value]) => ({ key, value }))
 
-    for (const [key, value] of updates) {
-      await updateOption.mutateAsync({ key, value })
+    const extendedSerialized = JSON.stringify(extendedCacheRules)
+    if (
+      extendedSerialized !==
+      JSON.stringify(props.defaultValues['extended_cache_ttl_setting.rules'])
+    ) {
+      updates.push({
+        key: 'extended_cache_ttl_setting.rules',
+        value: extendedSerialized,
+      })
+    }
+
+    const metadataSerialized = JSON.stringify(metadataDisableRules)
+    if (
+      metadataSerialized !==
+      JSON.stringify(
+        props.defaultValues['metadata_injection_disable_setting.rules']
+      )
+    ) {
+      updates.push({
+        key: 'metadata_injection_disable_setting.rules',
+        value: metadataSerialized,
+      })
+    }
+
+    const clientDisconnectSerialized = JSON.stringify(clientDisconnectRules)
+    if (
+      clientDisconnectSerialized !==
+      JSON.stringify(props.defaultValues['client_disconnect_setting.rules'])
+    ) {
+      updates.push({
+        key: 'client_disconnect_setting.rules',
+        value: clientDisconnectSerialized,
+      })
+    }
+
+    for (const update of updates) {
+      await updateOption.mutateAsync(update)
     }
   }
 
   return (
-    <SettingsSection title={t('System Behavior')}>
-      <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
-          <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
-            isSaving={updateOption.isPending}
-          />
-          <FormField
-            control={form.control}
-            name='DefaultCollapseSidebar'
-            render={({ field }) => (
-              <SettingsSwitchItem>
-                <SettingsSwitchContent>
-                  <FormLabel>{t('Default Collapse Sidebar')}</FormLabel>
-                  <FormDescription>
-                    {t('Sidebar collapsed by default for new users')}
-                  </FormDescription>
-                </SettingsSwitchContent>
-                <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-              </SettingsSwitchItem>
-            )}
-          />
+    <>
+      <SettingsSection title={t('System Behavior')}>
+        <Form {...form}>
+          <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+            <SettingsPageFormActions
+              onSave={form.handleSubmit(onSubmit)}
+              isSaving={updateOption.isPending}
+            />
+            <FormField
+              control={form.control}
+              name='DefaultCollapseSidebar'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Default Collapse Sidebar')}</FormLabel>
+                    <FormDescription>
+                      {t('Sidebar collapsed by default for new users')}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
 
-          <FormField
-            control={form.control}
-            name='DemoSiteEnabled'
-            render={({ field }) => (
-              <SettingsSwitchItem>
-                <SettingsSwitchContent>
-                  <FormLabel>{t('Demo Site Mode')}</FormLabel>
-                  <FormDescription>
-                    {t('Enable demo mode with limited functionality')}
-                  </FormDescription>
-                </SettingsSwitchContent>
-                <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-              </SettingsSwitchItem>
-            )}
-          />
+            <FormField
+              control={form.control}
+              name='DemoSiteEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Demo Site Mode')}</FormLabel>
+                    <FormDescription>
+                      {t('Enable demo mode with limited functionality')}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='SelfUseModeEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Self-Use Mode')}</FormLabel>
+                    <FormDescription>
+                      {t('Optimize system for self-hosted single-user usage')}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
 
-          <FormField
-            control={form.control}
-            name='SelfUseModeEnabled'
-            render={({ field }) => (
-              <SettingsSwitchItem>
-                <SettingsSwitchContent>
-                  <FormLabel>{t('Self-Use Mode')}</FormLabel>
-                  <FormDescription>
-                    {t('Optimize system for self-hosted single-user usage')}
-                  </FormDescription>
-                </SettingsSwitchContent>
-                <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-              </SettingsSwitchItem>
-            )}
-          />
-        </SettingsForm>
-      </Form>
-    </SettingsSection>
+            <FormField
+              control={form.control}
+              name='AllowUnsetModelRatio'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>
+                      {t('Allow Models Without Configured Price')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'When enabled, requests to models without a configured price are allowed and billed at the fallback ratio instead of being rejected'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={(checked) => {
+                        if (!checked) {
+                          setConfirmDisableRatioOpen(true)
+                          return
+                        }
+                        field.onChange(true)
+                      }}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='DebugEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Debug Mode')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Output verbose debug logs. Takes effect immediately without a restart.'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+
+            <Separator />
+
+            <ClientDisconnectRulesField
+              label={t('Abort Upstream on Client Disconnect (API Key + Model)')}
+              description={t(
+                'Abort the upstream stream when the client disconnects, only for the listed API key (token name) + model pairs. Both fields are required per rule; add multiple rows to cover more scopes. Leave empty to keep the upstream alive and bill the final usage frame.'
+              )}
+              value={clientDisconnectRules}
+              onChange={setClientDisconnectRules}
+            />
+
+            <Separator />
+
+            <GroupModelRulesField
+              label={t('Force 1h Prompt Cache TTL')}
+              description={t(
+                'Force the 1-hour prompt-cache TTL for the listed group and model combinations (Claude). Leave empty to disable.'
+              )}
+              value={extendedCacheRules}
+              onChange={setExtendedCacheRules}
+            />
+
+            <GroupModelRulesField
+              label={t('Disable Metadata Injection')}
+              description={t(
+                'Disable Claude metadata (user_id / session_id) injection for the listed group and model combinations. Leave empty to inject for all.'
+              )}
+              value={metadataDisableRules}
+              onChange={setMetadataDisableRules}
+            />
+          </SettingsForm>
+        </Form>
+      </SettingsSection>
+      <Dialog
+        open={confirmDisableRatioOpen}
+        onOpenChange={setConfirmDisableRatioOpen}
+        title={t('Confirm disabling this option')}
+        contentClassName='sm:max-w-md'
+        footer={
+          <>
+            <Button
+              variant='outline'
+              onClick={() => setConfirmDisableRatioOpen(false)}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button
+              variant='destructive'
+              onClick={confirmDisableAllowUnsetModelRatio}
+            >
+              {t('Confirm Disable')}
+            </Button>
+          </>
+        }
+      >
+        <div className='text-muted-foreground text-sm'>
+          {t(
+            'After disabling, requests to models that have no configured price will be rejected instead of billed at the fallback ratio. Any in-use model that is not yet priced will immediately become unavailable, which may break live traffic. Please confirm you understand the risk before turning it off.'
+          )}
+        </div>
+      </Dialog>
+    </>
   )
 }
