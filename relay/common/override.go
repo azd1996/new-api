@@ -911,7 +911,8 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 		// 检查条件是否满足
 		ok, err := checkConditions(result, contextJSON, op.Conditions, op.Logic)
 		if err != nil {
-			return nil, err
+			common.SysError(fmt.Sprintf("param override: skipping operation %q, condition evaluation failed: %v", op.Mode, err))
+			continue
 		}
 		if !ok {
 			continue // 条件不满足，跳过当前操作
@@ -922,11 +923,21 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 		if isPathBasedOperation(op.Mode) {
 			opPaths, err = resolveOperationPaths(result, opPath)
 			if err != nil {
-				return nil, err
+				common.SysError(fmt.Sprintf("param override: skipping operation %q, path resolution failed: %v", op.Mode, err))
+				continue
 			}
 			if len(opPaths) == 0 {
 				continue
 			}
+		}
+
+		// Snapshot so a single bad operation can roll back and be skipped without
+		// corrupting later operations (fail-open per operation).
+		resultSnapshot := append([]byte(nil), result...)
+		contextJSONSnapshot := contextJSON
+		var headerSnapshot map[string]interface{}
+		if hv, ok := context[paramOverrideContextHeaderOverride].(map[string]interface{}); ok {
+			headerSnapshot = maps.Clone(hv)
 		}
 
 		switch op.Mode {
@@ -958,7 +969,8 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 			}
 		case "copy":
 			if op.From == "" || op.To == "" {
-				return nil, fmt.Errorf("copy from/to is required")
+				err = fmt.Errorf("copy from/to is required")
+				break
 			}
 			opFrom := processNegativeIndex(result, op.From)
 			opTo := processNegativeIndex(result, op.To)
@@ -1058,7 +1070,8 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 			auditRecorder.recordOperation("return_error", op.Path, "", "", op.Value)
 			returnErr, parseErr := parseParamOverrideReturnError(op.Value)
 			if parseErr != nil {
-				return nil, parseErr
+				err = parseErr
+				break
 			}
 			return nil, returnErr
 		case "prune_objects":
@@ -1117,7 +1130,8 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 		case "pass_headers":
 			headerNames, parseErr := parseHeaderPassThroughNames(op.Value)
 			if parseErr != nil {
-				return nil, parseErr
+				err = parseErr
+				break
 			}
 			for _, headerName := range headerNames {
 				if err = copyHeaderInContext(context, headerName, headerName, op.KeepOrigin); err != nil {
@@ -1139,10 +1153,20 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 				contextJSON, err = marshalContextJSON(context)
 			}
 		default:
-			return nil, fmt.Errorf("unknown operation: %s", op.Mode)
+			err = fmt.Errorf("unknown operation: %s", op.Mode)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("operation %s failed: %w", op.Mode, err)
+			// return_error's intentional block propagates; others fail open.
+			if _, isReturnErr := AsParamOverrideReturnError(err); isReturnErr {
+				return nil, err
+			}
+			common.SysError(fmt.Sprintf("param override: skipping operation %q due to error: %v", op.Mode, err))
+			result = resultSnapshot
+			contextJSON = contextJSONSnapshot
+			if headerSnapshot != nil {
+				context[paramOverrideContextHeaderOverride] = headerSnapshot
+			}
+			continue
 		}
 	}
 	return result, nil

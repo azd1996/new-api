@@ -134,10 +134,9 @@ func TestApplyParamOverrideTrimRequiresValue(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverrideReplace(t *testing.T) {
@@ -197,10 +196,9 @@ func TestApplyParamOverrideReplaceRequiresFrom(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverrideRegexReplaceRequiresPattern(t *testing.T) {
@@ -216,10 +214,9 @@ func TestApplyParamOverrideRegexReplaceRequiresPattern(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverrideDelete(t *testing.T) {
@@ -571,10 +568,9 @@ func TestApplyParamOverrideMoveMissingSource(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverridePrependAppendString(t *testing.T) {
@@ -698,9 +694,9 @@ func TestApplyParamOverrideConditionRegex(t *testing.T) {
 		{name: "negative array index", input: `{"messages":[{"role":"user"}]}`, path: "messages.-1.role", pattern: `^(user|system)$`, wantMatch: true},
 		{name: "string conversion matches other text comparisons", input: `{"model":123}`, pattern: `^\d+$`, wantMatch: true},
 		{name: "empty pattern matches empty string", input: `{"model":""}`, pattern: "", wantMatch: true},
-		{name: "invalid pattern returns error", input: `{"model":"gpt-4o"}`, pattern: "[", wantError: "invalid regex pattern"},
-		{name: "nonstring pattern returns error", input: `{"model":"123"}`, pattern: 123, wantError: "regex pattern must be a string"},
-		{name: "missing pattern returns error", input: `{"model":"gpt-4o"}`, wantError: "regex pattern must be a string"},
+		{name: "invalid pattern is skipped (fail-open)", input: `{"model":"gpt-4o"}`, pattern: "["},
+		{name: "nonstring pattern is skipped (fail-open)", input: `{"model":"123"}`, pattern: 123},
+		{name: "missing pattern is skipped (fail-open)", input: `{"model":"gpt-4o"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -795,9 +791,9 @@ func TestApplyParamOverridePruneObjectsRegex(t *testing.T) {
 			pattern: `[`, want: `{"messages":[{"content":"hello"},{"content":"world"}]}`,
 		},
 		{
-			name:    "invalid pattern errors on first present key after missing keys",
+			name:    "invalid pattern skips the prune op (fail-open), body unchanged",
 			input:   `{"messages":[{"content":"hello"},{"role":"user"},{"role":"system"}]}`,
-			pattern: `[`, wantError: "comparison failed for path role: invalid regex pattern",
+			pattern: `[`, want: `{"messages":[{"content":"hello"},{"role":"user"},{"role":"system"}]}`,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -993,10 +989,9 @@ func TestApplyParamOverrideRegexReplaceInvalidPattern(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverrideCopy(t *testing.T) {
@@ -1034,10 +1029,9 @@ func TestApplyParamOverrideCopyMissingSource(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverrideCopyRequiresFromTo(t *testing.T) {
@@ -1052,10 +1046,9 @@ func TestApplyParamOverrideCopyRequiresFromTo(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverrideEnsurePrefix(t *testing.T) {
@@ -1155,10 +1148,9 @@ func TestApplyParamOverrideEnsureRequiresValue(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverrideTrimSpace(t *testing.T) {
@@ -1355,10 +1347,9 @@ func TestApplyParamOverrideNormalizeThinkingSignatureUnsupported(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverrideConditionFromRetryAndLastErrorContext(t *testing.T) {
@@ -1804,10 +1795,9 @@ func TestApplyParamOverrideSyncFieldsInvalidTarget(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyParamOverride(input, override, nil)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(input), string(out))
 }
 
 func TestApplyParamOverrideSetHeaderKeepOrigin(t *testing.T) {
