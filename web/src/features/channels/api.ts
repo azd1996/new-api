@@ -30,6 +30,7 @@ import type {
   ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
+  CopyBehindCdnAigwParams,
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
@@ -330,6 +331,52 @@ export async function copyChannel(
     `/api/channel/copy/${id}`,
     null,
     channelActionConfig({ params })
+  )
+  return res.data
+}
+
+/**
+ * Copy a channel tagged "behind-cdnaigw" and provision its matching
+ * zero-ratio group + unlimited-quota API key in one step.
+ */
+export async function copyBehindCdnAigwChannel(
+  id: number,
+  params: CopyBehindCdnAigwParams
+): Promise<CopyChannelResponse> {
+  const res = await api.post(
+    `/api/channel/copy_behind_cdnaigw/${id}`,
+    params,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export type ProxyHealthStatus = 'healthy' | 'unknown' | 'unhealthy'
+
+export type ProxyHealthEntry = {
+  alias: string
+  status: ProxyHealthStatus
+  p50_ms: number
+  p90_ms: number
+  p99_ms: number
+  samples: number
+  last_checked_unix: number
+}
+
+export type ProxyHealthResponse = {
+  success: boolean
+  message?: string
+  data?: ProxyHealthEntry[]
+}
+
+/**
+ * Passive health snapshot of every alias in the global proxy pool, used to
+ * populate the channel proxy-pool alias multi-select.
+ */
+export async function getProxyHealth(): Promise<ProxyHealthResponse> {
+  const res = await api.get<ProxyHealthResponse>(
+    '/api/option/proxy_health',
+    channelActionConfig()
   )
   return res.data
 }

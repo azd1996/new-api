@@ -274,6 +274,12 @@ export const channelFormSchema = z
     responses_websocket_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
+    // Named proxy-pool aliases (stored in setting JSON as string[]). Consulted
+    // in order; the first healthy proxy wins, else fall back to `proxy`.
+    proxy_aliases: z.array(z.string()).optional(),
+    // Retry override (stored in setting JSON as an array of four-phase rules).
+    // Kept as a pretty-printed JSON string in the form, edited as multiline text.
+    retry_override: z.string().optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -468,6 +474,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   responses_websocket_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
+  proxy_aliases: [],
+  retry_override: '',
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -515,6 +523,8 @@ export function transformChannelToFormDefaults(
     responses_websocket_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    proxy_aliases: [] as string[],
+    retry_override: '',
   }
 
   if (channel.setting) {
@@ -538,6 +548,14 @@ export function transformChannelToFormDefaults(
           parsed.responses_websocket_enabled === true,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
+        proxy_aliases: Array.isArray(parsed.proxy_aliases)
+          ? parsed.proxy_aliases.filter(
+              (alias: unknown): alias is string => typeof alias === 'string'
+            )
+          : [],
+        retry_override: Array.isArray(parsed.retry_override)
+          ? JSON.stringify(parsed.retry_override, null, 2)
+          : '',
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -692,6 +710,24 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   }
   if (formData.tls_insecure_skip_verify === true) {
     settingObj.tls_insecure_skip_verify = true
+  }
+
+  const proxyAliases = (formData.proxy_aliases || [])
+    .map((alias) => alias.trim())
+    .filter((alias) => alias.length > 0)
+  if (proxyAliases.length > 0) {
+    settingObj.proxy_aliases = proxyAliases
+  }
+
+  if (formData.retry_override && formData.retry_override.trim() !== '') {
+    try {
+      const parsedRetry = JSON.parse(formData.retry_override)
+      if (Array.isArray(parsedRetry) && parsedRetry.length > 0) {
+        settingObj.retry_override = parsedRetry
+      }
+    } catch {
+      // Ignore invalid JSON; the field is validated/edited as free-form text.
+    }
   }
 
   return JSON.stringify(settingObj)

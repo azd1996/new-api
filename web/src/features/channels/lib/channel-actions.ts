@@ -25,6 +25,7 @@ import { getServerMessage } from '@/lib/server-error-message'
 
 import {
   copyChannel,
+  copyBehindCdnAigwChannel,
   deleteChannel,
   testChannel,
   updateChannel,
@@ -41,7 +42,11 @@ import {
   updateAllChannelsBalance,
 } from '../api'
 import { CHANNEL_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
-import type { ChannelTestResponse, CopyChannelParams } from '../types'
+import type {
+  ChannelTestResponse,
+  CopyBehindCdnAigwParams,
+  CopyChannelParams,
+} from '../types'
 
 // ============================================================================
 // Query Keys
@@ -356,6 +361,29 @@ export async function handleCopyChannel(
 ): Promise<void> {
   try {
     const response = await copyChannel(id, params)
+    if (response.success) {
+      toast.success(i18next.t(SUCCESS_MESSAGES.COPIED))
+      queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      onSuccess?.(response.data?.id ?? 0)
+    } else {
+      handleServerError(response, i18next.t('Failed to copy channel'))
+    }
+  } catch (error) {
+    handleServerError(error, i18next.t('Failed to copy channel'))
+  }
+}
+
+/**
+ * Copy a behind-cdnaigw channel and auto-provision its group + API key
+ */
+export async function handleCopyBehindCdnAigwChannel(
+  id: number,
+  params: CopyBehindCdnAigwParams,
+  queryClient?: QueryClient,
+  onSuccess?: (newId: number) => void
+): Promise<void> {
+  try {
+    const response = await copyBehindCdnAigwChannel(id, params)
     if (response.success) {
       toast.success(i18next.t(SUCCESS_MESSAGES.COPIED))
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })

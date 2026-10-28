@@ -38,6 +38,9 @@ export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
   key: z.string(),
+  // Display-only masked key (first-10/last-6 visible, middle starred) populated
+  // by GetChannel so admins can verify the stored key without revealing it.
+  key_masked: z.string().nullish(),
   openai_organization: z.string().nullish(),
   test_model: z.string().nullish(),
   status: z.number(), // 1: enabled, 0: manual disabled, 2: auto disabled
@@ -89,6 +92,10 @@ export interface ChannelSettings {
   responses_websocket_enabled?: boolean
   system_prompt?: string
   system_prompt_override?: boolean
+  // Retry override rules (four-phase JSON array) stored in the setting JSON.
+  retry_override?: Array<Record<string, unknown>>
+  // Named proxy-pool aliases consulted in order before the proxy address.
+  proxy_aliases?: string[]
   http_protocol?: 'auto' | 'http1' | string
   http2_connection_shards?: number
   tls_insecure_skip_verify?: boolean
@@ -312,6 +319,11 @@ export interface ChannelTestParams {
 
 export interface CopyChannelParams {
   suffix?: string
+  reset_balance?: boolean
+}
+
+export interface CopyBehindCdnAigwParams {
+  name: string
   reset_balance?: boolean
 }
 

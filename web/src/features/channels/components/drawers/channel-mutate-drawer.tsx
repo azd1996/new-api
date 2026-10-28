@@ -133,6 +133,7 @@ import {
   getChannelDefaultBaseURLs,
   getGroups,
   getPrefillGroups,
+  getProxyHealth,
   getTaskPluginOptions,
   refreshCodexCredential,
 } from '../../api'
@@ -155,6 +156,7 @@ import {
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../../constants'
 import { useChannelKeyDisclosure } from '../../hooks/use-channel-key-disclosure'
+import { RetryRulesSection } from '../retry-rules-section'
 import {
   useChannelModelDiscovery,
   type ChannelModelDiscoveryRequest,
@@ -570,6 +572,10 @@ export function ChannelMutateDrawer({
   const isMultiKeyChannel =
     isEditing && channelData?.data?.channel_info?.is_multi_key === true
 
+  // Masked key (head/tail visible, middle starred) returned by GetChannel so
+  // admins can verify the stored key without revealing the full secret.
+  const maskedChannelKey = channelData?.data?.key_masked ?? ''
+
   // Form setup
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelFormSchema),
@@ -606,6 +612,19 @@ export function ChannelMutateDrawer({
   const currentAdvancedCustom = formValues.advanced_custom
   const currentHeaderOverride = formValues.header_override
   const currentProxy = formValues.proxy
+  const proxyHealthQuery = useQuery({
+    queryKey: ['proxy-health'],
+    queryFn: getProxyHealth,
+    staleTime: 30000,
+  })
+  const proxyAliasOptions = useMemo(
+    () =>
+      (proxyHealthQuery.data?.data ?? []).map((entry) => ({
+        label: entry.alias,
+        value: entry.alias,
+      })),
+    [proxyHealthQuery.data]
+  )
   const currentHttpProtocol = formValues.http_protocol
   const {
     unlocked: doubaoApiEditUnlocked,
@@ -1797,6 +1816,34 @@ export function ChannelMutateDrawer({
     [onOpenChange, form, isSubmitting, showProviderPicker, providerTarget]
   )
 
+  const proxyAliasesFields = (
+    <FormField
+      control={form.control}
+      name='proxy_aliases'
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{t('Proxy Pool Aliases')}</FormLabel>
+          <FormControl>
+            <MultiSelect
+              options={proxyAliasOptions}
+              selected={field.value || []}
+              onChange={field.onChange}
+              allowCreate
+              createLabel='Add alias "{{value}}"'
+              placeholder={t('Select proxies from the proxy pool')}
+            />
+          </FormControl>
+          <FormDescription>
+            {t(
+              'References named proxies from the proxy pool (System Settings - Models). The first healthy proxy in order is used; if none is healthy or the list is empty, it falls back to the proxy address below.'
+            )}
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+
   const proxyFields = (
     <FormField
       control={form.control}
@@ -2789,6 +2836,8 @@ export function ChannelMutateDrawer({
             </FormItem>
           )}
         />
+
+        <RetryRulesSection form={form} disabled={sensitiveLocked} />
 
         <FormField
           control={form.control}
@@ -4459,7 +4508,7 @@ export function ChannelMutateDrawer({
                           )}
                         </span>
                       </FormDescription>
-                      {isEditing && canRevealChannelKey && (
+                      {isEditing && (
                         <div className='border-border/60 mt-4 flex flex-col gap-3 border-y border-dashed py-4'>
                           <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
                             <div>
@@ -4467,11 +4516,16 @@ export function ChannelMutateDrawer({
                                 {t('Current key')}
                               </p>
                               <p className='text-muted-foreground text-xs'>
-                                {t(
-                                  'Verification required to reveal the saved key.'
-                                )}
+                                {canRevealChannelKey
+                                  ? t(
+                                      'Showing a masked key. Reveal to view the full key.'
+                                    )
+                                  : t(
+                                      'Showing a masked key for verification.'
+                                    )}
                               </p>
                             </div>
+                            {canRevealChannelKey && (
                             <div className='flex items-center gap-2'>
                               <Button
                                 type='button'
@@ -4505,11 +4559,12 @@ export function ChannelMutateDrawer({
                                 {t('Copy')}
                               </Button>
                             </div>
+                            )}
                           </div>
                           <Input
                             readOnly
-                            value={channelKey ?? ''}
-                            placeholder={t('Hidden — verify to reveal')}
+                            value={channelKey ?? maskedChannelKey}
+                            placeholder={t('No key saved yet')}
                             className='font-mono'
                           />
                         </div>
@@ -4786,6 +4841,7 @@ export function ChannelMutateDrawer({
                 className='space-y-4 disabled:opacity-60'
               >
                 {taskPollingFields}
+                {proxyAliasesFields}
                 {proxyFields}
                 {httpProtocolFields}
                 {httpShardsFields}

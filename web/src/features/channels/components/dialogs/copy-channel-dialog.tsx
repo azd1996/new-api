@@ -27,13 +27,16 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-import { handleCopyChannel } from '../../lib'
+import { handleCopyBehindCdnAigwChannel, handleCopyChannel } from '../../lib'
 import { useChannels } from '../channels-provider'
 
 type CopyChannelDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
+
+const BEHIND_CDNAIGW_TAG = 'behind-cdnaigw'
+const BEHIND_CDNAIGW_PREFIX = 'behind-cdnaigw_'
 
 export function CopyChannelDialog({
   open,
@@ -43,27 +46,49 @@ export function CopyChannelDialog({
   const { currentRow } = useChannels()
   const queryClient = useQueryClient()
   const [suffix, setSuffix] = useState('_copy')
+  const [channelName, setChannelName] = useState('')
   const [resetBalance, setResetBalance] = useState(true)
   const [isCopying, setIsCopying] = useState(false)
 
   if (!currentRow) return null
 
+  const isBehindCdnAigw = currentRow.tag === BEHIND_CDNAIGW_TAG
+  const trimmedChannelName = channelName.trim()
+  const canSubmit = isBehindCdnAigw ? trimmedChannelName.length > 0 : true
+
+  const resetState = () => {
+    setSuffix('_copy')
+    setChannelName('')
+    setResetBalance(true)
+  }
+
   const handleCopy = async () => {
     setIsCopying(true)
 
-    await handleCopyChannel(
-      currentRow.id,
-      {
-        suffix,
-        reset_balance: resetBalance,
-      },
-      queryClient,
-      () => {
-        onOpenChange(false)
-        setSuffix('_copy')
-        setResetBalance(true)
-      }
-    )
+    if (isBehindCdnAigw) {
+      await handleCopyBehindCdnAigwChannel(
+        currentRow.id,
+        { name: trimmedChannelName, reset_balance: resetBalance },
+        queryClient,
+        () => {
+          onOpenChange(false)
+          resetState()
+        }
+      )
+    } else {
+      await handleCopyChannel(
+        currentRow.id,
+        {
+          suffix,
+          reset_balance: resetBalance,
+        },
+        queryClient,
+        () => {
+          onOpenChange(false)
+          resetState()
+        }
+      )
+    }
 
     setIsCopying(false)
   }
@@ -90,7 +115,7 @@ export function CopyChannelDialog({
           >
             {t('Cancel')}
           </Button>
-          <Button onClick={handleCopy} disabled={isCopying}>
+          <Button onClick={handleCopy} disabled={isCopying || !canSubmit}>
             {isCopying && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
             {isCopying ? t('Copying...') : t('Copy Channel')}
           </Button>
@@ -98,20 +123,51 @@ export function CopyChannelDialog({
       }
     >
       <div className='space-y-4 py-4'>
-        <div className='space-y-2'>
-          <Label htmlFor='suffix'>{t('Name Suffix')}</Label>
-          <Input
-            id='suffix'
-            placeholder={t('_copy')}
-            value={suffix}
-            onChange={(e) => setSuffix(e.target.value)}
-            disabled={isCopying}
-          />
-          <p className='text-muted-foreground text-xs'>
-            {t('New name will be:')} {currentRow.name}
-            {suffix}
-          </p>
-        </div>
+        {isBehindCdnAigw ? (
+          <div className='space-y-2'>
+            <Label htmlFor='channel-name'>{t('Channel Name')}</Label>
+            <div className='flex items-center'>
+              <span className='border-input bg-muted text-muted-foreground inline-flex h-9 items-center rounded-l-md border border-r-0 px-3 text-sm'>
+                {BEHIND_CDNAIGW_PREFIX}
+              </span>
+              <Input
+                id='channel-name'
+                className='rounded-l-none'
+                placeholder={t('e.g. dept-claude-official')}
+                value={channelName}
+                onChange={(e) => setChannelName(e.target.value)}
+                disabled={isCopying}
+              />
+            </div>
+            <p className='text-muted-foreground text-xs'>
+              {t('New name will be:')} {BEHIND_CDNAIGW_PREFIX}
+              {trimmedChannelName}
+            </p>
+          </div>
+        ) : (
+          <div className='space-y-2'>
+            <Label htmlFor='suffix'>{t('Name Suffix')}</Label>
+            <Input
+              id='suffix'
+              placeholder={t('_copy')}
+              value={suffix}
+              onChange={(e) => setSuffix(e.target.value)}
+              disabled={isCopying}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t('New name will be:')} {currentRow.name}
+              {suffix}
+            </p>
+          </div>
+        )}
+
+        {isBehindCdnAigw && (
+          <div className='text-muted-foreground bg-muted/50 rounded-md border p-3 text-xs leading-relaxed'>
+            {t(
+              "After copying, please review and configure the channel's endpoint, key, proxy, models, and upstream request ID header; run connectivity tests through the unified gateway whenever possible."
+            )}
+          </div>
+        )}
 
         <div className='flex items-center space-x-2'>
           <Checkbox
