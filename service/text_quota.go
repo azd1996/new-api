@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -60,12 +61,35 @@ type textQuotaSummary struct {
 	CacheCreationRatio1h   float64
 	CacheCreationRatio12h  float64
 	Quota                  int
-	IsClaudeUsageSemantic  bool
-	UsageSemantic          string
-	AudioInputPrice        float64
-	ToolSurchargeItems     []ToolSurchargeItem
-	ToolCallSurchargeQuota decimal.Decimal
-	FixedPriceBilling      bool
+	// RawQuota, StatQuota and CustomerStatQuota are reporting-only charges
+	// derived from the same base as Quota but at a different group ratio: RawQuota
+	// uses group ratio 1 (the undiscounted "list" amount), StatQuota uses the
+	// channel StatGroupRatio, and CustomerStatQuota uses the resolved customer
+	// discount. They NEVER affect actual billing (never feed
+	// UpdateUserUsedQuotaAndRequestCount / UpdateChannelUsedQuota / SettleBilling /
+	// Log.Quota); they exist so per-channel / per-customer consumption stays
+	// visible even when the billing group ratio is 0 (free pass-through channels).
+	// See finalizeTextQuotaForGroupRatio.
+	RawQuota       int
+	StatQuota      int
+	StatGroupRatio float64
+	// CustomerDiscount is the per-(customer, model) statistics discount resolved
+	// from the decoded trace-tag customer id; CustomerStatQuota is the amount
+	// scaled by it. HasCustomer is true only when a customer id was decoded, so
+	// the amount is recorded only for identified downstream customers.
+	// CustomerDiscountFallback / CustomerMatchedPrefix carry resolution
+	// provenance. All reporting-only (never billed).
+	CustomerDiscount         float64
+	CustomerDiscountFallback bool
+	CustomerMatchedPrefix    string
+	CustomerStatQuota        int
+	HasCustomer              bool
+	IsClaudeUsageSemantic    bool
+	UsageSemantic            string
+	AudioInputPrice          float64
+	ToolSurchargeItems       []ToolSurchargeItem
+	ToolCallSurchargeQuota   decimal.Decimal
+	FixedPriceBilling        bool
 }
 
 // hasBillableUsage reports whether this request should incur any charge.
@@ -223,6 +247,42 @@ func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaS
 	return total
 }
 
+// finalizeTextQuotaForGroupRatio reproduces the billed text-quota math for an
+// arbitrary group ratio from the already-assembled, pre-group-ratio decimals:
+// scaledBase is the per-request charge before the group ratio and the configured
+// other-ratios, and surchargeUnit is the tool-call surcharge before the group
+// ratio. Called with the real group ratio it returns the billed quota
+// byte-for-byte; called with 1 / StatGroupRatio / CustomerDiscount it returns
+// the report-only calibers. The other-ratios application, the ratio-branch
+// minimum-one-point clamp and the zero-usage / minimum-one guards all match the
+// billed path exactly, so no caliber can change the deducted quota.
+func finalizeTextQuotaForGroupRatio(summary *textQuotaSummary, priceData *hosttypes.PriceData, scaledBase, surchargeUnit decimal.Decimal, groupRatio float64, isRatioBranch bool) (int, *common.QuotaClamp) {
+	dGroupRatio := decimal.NewFromFloat(groupRatio)
+	calc := priceData.ApplyOtherRatiosToDecimal(scaledBase.Mul(dGroupRatio))
+	calc = calc.Add(surchargeUnit.Mul(dGroupRatio))
+	ratio := decimal.NewFromFloat(summary.ModelRatio).Mul(dGroupRatio)
+	if isRatioBranch && !ratio.IsZero() && calc.LessThanOrEqual(decimal.Zero) {
+		calc = decimal.NewFromInt(1)
+	}
+	quota, clamp := common.QuotaFromDecimalChecked(calc)
+	if !summary.hasBillableUsage() {
+		quota = 0
+	} else if !ratio.IsZero() && quota == 0 {
+		quota = 1
+	}
+	return quota, clamp
+}
+
+// tieredCaliberQuota mirrors composeTieredTextQuota for a report-only caliber:
+// the tiered pre-group-ratio quota scaled by the given ratio plus the billed
+// tool-call surcharge. Reporting-only; it never feeds the deducted quota.
+func tieredCaliberQuota(summary textQuotaSummary, tieredResult *billingexpr.TieredResult, groupRatio float64) int {
+	q := decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup).
+		Mul(decimal.NewFromFloat(groupRatio)).
+		Add(summary.ToolCallSurchargeQuota)
+	return common.QuotaFromDecimal(q)
+}
+
 // calculateTextQuotaSummary expects a usage already remapped by
 // effectiveBillingUsage; PostTextConsumeQuota performs that remap once and shares
 // the result with tiered billing, affinity observation and logging.
@@ -244,6 +304,29 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		UsageSemantic:         usageSemanticFromUsage(relayInfo, usage),
 	}
 	summary.IsClaudeUsageSemantic = summary.UsageSemantic == "anthropic"
+
+	// StatGroupRatio is the channel-level statistics/discount ratio used only for
+	// the reporting StatQuota. Unset or invalid falls back to 1 (StatQuota equals
+	// the undiscounted RawQuota). Reporting-only; never billed.
+	summary.StatGroupRatio = 1
+	if relayInfo.ChannelMeta != nil {
+		if r := relayInfo.ChannelSetting.StatGroupRatio; r != nil && *r > 0 && !math.IsInf(*r, 1) && !math.IsNaN(*r) {
+			summary.StatGroupRatio = *r
+		}
+	}
+
+	// CustomerDiscount is the per-(customer, model) statistics discount resolved
+	// from the decoded trace-tag customer id (longest series prefix, else 1).
+	// Reporting-only; recorded only when a customer id was actually decoded from
+	// the inbound trace-tag header.
+	summary.CustomerDiscount = 1
+	if _, _, customerID, decoded := common.TraceTagFromContext(ctx); decoded && customerID != "" {
+		summary.HasCustomer = true
+		resolution := model.ResolveCustomerModelDiscount(customerID, summary.ModelName)
+		summary.CustomerDiscount = resolution.Discount
+		summary.CustomerDiscountFallback = resolution.Fallback
+		summary.CustomerMatchedPrefix = resolution.MatchedPrefix
+	}
 
 	if usage == nil {
 		usage = &dto.Usage{
@@ -292,7 +375,6 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	dCacheRatio := decimal.NewFromFloat(summary.CacheRatio)
 	dImageRatio := decimal.NewFromFloat(summary.ImageRatio)
 	dModelRatio := decimal.NewFromFloat(summary.ModelRatio)
-	dGroupRatio := decimal.NewFromFloat(summary.GroupRatio)
 	dModelPrice := decimal.NewFromFloat(summary.ModelPrice)
 	dCacheCreationRatio := decimal.NewFromFloat(summary.CacheCreationRatio)
 	dCacheCreationRatio5m := decimal.NewFromFloat(summary.CacheCreationRatio5m)
@@ -300,11 +382,27 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	dCacheCreationRatio12h := decimal.NewFromFloat(summary.CacheCreationRatio12h)
 	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 
-	ratio := dModelRatio.Mul(dGroupRatio)
 	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
+	// surchargeUnit is the same tool-call surcharge BEFORE the group ratio, so the
+	// billed quota and the report-only calibers can each scale it by their own
+	// group ratio. surchargeUnit.Mul(dGroupRatio) is byte-identical to
+	// summary.ToolCallSurchargeQuota (distributive over the per-item sum).
+	var surchargeUnit decimal.Decimal
+	for _, item := range summary.ToolSurchargeItems {
+		surchargeUnit = surchargeUnit.Add(decimal.NewFromFloat(item.Price).
+			Mul(decimal.NewFromInt(int64(item.Count))).
+			Div(decimal.NewFromInt(1000)).
+			Mul(dQuotaPerUnit))
+	}
 
-	var audioInputQuota decimal.Decimal
-	if !relayInfo.PriceData.UsePrice {
+	// scaledBase is the per-request charge evaluated at group ratio = 1 and before
+	// the configured other-ratios. The final charge is linear in the group ratio,
+	// so the billed quota and the three reporting quotas (raw at group ratio 1,
+	// stat at the channel statistics ratio, customer at the customer discount) are
+	// all derived from this single base via finalizeTextQuotaForGroupRatio.
+	isRatioBranch := !relayInfo.PriceData.UsePrice
+	var scaledBase decimal.Decimal
+	if isRatioBranch {
 		baseTokens := dPromptTokens
 
 		var cachedTokensWithRatio decimal.Decimal
@@ -338,12 +436,13 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			imageTokensWithRatio = dImageTokens.Mul(dImageRatio)
 		}
 
+		var audioInputUnit decimal.Decimal
 		if !dAudioTokens.IsZero() {
 			summary.AudioInputPrice = operation_setting.GetGeminiInputAudioPricePerMillionTokens(summary.ModelName)
 			if summary.AudioInputPrice > 0 {
 				baseTokens = baseTokens.Sub(dAudioTokens)
-				audioInputQuota = decimal.NewFromFloat(summary.AudioInputPrice).
-					Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dGroupRatio).Mul(dQuotaPerUnit)
+				audioInputUnit = decimal.NewFromFloat(summary.AudioInputPrice).
+					Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dQuotaPerUnit)
 			}
 		}
 
@@ -357,32 +456,22 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 
 		promptQuota := baseTokens.Add(cachedTokensWithRatio).Add(imageTokensWithRatio).Add(cachedCreationTokensWithRatio)
 		completionQuota := dCompletionTokens.Mul(dCompletionRatio)
-		quotaCalculateDecimal := promptQuota.Add(completionQuota).Mul(ratio)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
-
-		if !ratio.IsZero() && quotaCalculateDecimal.LessThanOrEqual(decimal.Zero) {
-			quotaCalculateDecimal = decimal.NewFromInt(1)
-		}
-		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
-		summary.Quota = quota
-		noteQuotaClamp(relayInfo, clamp)
+		// (promptQuota+completionQuota).Mul(dModelRatio) is the group-ratio-1 base;
+		// audioInputUnit is already at group ratio 1. The old code multiplied the
+		// first term by ratio (=dModelRatio*dGroupRatio) and audio by dGroupRatio,
+		// then applied other-ratios; scaling this base by the group ratio inside
+		// the helper is the exact same decimal product.
+		scaledBase = promptQuota.Add(completionQuota).Mul(dModelRatio).Add(audioInputUnit)
 	} else {
-		quotaCalculateDecimal := dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
-		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
-		summary.Quota = quota
-		noteQuotaClamp(relayInfo, clamp)
+		scaledBase = dModelPrice.Mul(dQuotaPerUnit)
 	}
 
-	if !summary.hasBillableUsage() {
-		summary.Quota = 0
-	} else if !ratio.IsZero() && summary.Quota == 0 {
-		summary.Quota = 1
-	}
+	var billingClamp *common.QuotaClamp
+	summary.Quota, billingClamp = finalizeTextQuotaForGroupRatio(&summary, &relayInfo.PriceData, scaledBase, surchargeUnit, summary.GroupRatio, isRatioBranch)
+	noteQuotaClamp(relayInfo, billingClamp)
+	summary.RawQuota, _ = finalizeTextQuotaForGroupRatio(&summary, &relayInfo.PriceData, scaledBase, surchargeUnit, 1, isRatioBranch)
+	summary.StatQuota, _ = finalizeTextQuotaForGroupRatio(&summary, &relayInfo.PriceData, scaledBase, surchargeUnit, summary.StatGroupRatio, isRatioBranch)
+	summary.CustomerStatQuota, _ = finalizeTextQuotaForGroupRatio(&summary, &relayInfo.PriceData, scaledBase, surchargeUnit, summary.CustomerDiscount, isRatioBranch)
 
 	return summary
 }
@@ -431,6 +520,15 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			tieredBillingApplied = true
 			tieredResult = tieredRes
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
+			// Recompute the report-only calibers off the tiered billed base so they
+			// track tiered billing too (ActualQuotaBeforeGroup scaled by 1 /
+			// StatGroupRatio / CustomerDiscount, plus the billed surcharge). Never
+			// feeds the deducted quota.
+			if tieredRes != nil {
+				summary.RawQuota = tieredCaliberQuota(summary, tieredRes, 1)
+				summary.StatQuota = tieredCaliberQuota(summary, tieredRes, summary.StatGroupRatio)
+				summary.CustomerStatQuota = tieredCaliberQuota(summary, tieredRes, summary.CustomerDiscount)
+			}
 			summary.FixedPriceBilling = isFixedPriceSettlement(relayInfo, tieredRes)
 			if summary.FixedPriceBilling {
 				summary.AudioInputPrice = 0
@@ -489,6 +587,25 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		other.SetPublic("usage_semantic", "anthropic")
 	} else {
 		other = GenerateTextOtherInfo(ctx, relayInfo, summary.ModelRatio, summary.GroupRatio, summary.CompletionRatio, summary.CacheTokens, summary.CacheRatio, summary.ModelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
+	}
+	// Reporting-only charges (never billed): raw_quota is the undiscounted amount
+	// (group ratio 1), stat_quota applies the channel statistics ratio. They keep
+	// per-channel consumption visible even when the billing group ratio is 0.
+	// Written at the admin tier (root-only internal deployment): non-admin log
+	// views strip admin_info for free.
+	other.SetAdmin("raw_quota", summary.RawQuota)
+	other.SetAdmin("stat_quota", summary.StatQuota)
+	other.SetAdmin("stat_group_ratio", summary.StatGroupRatio)
+	// Customer discounted amount: the raw amount scaled by the per-customer stat
+	// discount, recorded only for requests whose trace-tag decoded a customer id
+	// (customer_id itself is written by RecordConsumeLog's trace-tag path).
+	if summary.HasCustomer {
+		other.SetAdmin("customer_stat_quota", summary.CustomerStatQuota)
+		other.SetAdmin("customer_discount", summary.CustomerDiscount)
+		other.SetAdmin("customer_discount_fallback", summary.CustomerDiscountFallback)
+		if summary.CustomerMatchedPrefix != "" {
+			other.SetAdmin("customer_discount_matched_prefix", summary.CustomerMatchedPrefix)
+		}
 	}
 	appendUsageBillingPathForLog(other, common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), originUsage)
 	if adminRejectReason != "" {

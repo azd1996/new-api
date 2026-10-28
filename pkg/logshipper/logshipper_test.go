@@ -29,7 +29,9 @@ var clickHouseLogColumns = []string{
 	"user_id", "ts", "type", "content", "username",
 	"token_name", "model_name", "quota", "prompt_tokens", "completion_tokens",
 	"use_time", "is_stream", "channel_id", "token_id", "group_name", "ip",
-	"request_id", "upstream_request_id", "other", "x_instance_name",
+	"request_id", "upstream_request_id",
+	"raw_quota", "stat_quota", "stat_group_ratio", "customer_stat_quota", "customer_discount",
+	"other", "x_instance_name",
 }
 
 func newTestShipper(t *testing.T) string {

@@ -1705,3 +1705,132 @@ func TestPostTextConsumeQuotaLogsMissingUsageAsStructuredContent(t *testing.T) {
 		map[string]any{"key": "Upstream returned no usage, so nothing was charged (possibly an upstream timeout)"},
 	}, other["content_parts"])
 }
+
+// TestTextQuotaCalibersPreserveBilledDeduction is the deduction invariant for
+// the report-only stat calibers: the billed quota (summary.Quota) MUST be
+// byte-identical to the pre-caliber math across the ratio branch, the price
+// branch, a free (group ratio 0) pass-through, cache tokens and the tiered
+// path, while RawQuota uses group ratio 1 and StatQuota/CustomerStatQuota use
+// their own ratios. The calibers never feed the billed quota.
+func TestTextQuotaCalibersPreserveBilledDeduction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	t.Run("summary calibers never change billed quota", func(t *testing.T) {
+		cases := []struct {
+			name        string
+			price       hosttypes.PriceData
+			usage       *dto.Usage
+			wantBilled  int
+			wantRaw     int
+			statGroupR1 bool
+		}{
+			{
+				name:        "ratio branch discounted",
+				price:       hosttypes.PriceData{ModelRatio: 2, CompletionRatio: 3, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 0.5}},
+				usage:       &dto.Usage{PromptTokens: 1000, CompletionTokens: 500},
+				wantBilled:  2500, // (1000 + 500*3) * 2 * 0.5
+				wantRaw:     5000, // group ratio 1
+				statGroupR1: true,
+			},
+			{
+				name:        "ratio branch free pass-through (group ratio 0)",
+				price:       hosttypes.PriceData{ModelRatio: 2, CompletionRatio: 3, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 0}},
+				usage:       &dto.Usage{PromptTokens: 1000, CompletionTokens: 500},
+				wantBilled:  0,    // billed collapses to 0
+				wantRaw:     5000, // raw keeps the list amount
+				statGroupR1: true,
+			},
+			{
+				name:        "ratio branch with cache tokens",
+				price:       hosttypes.PriceData{ModelRatio: 1, CompletionRatio: 2, CacheRatio: 0.1, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 0.5}},
+				usage:       &dto.Usage{PromptTokens: 1000, CompletionTokens: 10, PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 200}},
+				wantBilled:  420, // ((1000-200) + 200*0.1 + 10*2) * 0.5
+				wantRaw:     840,
+				statGroupR1: true,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				relayInfo := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, OriginModelName: "m", PriceData: tc.price, StartTime: time.Now()}
+				summary := calculateTextQuotaSummary(ctx, relayInfo, tc.usage)
+				assert.Equal(t, tc.wantBilled, summary.Quota, "billed quota must be unchanged")
+				assert.Equal(t, tc.wantRaw, summary.RawQuota, "raw caliber uses group ratio 1")
+				if tc.statGroupR1 {
+					assert.Equal(t, float64(1), summary.StatGroupRatio)
+				}
+				// Stat and customer default to ratio 1 (no channel setting, no
+				// customer), so their calibers equal the raw amount.
+				assert.Equal(t, summary.RawQuota, summary.StatQuota)
+				assert.Equal(t, summary.RawQuota, summary.CustomerStatQuota)
+			})
+		}
+	})
+
+	t.Run("price branch discounted", func(t *testing.T) {
+		relayInfo := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, OriginModelName: "m", PriceData: hosttypes.PriceData{UsePrice: true, ModelPrice: 2, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 0.5}}, StartTime: time.Now()}
+		summary := calculateTextQuotaSummary(ctx, relayInfo, &dto.Usage{PromptTokens: 1, CompletionTokens: 1})
+		wantBilled := common.QuotaFromDecimal(decimal.NewFromFloat(2).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Mul(decimal.NewFromFloat(0.5)))
+		wantRaw := common.QuotaFromDecimal(decimal.NewFromFloat(2).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+		assert.Equal(t, wantBilled, summary.Quota)
+		assert.Equal(t, wantRaw, summary.RawQuota)
+		assert.Equal(t, summary.RawQuota, summary.StatQuota)
+	})
+
+	t.Run("channel StatGroupRatio scales only the stat caliber", func(t *testing.T) {
+		statRatio := 0.25
+		relayInfo := &relaycommon.RelayInfo{
+			RelayFormat:     types.RelayFormatOpenAI,
+			OriginModelName: "m",
+			ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 1, ChannelSetting: dto.ChannelSettings{StatGroupRatio: &statRatio}},
+			PriceData:       hosttypes.PriceData{ModelRatio: 1, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}},
+			StartTime:       time.Now(),
+		}
+		summary := calculateTextQuotaSummary(ctx, relayInfo, &dto.Usage{PromptTokens: 1000, CompletionTokens: 0})
+		assert.Equal(t, 1000, summary.Quota)             // billed unchanged (group ratio 1)
+		assert.Equal(t, 1000, summary.RawQuota)          // undiscounted
+		assert.Equal(t, 0.25, summary.StatGroupRatio)    // resolved from channel setting
+		assert.Equal(t, 250, summary.StatQuota)          // 1000 * 0.25
+		assert.Equal(t, 1000, summary.CustomerStatQuota) // no customer => ratio 1
+	})
+
+	t.Run("StatGroupRatio nil falls back to 1", func(t *testing.T) {
+		relayInfo := &relaycommon.RelayInfo{
+			RelayFormat:     types.RelayFormatOpenAI,
+			OriginModelName: "m",
+			ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 1, ChannelSetting: dto.ChannelSettings{}},
+			PriceData:       hosttypes.PriceData{ModelRatio: 1, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}},
+			StartTime:       time.Now(),
+		}
+		summary := calculateTextQuotaSummary(ctx, relayInfo, &dto.Usage{PromptTokens: 100, CompletionTokens: 0})
+		assert.Equal(t, float64(1), summary.StatGroupRatio)
+		assert.Equal(t, summary.RawQuota, summary.StatQuota)
+	})
+
+	t.Run("helper linearity and group-ratio-0 floor (covers audio-inclusive base)", func(t *testing.T) {
+		// scaledBase stands in for any assembled base, including an audio unit; the
+		// helper must scale it linearly and collapse the billed amount to 0 at
+		// group ratio 0 while the raw caliber keeps the undiscounted amount.
+		summary := &textQuotaSummary{ModelRatio: 1, TotalTokens: 100}
+		priceData := &hosttypes.PriceData{}
+		scaledBase := decimal.NewFromInt(1000)
+		billed, _ := finalizeTextQuotaForGroupRatio(summary, priceData, scaledBase, decimal.Zero, 0.5, true)
+		raw, _ := finalizeTextQuotaForGroupRatio(summary, priceData, scaledBase, decimal.Zero, 1, true)
+		free, _ := finalizeTextQuotaForGroupRatio(summary, priceData, scaledBase, decimal.Zero, 0, true)
+		assert.Equal(t, 500, billed)
+		assert.Equal(t, 1000, raw)
+		assert.Equal(t, 0, free)
+	})
+
+	t.Run("tiered calibers mirror composeTieredTextQuota", func(t *testing.T) {
+		summary := textQuotaSummary{ToolCallSurchargeQuota: decimal.NewFromInt(100)}
+		tieredResult := &billingexpr.TieredResult{ActualQuotaBeforeGroup: 1000}
+		relayInfo := &relaycommon.RelayInfo{TieredBillingSnapshot: &billingexpr.BillingSnapshot{GroupRatio: 0.5}}
+		billed := composeTieredTextQuota(relayInfo, summary, 0, tieredResult)
+		raw := tieredCaliberQuota(summary, tieredResult, 1)
+		stat := tieredCaliberQuota(summary, tieredResult, 0.5)
+		assert.Equal(t, 600, billed)  // 1000*0.5 + 100
+		assert.Equal(t, 1100, raw)    // 1000*1 + 100
+		assert.Equal(t, billed, stat) // stat ratio == billed group ratio
+	})
+}

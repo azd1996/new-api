@@ -88,7 +88,15 @@ type Row struct {
 	Ip                string `json:"ip"`
 	RequestId         string `json:"request_id"`
 	UpstreamRequestId string `json:"upstream_request_id"`
-	Other             string `json:"other"`
+	// RawQuota/StatQuota/StatGroupRatio/CustomerStatQuota/CustomerDiscount are the
+	// reporting-only raw/discounted stat amounts dual-written from model.Log so
+	// the cluster table can SUM them. They never affect billing.
+	RawQuota          int     `json:"raw_quota"`
+	StatQuota         int     `json:"stat_quota"`
+	StatGroupRatio    float64 `json:"stat_group_ratio"`
+	CustomerStatQuota int     `json:"customer_stat_quota"`
+	CustomerDiscount  float64 `json:"customer_discount"`
+	Other             string  `json:"other"`
 
 	// XInstanceName is the cluster table's leading ORDER BY column; several
 	// instances share one table. Ship fills it in, callers leave it zero.

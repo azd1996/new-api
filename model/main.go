@@ -434,6 +434,21 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS error_signature_hash String DEFAULT ''").Error; err != nil {
 		return err
 	}
+	// Reporting-only raw/discounted stat amount columns (consume logs only),
+	// dual-written from model.Log. ADD COLUMN IF NOT EXISTS is idempotent on
+	// ClickHouse; rows predating them read as 0.
+	statAmountColumns := []string{
+		"raw_quota Int32 DEFAULT 0",
+		"stat_quota Int32 DEFAULT 0",
+		"stat_group_ratio Float64 DEFAULT 0",
+		"customer_stat_quota Int32 DEFAULT 0",
+		"customer_discount Float64 DEFAULT 0",
+	}
+	for _, col := range statAmountColumns {
+		if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS " + col).Error; err != nil {
+			return err
+		}
+	}
 	return syncClickHouseLogTTL(ttlDays)
 }
 
@@ -486,6 +501,11 @@ CREATE TABLE IF NOT EXISTS logs (
 	downstream_request_id String DEFAULT '',
 	customer_id String DEFAULT '',
 	error_signature_hash String DEFAULT '',
+	raw_quota Int32 DEFAULT 0,
+	stat_quota Int32 DEFAULT 0,
+	stat_group_ratio Float64 DEFAULT 0,
+	customer_stat_quota Int32 DEFAULT 0,
+	customer_discount Float64 DEFAULT 0,
 	other String DEFAULT ''
 )
 ENGINE = MergeTree()

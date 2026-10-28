@@ -141,7 +141,17 @@ type Log struct {
 	// trace-tag header and duplicated into real indexed columns for fast search.
 	DownstreamRequestId string `json:"downstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_downstream_request_id;default:''"`
 	CustomerId          string `json:"customer_id,omitempty" gorm:"type:varchar(128);index:idx_logs_customer_id;default:''"`
-	Other               string `json:"other"`
+	// RawQuota/StatQuota/StatGroupRatio/CustomerStatQuota/CustomerDiscount
+	// duplicate the reporting-only raw/discounted amounts from the Other JSON
+	// (admin_info) into real columns (consume logs only), written alongside the
+	// Other copy so they can reach ClickHouse and be SUM-aggregated. They never
+	// affect billing; historical rows predating the columns read as 0.
+	RawQuota          int     `json:"raw_quota,omitempty" gorm:"default:0"`
+	StatQuota         int     `json:"stat_quota,omitempty" gorm:"default:0"`
+	StatGroupRatio    float64 `json:"stat_group_ratio,omitempty" gorm:"default:0"`
+	CustomerStatQuota int     `json:"customer_stat_quota,omitempty" gorm:"default:0"`
+	CustomerDiscount  float64 `json:"customer_discount,omitempty" gorm:"default:0"`
+	Other             string  `json:"other"`
 }
 
 // don't use iota, avoid change log type value
@@ -199,6 +209,11 @@ func shipLog(log *Log) {
 		Ip:                log.Ip,
 		RequestId:         log.RequestId,
 		UpstreamRequestId: log.UpstreamRequestId,
+		RawQuota:          log.RawQuota,
+		StatQuota:         log.StatQuota,
+		StatGroupRatio:    log.StatGroupRatio,
+		CustomerStatQuota: log.CustomerStatQuota,
+		CustomerDiscount:  log.CustomerDiscount,
 		Other:             log.Other,
 	})
 	if err != nil {
@@ -487,6 +502,19 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	}
 	content := other.setContent(params.Content)
 	otherStr := other.JSONString()
+	// Dual-write the reporting-only raw/discounted amounts (set via SetAdmin in
+	// PostTextConsumeQuota) into their own columns while keeping the Other JSON
+	// copy. nil/absent reads yield zero values; customer_* are only present when
+	// the request carried a decoded customer id.
+	var rawQuota, statQuota, customerStatQuota int
+	var statGroupRatio, customerDiscount float64
+	if other != nil {
+		rawQuota, _ = other.adminInfo["raw_quota"].(int)
+		statQuota, _ = other.adminInfo["stat_quota"].(int)
+		statGroupRatio, _ = other.adminInfo["stat_group_ratio"].(float64)
+		customerStatQuota, _ = other.adminInfo["customer_stat_quota"].(int)
+		customerDiscount, _ = other.adminInfo["customer_discount"].(float64)
+	}
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
@@ -521,6 +549,11 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		}(),
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
+		RawQuota:          rawQuota,
+		StatQuota:         statQuota,
+		StatGroupRatio:    statGroupRatio,
+		CustomerStatQuota: customerStatQuota,
+		CustomerDiscount:  customerDiscount,
 		Other:             otherStr,
 	}
 	err := createLog(log)
@@ -548,6 +581,8 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			TokenID:             params.TokenId,
 			ChannelID:           params.ChannelId,
 			NodeName:            common.NodeName,
+			ChannelStatQuota:    statQuota,
+			CustomerStatQuota:   customerStatQuota,
 		})
 	}
 }
