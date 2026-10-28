@@ -122,11 +122,19 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	seenStreamToolCalls := make(map[string]struct{})
 	var streamFunctionCallNames []string
 
-	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	// retry-override: hold leading chunks in a pre-commit buffer so a matching
+	// rule (e.g. a 200-body rate-limit) can fall back with nothing forwarded to the
+	// client. With no retry_override rules the guard starts committed (no buffering),
+	// so every chunk passes straight through — identical to the un-guarded path.
+	guard := newPrecommitGuard(info, resp.StatusCode)
+	var curSR *helper.StreamResult
+	process := func(data string) {
 		if lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog(common.LogText("error handling stream format: %s", err.Error()))
-				sr.Error(err)
+				if curSR != nil {
+					curSR.Error(err)
+				}
 			}
 		}
 		if len(data) > 0 {
@@ -138,10 +146,26 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			observeStreamChoices(info, data, seenStreamToolCalls, &streamFunctionCallNames)
 			if err := processTokenData(info, data, &responseTextBuilder, &toolCount); err != nil {
 				logger.LogError(c, common.LogText("error processing stream token data: %s", err.Error()))
-				sr.Error(err)
+				if curSR != nil {
+					curSR.Error(err)
+				}
 			}
 		}
+	}
+
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		curSR = sr
+		if guard.feed(data, isChatStreamCommit(data), process) {
+			sr.Stop(nil)
+		}
 	})
+
+	// retry-override hit in the pre-commit window: nothing was forwarded to the
+	// client, so the relay loop can cleanly fall back to the next channel.
+	if guard.matched != nil {
+		return nil, guard.matched
+	}
+	guard.finish(process)
 
 	info.StreamStatus.RequireTerminal()
 
@@ -272,6 +296,12 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			logger.LogError(c, common.LogText("openrouter enterprise response success=false, data: %s", enterpriseResponse.Data))
 			return nil, types.NewOpenAIError(fmt.Errorf("openrouter response success=false"), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
+	}
+
+	// retry-override: treat a matching 200 body (e.g. embedded rate-limit) as a
+	// retryable error before anything is written to the client.
+	if guardErr := retryBodyGuardError(info, resp.StatusCode, responseBody); guardErr != nil {
+		return nil, guardErr
 	}
 
 	err = common.Unmarshal(responseBody, &simpleResponse)
