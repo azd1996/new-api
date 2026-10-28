@@ -68,6 +68,40 @@ func errorContentLikeCondition(column string, keyword string) (string, string) {
 	return column + " LIKE ? ESCAPE '!'", "%" + esc + "%"
 }
 
+// otherFieldLikeCondition builds a cross-dialect condition matching logs whose
+// Other JSON carries the given string field as `"key":"value"`. It powers the
+// downstream trace-tag filters (downstream_trace_tag / customer_id /
+// downstream_request_id), which live in the unindexed Other TEXT blob, so this
+// scans — callers should pair it with a time range or other narrowing filter.
+// The value's LIKE metacharacters are escaped so it cannot alter the pattern.
+func otherFieldLikeCondition(column, key, value string) (string, string) {
+	literal := fmt.Sprintf(`"%s":"%s"`, key, value)
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(literal)
+		return column + " LIKE ?", "%" + esc + "%"
+	}
+	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(literal)
+	return column + " LIKE ? ESCAPE '!'", "%" + esc + "%"
+}
+
+// customerNoneFilter is the sentinel value the UI sends for the "其他 / Other
+// (no customer info)" option in the customer-id / customer-name filters; it
+// selects logs whose Other JSON has no decoded customer.
+const customerNoneFilter = "__none__"
+
+// otherFieldAbsentCondition builds a cross-dialect condition matching logs whose
+// Other JSON does NOT contain the given key (e.g. requests without a decoded
+// customer). The key's LIKE metacharacters (notably `_`) are escaped.
+func otherFieldAbsentCondition(column, key string) (string, string) {
+	literal := fmt.Sprintf(`"%s":`, key)
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(literal)
+		return column + " NOT LIKE ?", "%" + esc + "%"
+	}
+	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(literal)
+	return column + " NOT LIKE ? ESCAPE '!'", "%" + esc + "%"
+}
+
 func sanitizeClickHouseLikePattern(input string) (string, error) {
 	input = strings.ReplaceAll(input, `\`, `\\`)
 	input = strings.ReplaceAll(input, `_`, `\_`)
