@@ -1069,6 +1069,72 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	return logs, total, err
 }
 
+// logStatAggregateRow scans the combined fast-path aggregate below. Every output
+// is aliased with a _sum suffix so an identifier referenced inside an aggregate
+// never binds to a same-SELECT alias first (the ClickHouse resolution order
+// guarded against in SumLogStatAmounts).
+type logStatAggregateRow struct {
+	Quota             int64 `gorm:"column:quota_sum"`
+	RequestCount      int64 `gorm:"column:request_count_sum"`
+	ChannelStatQuota  int64 `gorm:"column:channel_stat_quota_sum"`
+	CustomerStatQuota int64 `gorm:"column:customer_stat_quota_sum"`
+	ProfitQuota       int64 `gorm:"column:profit_quota_sum"`
+}
+
+// SumLogStatWithAmounts computes the usage-log stat badges (consumption quota /
+// request count / RPM / TPM) together with the admin reporting amounts
+// (channel-discounted / customer-discounted / profit) in a single scan of the
+// time range, replacing the separate SumUsedQuota + SumLogStatAmounts passes
+// over the identical rows.
+//
+// It applies ONLY the field filters (model/username/token/channel/group) and
+// the time range — the subset shared by both callers — so it is valid only when
+// no admin-only filter (status code, request/upstream id, trace tag, customer,
+// error keyword/signature, retry) is active and the type scope is all-or-consume.
+// GetLogsStat enforces those preconditions. Consumption quota/count are scoped to
+// consume via CASE (matching SumUsedQuota, which always forces consume); the
+// amount columns are non-zero only on consume rows, so summing them over the
+// unfiltered range matches SumLogStatAmounts.
+func SumLogStatWithAmounts(startTimestamp int64, endTimestamp int64, filters LogFilterOptions) (Stat, LogStatAmounts, error) {
+	var stat Stat
+	var amounts LogStatAmounts
+
+	tx := LOG_DB.Table("logs")
+	var err error
+	if tx, err = applyLogFilterOptions(tx, filters, ""); err != nil {
+		return stat, amounts, err
+	}
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+
+	selectExpr := fmt.Sprintf(
+		"COALESCE(SUM(CASE WHEN type = %[1]d THEN quota ELSE 0 END), 0) AS quota_sum, "+
+			"COALESCE(SUM(CASE WHEN type = %[1]d THEN 1 ELSE 0 END), 0) AS request_count_sum, "+
+			"COALESCE(SUM(stat_quota), 0) AS channel_stat_quota_sum, "+
+			"COALESCE(SUM(customer_stat_quota), 0) AS customer_stat_quota_sum, "+
+			"COALESCE(SUM(CASE WHEN customer_discount > 0 THEN customer_stat_quota - stat_quota ELSE 0 END), 0) AS profit_quota_sum",
+		LogTypeConsume,
+	)
+	var row logStatAggregateRow
+	if err = tx.Select(selectExpr).Scan(&row).Error; err != nil {
+		return stat, amounts, err
+	}
+	stat.Quota = int(row.Quota)
+	stat.RequestCount = int(row.RequestCount)
+	amounts.ChannelStatQuota = row.ChannelStatQuota
+	amounts.CustomerStatQuota = row.CustomerStatQuota
+	amounts.ProfitQuota = row.ProfitQuota
+
+	if stat.Rpm, stat.Tpm, err = sumRecentRpmTpm(filters); err != nil {
+		return stat, amounts, err
+	}
+	return stat, amounts, nil
+}
+
 type Stat struct {
 	Quota        int `json:"quota"`
 	Rpm          int `json:"rpm"`
@@ -1082,14 +1148,7 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, filters
 		return stat, nil
 	}
 	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota, count(*) request_count")
-
-	// 为rpm和tpm创建单独的查询
-	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
-
 	if tx, err = applyLogFilterOptions(tx, filters, ""); err != nil {
-		return stat, err
-	}
-	if rpmTpmQuery, err = applyLogFilterOptions(rpmTpmQuery, filters, ""); err != nil {
 		return stat, err
 	}
 	if startTimestamp != 0 {
@@ -1099,22 +1158,37 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, filters
 		tx = tx.Where("created_at <= ?", endTimestamp)
 	}
 	tx = tx.Where("type = ?", LogTypeConsume)
-	rpmTpmQuery = rpmTpmQuery.Where("type = ?", LogTypeConsume)
-
-	// 只统计最近60秒的rpm和tpm
-	rpmTpmQuery = rpmTpmQuery.Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
-
-	// 执行查询
-	if err := tx.Scan(&stat).Error; err != nil {
+	if err = tx.Scan(&stat).Error; err != nil {
 		common.SysError("failed to query log stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
-	if err := rpmTpmQuery.Scan(&stat).Error; err != nil {
+
+	if stat.Rpm, stat.Tpm, err = sumRecentRpmTpm(filters); err != nil {
 		common.SysError("failed to query rpm/tpm stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
-
 	return stat, nil
+}
+
+// sumRecentRpmTpm returns the last-60s requests-per-minute and tokens-per-minute
+// for consume logs matching the given field filters. It is deliberately scoped
+// to a rolling 60s window (independent of the caller's start/end range), shared
+// by SumUsedQuota and SumLogStatWithAmounts.
+func sumRecentRpmTpm(filters LogFilterOptions) (rpm int, tpm int, err error) {
+	tx := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
+	if tx, err = applyLogFilterOptions(tx, filters, ""); err != nil {
+		return 0, 0, err
+	}
+	tx = tx.Where("type = ?", LogTypeConsume).
+		Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
+	var result struct {
+		Rpm int
+		Tpm int
+	}
+	if err = tx.Scan(&result).Error; err != nil {
+		return 0, 0, err
+	}
+	return result.Rpm, result.Tpm, nil
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {

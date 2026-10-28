@@ -222,14 +222,10 @@ func GetLogsStat(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, filters)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
 	// Reporting-only amounts (channel-discounted / customer-discounted / profit)
-	// live per row in the Other JSON, so they are aggregated separately and honor
-	// the full admin log-list filter set (customer, status code, trace-tag, ...).
+	// are aggregated with the full admin log-list filter set (customer, status
+	// code, trace-tag, ...), while usage/RPM/TPM intentionally ignore those admin-
+	// only filters (see docs/log-filter-status-code.md).
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
 	statusCode, _ := strconv.Atoi(c.Query("status_code"))
@@ -239,10 +235,38 @@ func GetLogsStat(c *gin.Context) {
 	downstreamRequestId := c.Query("downstream_request_id")
 	downstreamTraceTag := c.Query("downstream_trace_tag")
 	errorSignatureHash := c.Query("error_signature_hash")
-	amounts, err := model.SumLogStatAmounts(logType, startTimestamp, endTimestamp, filters, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash)
-	if err != nil {
-		common.ApiError(c, err)
-		return
+
+	// Fast path: with no admin-only filter active and an all/consume type scope,
+	// the consumption aggregate and the reporting amounts scan the identical rows,
+	// so compute them in one pass instead of two full scans of the (often large)
+	// time range — the common case when the page is first opened. Any admin-only
+	// filter makes the two diverge, so fall back to the separate queries then.
+	noAdminFilter := requestId == "" && upstreamRequestId == "" && statusCode == 0 &&
+		errorKeyword == "" && customerId == "" && customerName == "" &&
+		downstreamRequestId == "" && downstreamTraceTag == "" && errorSignatureHash == "" &&
+		filters.RetryTriggered == nil
+	canCombine := noAdminFilter && (logType == model.LogTypeUnknown || logType == model.LogTypeConsume)
+
+	var stat model.Stat
+	var amounts model.LogStatAmounts
+	var err error
+	if canCombine {
+		stat, amounts, err = model.SumLogStatWithAmounts(startTimestamp, endTimestamp, filters)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	} else {
+		stat, err = model.SumUsedQuota(logType, startTimestamp, endTimestamp, filters)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		amounts, err = model.SumLogStatAmounts(logType, startTimestamp, endTimestamp, filters, requestId, upstreamRequestId, statusCode, errorKeyword, customerId, customerName, downstreamRequestId, downstreamTraceTag, errorSignatureHash)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

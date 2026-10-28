@@ -5,6 +5,13 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-10-28]
+
+### 优化 Changed
+- **使用日志首屏统计开销优化（Stat 查询合并快路径）**：日志量大时，打开「使用日志」默认会对同一时间范围重复扫表——列表的 `COUNT(*)`、`SumUsedQuota` 的 `sum(quota)+count(*)`、`SumLogStatAmounts` 的三项金额 `SUM`，其中后两者 WHERE 完全一致却各扫一遍。新增 `model.SumLogStatWithAmounts`，用条件聚合在**一次扫描**内同时算出消耗 `quota`/请求数（`CASE WHEN type=consume`）与渠道折后/客户折后/利润三项金额；RPM/TPM 因是「最近 60 秒」独立窗口仍单独查（抽出共享的 `sumRecentRpmTpm`，`SumUsedQuota` 一并复用去重）。`controller.GetLogsStat` 仅在**无任何管理员专属筛选**（request_id/upstream_request_id/status_code/error_keyword/customer/trace_tag/error_signature/retry 全空）且类型为「全部或消耗」时走合并快路径（恰好命中默认打开场景），否则回退原两次查询。**行为不变**：`用量/RPM/TPM` 仍刻意不随 status_code/error_keyword 等筛选变化（见 `docs/log-filter-status-code.md`），合并仅发生在两者扫描行一致时；新增 `model/log_stat_combined_test.go` 断言「合并结果 == 原两次查询结果」并锁定具体数值。
+- **使用日志统计徽标延迟加载**：顶部「请求数/用量/RPM/TPM/金额」徽标的统计请求改为首帧空闲后（`requestIdleCallback`，降级 `setTimeout`）再触发，让日志列表先渲染，统计随后补上（加载期间显示骨架），避免统计全表聚合与列表请求在打开瞬间争抢。
+- **使用日志默认每页条数 100 → 30（桌面端）**：桌面端默认 `page_size` 由 100 降为 30（移动端保持 20），减少首屏行数与大 JSON 字段的传输/反序列化开销。
+
 ## [2026-10-27]
 
 ### 新增 Added

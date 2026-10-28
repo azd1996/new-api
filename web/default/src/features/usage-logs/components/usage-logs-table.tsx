@@ -117,7 +117,7 @@ export function UsageLogsTable({
   } = useTableUrlState({
     search: route.useSearch(),
     navigate: route.useNavigate(),
-    pagination: { defaultPage: 1, defaultPageSize: isMobile ? 20 : 100 },
+    pagination: { defaultPage: 1, defaultPageSize: isMobile ? 20 : 30 },
     globalFilter: { enabled: false },
     columnFilters: [
       {
