@@ -60,7 +60,7 @@ func ShouldRetryRelayError(c *gin.Context, openaiErr *types.NewAPIError, retryTi
 	return DecideRelayRetry(c, openaiErr, retryTimes).Action == "retry"
 }
 
-func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) {
+func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo, retryDetails ...map[string]any) {
 	if err == nil {
 		return
 	}
@@ -92,6 +92,14 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		AppendRelayLogAdminInfo(c, relayInfo, other)
 		AppendResponseModelLogInfo(relayInfo, other)
 		AppendTaskPluginContextAuditInfo(c, other)
+		// retry_triggered records whether this failed attempt fired an
+		// error-triggered retry-override (detail present); the retry rewrite
+		// detail is admin-only. Report-only; never affects billing.
+		retryTriggered := len(retryDetails) > 0 && retryDetails[0] != nil
+		other.SetAdmin("retry_triggered", retryTriggered)
+		if retryTriggered {
+			other.SetAdmin("retry_override", retryDetails[0])
+		}
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
 			startTime = time.Now()

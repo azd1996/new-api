@@ -434,6 +434,9 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS error_signature_hash String DEFAULT ''").Error; err != nil {
 		return err
 	}
+	if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS retry_triggered UInt8 DEFAULT 0").Error; err != nil {
+		return err
+	}
 	// Reporting-only raw/discounted stat amount columns (consume logs only),
 	// dual-written from model.Log. ADD COLUMN IF NOT EXISTS is idempotent on
 	// ClickHouse; rows predating them read as 0.
@@ -501,6 +504,7 @@ CREATE TABLE IF NOT EXISTS logs (
 	downstream_request_id String DEFAULT '',
 	customer_id String DEFAULT '',
 	error_signature_hash String DEFAULT '',
+	retry_triggered UInt8 DEFAULT 0,
 	raw_quota Int32 DEFAULT 0,
 	stat_quota Int32 DEFAULT 0,
 	stat_group_ratio Float64 DEFAULT 0,

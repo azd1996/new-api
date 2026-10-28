@@ -141,6 +141,10 @@ type Log struct {
 	// trace-tag header and duplicated into real indexed columns for fast search.
 	DownstreamRequestId string `json:"downstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_downstream_request_id;default:''"`
 	CustomerId          string `json:"customer_id,omitempty" gorm:"type:varchar(128);index:idx_logs_customer_id;default:''"`
+	// RetryTriggered duplicates other.admin_info.retry_triggered into a real
+	// indexed column (error logs) so the admin log list can filter attempts that
+	// fired an error-triggered retry-override. Reporting-only; never billed.
+	RetryTriggered bool `json:"retry_triggered" gorm:"not null;default:false;index:idx_logs_retry_triggered"`
 	// RawQuota/StatQuota/StatGroupRatio/CustomerStatQuota/CustomerDiscount
 	// duplicate the reporting-only raw/discounted amounts from the Other JSON
 	// (admin_info) into real columns (consume logs only), written alongside the
@@ -415,8 +419,10 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		}
 	}
 	errorSignatureHash := ""
+	retryTriggered := false
 	if other != nil {
 		errorSignatureHash, _ = other.adminInfo["error_signature_hash"].(string)
+		retryTriggered, _ = other.adminInfo["retry_triggered"].(bool)
 	}
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
@@ -435,6 +441,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		DownstreamRequestId: downstreamRequestID,
 		CustomerId:          customerID,
 		ErrorSignatureHash:  errorSignatureHash,
+		RetryTriggered:      retryTriggered,
 		Content:             content,
 		PromptTokens:        0,
 		CompletionTokens:    0,
@@ -669,6 +676,9 @@ type LogFilter struct {
 	StatusCode          int
 	ErrorKeyword        string
 	ErrorSignatureHash  string
+	// RetryTriggered, when set, restricts to error logs whose attempt did (true)
+	// or did not (false) fire an error-triggered retry-override. Admin-only.
+	RetryTriggered *bool
 }
 
 func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
@@ -710,6 +720,9 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	}
 	if f.ErrorSignatureHash != "" {
 		tx = tx.Where("logs.error_signature_hash = ?", f.ErrorSignatureHash)
+	}
+	if f.RetryTriggered != nil {
+		tx = tx.Where("logs.type = ? AND logs.retry_triggered = ?", LogTypeError, *f.RetryTriggered)
 	}
 	if f.StartTimestamp != 0 {
 		tx = tx.Where("logs.created_at >= ?", f.StartTimestamp)

@@ -51,6 +51,11 @@ func TestShipLogMapsEveryLogField(t *testing.T) {
 		Ip:                "10.0.0.1",
 		RequestId:         "request-id-value",
 		UpstreamRequestId: "upstream-request-id-value",
+		RawQuota:          109,
+		StatQuota:         110,
+		StatGroupRatio:    0.5,
+		CustomerStatQuota: 111,
+		CustomerDiscount:  0.25,
 		Other:             `{"matched_tier":"standard"}`,
 	}
 	shipLog(log)
@@ -87,6 +92,11 @@ func TestShipLogMapsEveryLogField(t *testing.T) {
 		Ip:                "10.0.0.1",
 		RequestId:         "request-id-value",
 		UpstreamRequestId: "upstream-request-id-value",
+		RawQuota:          109,
+		StatQuota:         110,
+		StatGroupRatio:    0.5,
+		CustomerStatQuota: 111,
+		CustomerDiscount:  0.25,
 		Other:             `{"matched_tier":"standard"}`,
 		XInstanceName:     "log_test3",
 	}, envelope.Data)

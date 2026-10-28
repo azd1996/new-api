@@ -229,11 +229,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		// Error-triggered retry-override: stage a one-shot request rewrite and retry
 		// on the same channel (or hand off to next-channel fallback), bypassing the
 		// normal retry gate below. Must run before the gate decision.
-		retryTriggered, _ := maybeApplyRetryRuleFallback(c, relayInfo, channel, newAPIError, relayFormat, retryParam)
+		retryTriggered, retryDetail := maybeApplyRetryRuleFallback(c, relayInfo, channel, newAPIError, relayFormat, retryParam)
 
 		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
+		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo, retryDetail)
 
 		if retryTriggered {
 			continue
@@ -340,8 +340,8 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	return channel, nil
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) {
-	service.ProcessChannelError(c, channelError, err, relayInfo)
+func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo, retryDetails ...map[string]any) {
+	service.ProcessChannelError(c, channelError, err, relayInfo, retryDetails...)
 }
 
 func RelayMidjourney(c *gin.Context) {

@@ -40,6 +40,16 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 		filter.DownstreamRequestId = c.Query("downstream_request_id")
 		filter.CustomerId = c.Query("customer_id")
 		filter.ErrorSignatureHash = c.Query("error_signature_hash")
+		// retry_triggered is a tri-state admin filter: absent = no filter; only
+		// the canonical "true"/"false" select retry / non-retry error logs.
+		switch c.Query("retry_triggered") {
+		case "true":
+			v := true
+			filter.RetryTriggered = &v
+		case "false":
+			v := false
+			filter.RetryTriggered = &v
+		}
 	}
 	return filter
 }
