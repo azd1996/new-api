@@ -46,6 +46,10 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		)
 	}
 
+	// Capture the request session_id (prompt_cache_key, else client_metadata.session_id).
+	responsesSID, responsesSIDSource := responsesSessionID(responsesReq)
+	recordRequestSessionID(c, responsesSID, responsesSIDSource)
+
 	adaptor, requestBody, closer, apiErr := PrepareResponsesRequest(c, info, responsesReq)
 	if apiErr != nil {
 		return apiErr

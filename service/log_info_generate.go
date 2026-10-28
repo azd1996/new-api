@@ -108,6 +108,12 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other.SetPublic("model_price", modelPrice)
 	other.SetPublic("user_group_ratio", userGroupRatio)
 	other.SetPublic("frt", float64(relayInfo.FirstResponseTime.UnixMilli()-relayInfo.StartTime.UnixMilli()))
+	if sid := common.GetContextKeyString(ctx, constant.ContextKeySessionID); sid != "" {
+		other.SetPublic("session_id", sid)
+		if src := common.GetContextKeyString(ctx, constant.ContextKeySessionIDSource); src != "" {
+			other.SetPublic("session_id_source", src)
+		}
+	}
 	if relayInfo.ReasoningEffort != "" {
 		other.SetPublic("reasoning_effort", relayInfo.ReasoningEffort)
 	}

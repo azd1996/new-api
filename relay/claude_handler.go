@@ -143,6 +143,10 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
+		// Record the request session id (from the final metadata.user_id blob,
+		// client-provided or injected) for the consume/error log.
+		recordRequestSessionID(c, claudeSessionID(jsonData), "claude_metadata")
+
 		// For configured (group, model) rules, force the 1-hour prompt-cache TTL:
 		// rewrite every existing cache_control breakpoint to ttl=1h and append the
 		// extended cache TTL beta header. Only list models that support 1h, else
