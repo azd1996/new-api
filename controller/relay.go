@@ -90,6 +90,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 		defer ws.Close()
+		// Force-close the hijacked socket on process shutdown so a blocked relay
+		// returns instead of hanging past the drain window.
+		stopShutdownClose := common.TrackRelayCloser(c.Request.Context(), ws)
+		defer stopShutdownClose()
 	}
 
 	defer func() {
@@ -235,6 +239,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+
+		// Process shutdown force-cancelled this in-flight request: do not retry or
+		// auto-ban the channel; record the interruption and stop.
+		if shutdown := common.ProcessShutdownFromContext(c.Request.Context()); shutdown != nil {
+			newAPIError = types.NewErrorWithStatusCode(shutdown, types.ErrorCodeProcessShutdown, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+			relayInfo.LastError = newAPIError
+			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
+			break
+		}
 
 		// Error-triggered retry-override: stage a one-shot request rewrite and retry
 		// on the same channel (or hand off to next-channel fallback), bypassing the
@@ -616,6 +629,13 @@ func executeTaskSubmissionWith(
 		relayInfo.LastError = taskAPIError
 		decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
+		if shutdown := common.ProcessShutdownFromContext(c.Request.Context()); shutdown != nil {
+			processChannelError(c,
+				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
+					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
+				types.NewErrorWithStatusCode(shutdown, types.ErrorCodeProcessShutdown, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry()), relayInfo)
+			break
+		}
 		if !taskErr.LocalError {
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,

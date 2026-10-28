@@ -1,14 +1,17 @@
 package vertex
 
 import (
+	"context"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 
@@ -36,7 +39,7 @@ var Cache = asynccache.NewAsyncCache(asynccache.Options{
 	},
 })
 
-func getAccessToken(a *Adaptor, info *relaycommon.RelayInfo) (string, error) {
+func getAccessToken(ctx context.Context, a *Adaptor, info *relaycommon.RelayInfo) (string, error) {
 	var cacheKey string
 	if info.ChannelIsMultiKey {
 		cacheKey = fmt.Sprintf("access-token-%d-%d", info.ChannelId, info.ChannelMultiKeyIndex)
@@ -52,7 +55,7 @@ func getAccessToken(a *Adaptor, info *relaycommon.RelayInfo) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create signed JWT: %w", err)
 	}
-	newToken, err := exchangeJwtForAccessToken(signedJWT, info.ChannelSetting.Proxy)
+	newToken, err := exchangeJwtForAccessToken(ctx, signedJWT, info.ChannelSetting.Proxy)
 	if err != nil {
 		return "", fmt.Errorf("failed to exchange JWT for access token: %w", err)
 	}
@@ -108,13 +111,13 @@ func AcquireAccessToken(creds Credentials, proxy string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create signed JWT: %w", err)
 	}
-	return exchangeJwtForAccessToken(signedJWT, proxy)
+	return exchangeJwtForAccessToken(context.Background(), signedJWT, proxy)
 }
 
 // exchangeJwtForAccessToken trades a signed service-account JWT for an access
 // token at Google's OAuth endpoint. It goes through the channel proxy only and
 // always verifies the certificate; the channel's TLS setting does not apply.
-func exchangeJwtForAccessToken(signedJWT string, proxy string) (string, error) {
+func exchangeJwtForAccessToken(ctx context.Context, signedJWT string, proxy string) (string, error) {
 	authURL := "https://www.googleapis.com/oauth2/v4/token"
 	data := url.Values{}
 	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
@@ -125,7 +128,12 @@ func exchangeJwtForAccessToken(signedJWT string, proxy string) (string, error) {
 		return "", fmt.Errorf("new proxy http client failed: %w", err)
 	}
 
-	resp, err := client.PostForm(authURL, data)
+	req, err := http.NewRequestWithContext(common.RelayUpstreamContext(ctx), http.MethodPost, authURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

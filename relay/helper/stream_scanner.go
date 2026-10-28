@@ -132,7 +132,12 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	// 无条件新建 StreamStatus
 	info.StreamStatus = relaycommon.NewStreamStatus()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// The scanner context is detached from the client (RelayUpstreamContext uses
+	// context.WithoutCancel), so a client disconnect does not abort usage
+	// collection. A process-shutdown ForceCancel cancels that detached upstream
+	// context, which cancels this scanner context too.
+	upstreamCtx := common.RelayUpstreamContext(c.Request.Context())
+	ctx, cancel := context.WithCancel(upstreamCtx)
 
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
 
@@ -347,10 +352,15 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
 	case <-stopChan:
 		// EndReason already set by the goroutine that triggered stopChan
-		// case <-c.Request.Context().Done():
-		// 	// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
-		// 	// 避免为已放弃的请求继续消费上游 token。
-		// 	info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+	case <-upstreamCtx.Done():
+		// Process-shutdown force-cancel (distinct from a client disconnect): the
+		// detached upstream context was cancelled, so stop relaying and record a
+		// scanner error rather than ClientGone.
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, upstreamCtx.Err())
+	case <-c.Request.Context().Done():
+		// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
+		// 避免为已放弃的请求继续消费上游 token。
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
 	}
 
 	cleanup()

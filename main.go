@@ -259,13 +259,40 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 	common.SysLog(common.LogText("received signal: %v, shutting down...", sig))
+	// Stop accepting new relay requests before the stdlib graceful shutdown so
+	// the drain window only has to wait for already-tracked in-flight requests.
+	common.RelayRequests.Drain()
 
 	// SSE streams may run for minutes; give them time to finish before forced exit
 	shutdownTimeout := time.Duration(common.GetEnvOrDefault("SHUTDOWN_TIMEOUT_SECONDS", 120)) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		common.SysError(common.LogText("server forced to shutdown: %v", err))
+	shutdownErr := srv.Shutdown(ctx)
+	// Wait for tracked HTTP/SSE handlers to finish their synchronous cleanup.
+	relayErr := common.RelayRequests.Wait(ctx)
+	if shutdownErr != nil || relayErr != nil {
+		info := common.ProcessShutdownInfo{
+			Instance: common.NodeName,
+			BatchID:  common.GetUUID(),
+			At:       time.Now().Unix(),
+			Reason:   "shutdown_timeout",
+		}
+		active := common.RelayRequests.ForceCancel(info)
+		common.SysError(common.LogText("graceful shutdown expired: batch=%s, interrupted_requests=%d, server_error=%v", info.BatchID, active, shutdownErr))
+		// Unblock downstream HTTP reads/writes as well as upstream cancellation.
+		if err := srv.Close(); err != nil {
+			common.SysError(common.LogText("failed to close HTTP server: %v", err))
+		}
+		cleanupSeconds := common.GetEnvOrDefault("SHUTDOWN_CLEANUP_TIMEOUT_SECONDS", 60)
+		if cleanupSeconds <= 0 {
+			cleanupSeconds = 60
+		}
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Duration(cleanupSeconds)*time.Second)
+		err := common.RelayRequests.Wait(cleanupCtx)
+		cleanupCancel()
+		if err != nil {
+			common.SysError(common.LogText("request shutdown cleanup timed out: %v", err))
+		}
 	}
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
 	if common.DataExportEnabled {

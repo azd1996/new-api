@@ -41,10 +41,26 @@ func getAwsErrorStatusCode(err error) int {
 }
 
 func newAwsInvokeContext(parent context.Context) (context.Context, context.CancelFunc) {
+	var ctx context.Context
+	var cancel context.CancelFunc
 	if common.RelayTimeout <= 0 {
-		return context.WithCancel(parent)
+		ctx, cancel = context.WithCancel(parent)
+	} else {
+		ctx, cancel = context.WithTimeout(parent, time.Duration(common.RelayTimeout)*time.Second)
 	}
-	return context.WithTimeout(parent, time.Duration(common.RelayTimeout)*time.Second)
+	// parent is the client request context, so a client disconnect already cancels
+	// the SDK call. A process-shutdown force-cancel fires on the detached upstream
+	// context instead; propagate it so the in-flight invoke is aborted too. Skip the
+	// hook when the request was never registered (no cancellable upstream ctx).
+	if upstream := common.RelayUpstreamContext(parent); upstream.Done() != nil {
+		stop := context.AfterFunc(upstream, cancel)
+		inner := cancel
+		cancel = func() {
+			stop()
+			inner()
+		}
+	}
+	return ctx, cancel
 }
 
 func newAwsInvokeError(requestContext context.Context, err error, operation string) *types.NewAPIError {
