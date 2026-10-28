@@ -45,9 +45,15 @@ const usageLogsSearchSchema = z.object({
   username: z.string().optional().catch(''),
   requestId: z.string().optional().catch(''),
   upstreamRequestId: z.string().optional().catch(''),
-  // Drill-down params carried by the detailed-error-stats page (module K). The
-  // usage-logs filter bar will consume these once module J lands its
-  // error-signature filter; until then they are accepted and ignored.
+  // Extra server-side log filters (module J): session id, downstream trace
+  // id, upstream HTTP status code, and an error-content keyword.
+  sessionId: z.string().optional().catch(''),
+  downstreamRequestId: z.string().optional().catch(''),
+  statusCode: z.string().optional().catch(''),
+  errorKeyword: z.string().optional().catch(''),
+  // Drill-down params carried by the detailed-error-stats page (module K).
+  // errorSignatureHash is the indexed backend filter; errorSignature is a
+  // display-only label.
   errorSignatureHash: z.string().optional().catch(''),
   errorSignature: z.string().optional().catch(''),
   startTime: z.number().optional(),

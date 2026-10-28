@@ -58,6 +58,7 @@ import type { UsageLog } from '../../data/schema'
 import {
   formatModelName,
   decodeBillingExprB64,
+  getStreamThroughput,
   getTieredBillingSummary,
   hasAnyCacheTokens,
   parseLogOther,
@@ -707,17 +708,21 @@ export function useCommonLogsColumns(
 
           const useTime = row.getValue('use_time') as number
           const other = parseLogOther(log.other)
-          const tokensPerSecond =
-            useTime > 0 && log.completion_tokens > 0
-              ? log.completion_tokens / useTime
-              : null
+          const throughput = getStreamThroughput(
+            useTime,
+            log.completion_tokens,
+            log.is_stream,
+            other?.frt,
+            other?.lat
+          )
 
           return (
             <StreamTpsCell
               isStream={log.is_stream}
               isTask={other?.is_task === true}
               isSyncTask={other?.task_sync === true}
-              tokensPerSecond={tokensPerSecond}
+              tokensPerSecond={throughput.total}
+              generationTokensPerSecond={throughput.generation}
               streamStatus={other?.stream_status}
             />
           )

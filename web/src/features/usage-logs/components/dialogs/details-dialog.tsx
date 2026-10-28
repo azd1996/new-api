@@ -354,6 +354,45 @@ function BillingBreakdown(props: {
     })
   }
 
+  // Amount calibers (top-level log columns): raw amount, channel-discounted
+  // amount, and customer-discounted amount. Only shown when the backend
+  // populated them (0/undefined is the unset default).
+  const rawQuota = log.raw_quota ?? 0
+  const statQuota = log.stat_quota ?? 0
+  const statGroupRatio = log.stat_group_ratio ?? 0
+  const customerStatQuota = log.customer_stat_quota ?? 0
+  const customerDiscount = log.customer_discount ?? 0
+  if (rawQuota > 0) {
+    rows.push({
+      label: t('Original Amount'),
+      value: formatLogQuota(rawQuota),
+    })
+  }
+  if (statQuota > 0) {
+    const hasStatRatio = statGroupRatio > 0 && statGroupRatio !== 1
+    rows.push({
+      label: hasStatRatio
+        ? `${t('Channel Discounted Amount')} (x${statGroupRatio})`
+        : t('Channel Discounted Amount'),
+      value: formatLogQuota(statQuota),
+    })
+  }
+  if (customerStatQuota > 0) {
+    const hasCustomerDiscount = customerDiscount > 0 && customerDiscount !== 1
+    rows.push({
+      label: hasCustomerDiscount
+        ? `${t('Customer Discounted Amount')} (x${customerDiscount})`
+        : t('Customer Discounted Amount'),
+      value: formatLogQuota(customerStatQuota),
+    })
+    if (statQuota > 0) {
+      rows.push({
+        label: t('Profit Amount'),
+        value: formatLogQuota(customerStatQuota - statQuota),
+      })
+    }
+  }
+
   const usageFacts =
     other.usage_facts != null &&
     typeof other.usage_facts === 'object' &&
@@ -708,6 +747,32 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DetailRow
               label={t('Upstream Request ID')}
               value={props.log.upstream_request_id}
+              mono
+            />
+          )}
+
+          {(props.log.session_id || other?.session_id) && (
+            <DetailRow
+              label={t('Session ID')}
+              value={
+                <span>
+                  {props.log.session_id || other?.session_id}
+                  {other?.session_id_source && (
+                    <span className='text-muted-foreground'>
+                      {' '}
+                      ({other.session_id_source})
+                    </span>
+                  )}
+                </span>
+              }
+              mono
+            />
+          )}
+
+          {props.isAdmin && props.log.downstream_request_id && (
+            <DetailRow
+              label={t('Downstream Request ID')}
+              value={props.log.downstream_request_id}
               mono
             />
           )}

@@ -55,6 +55,15 @@ export interface CommonLogFilters extends CommonFilters {
   username?: string
   requestId?: string
   upstreamRequestId?: string
+  // Extra server-side log filters (backend LogFilter supports these columns).
+  sessionId?: string
+  downstreamRequestId?: string
+  statusCode?: string
+  errorKeyword?: string
+  // Detailed-error-stats drill-down (module K). errorSignatureHash is the
+  // indexed backend filter; errorSignature is a human-readable label only.
+  errorSignatureHash?: string
+  errorSignature?: string
 }
 
 /**
@@ -215,6 +224,13 @@ export interface LogOtherData {
   audio_ratio?: number
   audio_completion_ratio?: number
   frt?: number
+  // Total request latency in ms (same basis as frt). Used to recompute the
+  // pure-generation throughput window when whole-second use_time underflows.
+  lat?: number
+  // Where the session id was derived from (header/body/etc.), annotated on the
+  // log detail next to the Session ID.
+  session_id?: string
+  session_id_source?: string
   // Tiered (expression-based) billing fields, set by backend when
   // billing_mode === 'tiered_expr'. expr_b64 is the base64-encoded billing
   // expression; the matched tier and request-rule traces come from the actual
@@ -439,6 +455,11 @@ export interface GetLogsParams {
   group?: string
   request_id?: string
   upstream_request_id?: string
+  session_id?: string
+  downstream_request_id?: string
+  status_code?: number
+  error_keyword?: string
+  error_signature_hash?: string
 }
 
 export interface GetLogsResponse {
@@ -463,6 +484,11 @@ export interface GetLogStatsParams {
   group?: string
   request_id?: string
   upstream_request_id?: string
+  session_id?: string
+  downstream_request_id?: string
+  status_code?: number
+  error_keyword?: string
+  error_signature_hash?: string
 }
 
 export interface GetLogStatsResponse {

@@ -199,6 +199,22 @@ export function buildApiParams(config: {
     ...(searchParams.upstreamRequestId
       ? { upstream_request_id: String(searchParams.upstreamRequestId) }
       : {}),
+    ...(searchParams.sessionId
+      ? { session_id: String(searchParams.sessionId) }
+      : {}),
+    ...(searchParams.statusCode && Number(searchParams.statusCode)
+      ? { status_code: Number(searchParams.statusCode) }
+      : {}),
+    ...(searchParams.errorKeyword
+      ? { error_keyword: String(searchParams.errorKeyword) }
+      : {}),
+    // Admin-only server-side filters.
+    ...(isAdmin && searchParams.downstreamRequestId
+      ? { downstream_request_id: String(searchParams.downstreamRequestId) }
+      : {}),
+    ...(isAdmin && searchParams.errorSignatureHash
+      ? { error_signature_hash: String(searchParams.errorSignatureHash) }
+      : {}),
     ...buildTimeRangeParams(searchParams, false),
   }
 

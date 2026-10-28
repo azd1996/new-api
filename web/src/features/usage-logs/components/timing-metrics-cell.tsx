@@ -164,6 +164,8 @@ interface StreamTpsCellProps {
   /** The task request returned its result inline, so it is a synchronous call. */
   isSyncTask?: boolean
   tokensPerSecond?: number | null
+  /** Pure generation speed (excludes first-token wait); only for streams. */
+  generationTokensPerSecond?: number | null
   streamStatus?: LogOtherData['stream_status']
   className?: string
 }
@@ -176,6 +178,10 @@ export function StreamTpsCell(props: StreamTpsCellProps) {
     props.tokensPerSecond != null
       ? `${Math.round(props.tokensPerSecond)} t/s`
       : '—'
+  const generationTps =
+    props.generationTokensPerSecond != null
+      ? Math.round(props.generationTokensPerSecond)
+      : null
   let streamLabel = props.isStream ? t('Stream') : t('Non-stream')
   if (props.isTask) {
     streamLabel = props.isSyncTask ? t('Sync') : t('Async')
@@ -220,11 +226,35 @@ export function StreamTpsCell(props: StreamTpsCellProps) {
         )}
       </span>
       {(!props.compact ||
-        (props.isStream && props.tokensPerSecond != null)) && (
-        <span className='text-muted-foreground/60 px-0.5 tabular-nums'>
-          {tpsLabel}
-        </span>
-      )}
+        (props.isStream && props.tokensPerSecond != null)) &&
+        (generationTps != null ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className='text-muted-foreground/60 cursor-help px-0.5 tabular-nums'>
+                    {tpsLabel} · {generationTps}
+                  </span>
+                }
+              />
+              <TooltipContent>
+                <div className='space-y-0.5 text-xs'>
+                  <p>
+                    {t('Throughput (incl. first token)')}: {tpsLabel}
+                  </p>
+                  <p>
+                    {t('Pure generation (excl. first token)')}: {generationTps}{' '}
+                    t/s
+                  </p>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <span className='text-muted-foreground/60 px-0.5 tabular-nums'>
+            {tpsLabel}
+          </span>
+        ))}
     </div>
   )
 }

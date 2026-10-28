@@ -45,6 +45,17 @@ export const usageLogSchema = z.object({
   other: z.string().default(''),
   request_id: z.string().default(''),
   upstream_request_id: z.string().default(''),
+  session_id: z.string().optional(),
+  downstream_request_id: z.string().optional(),
+  // Amount calibers (top-level log columns). raw_quota is the undiscounted
+  // amount, stat_quota applies the channel/stat group ratio, and
+  // customer_stat_quota applies the customer discount on top. Optional because
+  // older log rows predate these columns.
+  raw_quota: z.number().optional(),
+  stat_quota: z.number().optional(),
+  stat_group_ratio: z.number().optional(),
+  customer_stat_quota: z.number().optional(),
+  customer_discount: z.number().optional(),
 })
 
 export type UsageLog = z.infer<typeof usageLogSchema>

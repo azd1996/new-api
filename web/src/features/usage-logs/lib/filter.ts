@@ -58,6 +58,24 @@ export function buildSearchParams(
         ...(commonFilters.upstreamRequestId && {
           upstreamRequestId: commonFilters.upstreamRequestId,
         }),
+        ...(commonFilters.sessionId && {
+          sessionId: commonFilters.sessionId,
+        }),
+        ...(commonFilters.downstreamRequestId && {
+          downstreamRequestId: commonFilters.downstreamRequestId,
+        }),
+        ...(commonFilters.statusCode && {
+          statusCode: commonFilters.statusCode,
+        }),
+        ...(commonFilters.errorKeyword && {
+          errorKeyword: commonFilters.errorKeyword,
+        }),
+        ...(commonFilters.errorSignatureHash && {
+          errorSignatureHash: commonFilters.errorSignatureHash,
+        }),
+        ...(commonFilters.errorSignature && {
+          errorSignature: commonFilters.errorSignature,
+        }),
       }
     }
     case 'drawing': {

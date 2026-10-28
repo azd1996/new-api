@@ -94,6 +94,12 @@ function buildSearchSourceKey(values: {
   username?: unknown
   requestId?: unknown
   upstreamRequestId?: unknown
+  sessionId?: unknown
+  downstreamRequestId?: unknown
+  statusCode?: unknown
+  errorKeyword?: unknown
+  errorSignatureHash?: unknown
+  errorSignature?: unknown
   type?: unknown
 }) {
   return [
@@ -106,6 +112,12 @@ function buildSearchSourceKey(values: {
     values.username,
     values.requestId,
     values.upstreamRequestId,
+    values.sessionId,
+    values.downstreamRequestId,
+    values.statusCode,
+    values.errorKeyword,
+    values.errorSignatureHash,
+    values.errorSignature,
     Array.isArray(values.type) ? values.type.join(',') : values.type,
   ]
     .map((value) => String(value ?? ''))
@@ -158,6 +170,12 @@ export function CommonLogsFilterBar<TData>(
       username: searchParams.username,
       requestId: searchParams.requestId,
       upstreamRequestId: searchParams.upstreamRequestId,
+      sessionId: searchParams.sessionId,
+      downstreamRequestId: searchParams.downstreamRequestId,
+      statusCode: searchParams.statusCode,
+      errorKeyword: searchParams.errorKeyword,
+      errorSignatureHash: searchParams.errorSignatureHash,
+      errorSignature: searchParams.errorSignature,
       type: searchParams.type,
     }
     const filters: CommonLogFilters = {
@@ -172,6 +190,12 @@ export function CommonLogsFilterBar<TData>(
       username: searchParams.username || undefined,
       requestId: searchParams.requestId || undefined,
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
+      sessionId: searchParams.sessionId || undefined,
+      downstreamRequestId: searchParams.downstreamRequestId || undefined,
+      statusCode: searchParams.statusCode || undefined,
+      errorKeyword: searchParams.errorKeyword || undefined,
+      errorSignatureHash: searchParams.errorSignatureHash || undefined,
+      errorSignature: searchParams.errorSignature || undefined,
     }
     return {
       sourceKey: buildSearchSourceKey(sourceValues),
@@ -188,6 +212,12 @@ export function CommonLogsFilterBar<TData>(
     searchParams.username,
     searchParams.requestId,
     searchParams.upstreamRequestId,
+    searchParams.sessionId,
+    searchParams.downstreamRequestId,
+    searchParams.statusCode,
+    searchParams.errorKeyword,
+    searchParams.errorSignatureHash,
+    searchParams.errorSignature,
     searchParams.type,
   ])
   const [draft, setDraft] = useState<CommonLogDraft>(() => searchState)
@@ -267,7 +297,12 @@ export function CommonLogsFilterBar<TData>(
     !!filters.username ||
     !!filters.channel ||
     !!filters.requestId ||
-    !!filters.upstreamRequestId
+    !!filters.upstreamRequestId ||
+    !!filters.sessionId ||
+    !!filters.downstreamRequestId ||
+    !!filters.statusCode ||
+    !!filters.errorKeyword ||
+    !!filters.errorSignatureHash
 
   const hasTypeFilter = logType !== LOG_TYPE_ALL_VALUE
   const hasAdditionalFilters =
@@ -279,6 +314,11 @@ export function CommonLogsFilterBar<TData>(
     isAdmin ? filters.channel : undefined,
     filters.requestId,
     filters.upstreamRequestId,
+    filters.sessionId,
+    isAdmin ? filters.downstreamRequestId : undefined,
+    filters.statusCode,
+    filters.errorKeyword,
+    isAdmin ? filters.errorSignatureHash : undefined,
   ].filter(Boolean).length
   const sensitiveInputClass = sensitiveVisible
     ? undefined
@@ -481,6 +521,52 @@ export function CommonLogsFilterBar<TData>(
           onKeyDown={handleKeyDown}
         />
       </LogsFilterField>
+      <LogsFilterField>
+        <LogsFilterInput
+          placeholder={t('Session ID')}
+          value={filters.sessionId || ''}
+          onChange={(e) => handleChange('sessionId', e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </LogsFilterField>
+      {isAdmin && (
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Downstream Request ID')}
+            value={filters.downstreamRequestId || ''}
+            onChange={(e) =>
+              handleChange('downstreamRequestId', e.target.value)
+            }
+            onKeyDown={handleKeyDown}
+          />
+        </LogsFilterField>
+      )}
+      <LogsFilterField>
+        <LogsFilterInput
+          type='number'
+          placeholder={t('Status Code')}
+          value={filters.statusCode || ''}
+          onChange={(e) => handleChange('statusCode', e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </LogsFilterField>
+      <LogsFilterField>
+        <LogsFilterInput
+          placeholder={t('Error Keyword')}
+          value={filters.errorKeyword || ''}
+          onChange={(e) => handleChange('errorKeyword', e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </LogsFilterField>
+      {isAdmin && filters.errorSignatureHash && (
+        <LogsFilterField>
+          <LogsFilterInput
+            readOnly
+            placeholder={t('Error Signature')}
+            value={filters.errorSignature || filters.errorSignatureHash}
+          />
+        </LogsFilterField>
+      )}
     </>
   )
 
