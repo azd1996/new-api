@@ -31,7 +31,7 @@ import (
 //     availability.
 func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel, apiErr *types.NewAPIError, relayFormat types.RelayFormat, retryParam *service.RetryParam) (bool, map[string]interface{}) {
 	if info == nil || channel == nil || apiErr == nil || info.RetryFallbackDone {
-		logger.LogDebug(c, fmt.Sprintf("retry-override: hook skipped by guard (info=%t channel=%t apiErr=%t fallbackDone=%t)",
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: hook skipped by guard (info=%t channel=%t apiErr=%t fallbackDone=%t)",
 			info != nil, channel != nil, apiErr != nil, info != nil && info.RetryFallbackDone))
 		return false, nil
 	}
@@ -53,7 +53,7 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 	if templateRules := service.ResolveRetryOverrideTemplates(refs); len(templateRules) > 0 {
 		ops = append(templateRules, ops...)
 	}
-	logger.LogDebug(c, fmt.Sprintf("retry-override: hook reached on channel #%d, configured operations=%d", channel.Id, len(ops)))
+	logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: hook reached on channel #%d, configured operations=%d", channel.Id, len(ops)))
 	if len(ops) == 0 {
 		return false, nil
 	}
@@ -66,18 +66,18 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 	if m, ok := reqCtx["model"]; ok {
 		respCtx["model"] = m
 	}
-	logger.LogDebug(c, fmt.Sprintf("retry-override: evaluating %d rule(s) on channel #%d, status_code=%d, error_message=%q",
+	logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: evaluating %d rule(s) on channel #%d, status_code=%d, error_message=%q",
 		len(ops), channel.Id, apiErr.StatusCode, apiErr.Error()))
 	rewrites, matched, action, ruleIDs := retryrule.CollectRewrites(ops, reqCtx, respCtx)
 	if !matched {
-		logger.LogDebug(c, fmt.Sprintf("retry-override: no operation matched on channel #%d, not retrying", channel.Id))
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: no operation matched on channel #%d, not retrying", channel.Id))
 		return false, nil
 	}
 	if data, err := common.Marshal(rewrites); err == nil {
-		logger.LogDebug(c, fmt.Sprintf("retry-override: matched (action=%s), staging %d rewrite(s) on channel #%d: %s",
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: matched (action=%s), staging %d rewrite(s) on channel #%d: %s",
 			action, len(rewrites), channel.Id, string(data)))
 	} else {
-		logger.LogDebug(c, fmt.Sprintf("retry-override: matched (action=%s), staging %d rewrite(s) on channel #%d",
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: matched (action=%s), staging %d rewrite(s) on channel #%d",
 			action, len(rewrites), channel.Id))
 	}
 	info.PendingRetryRewrite = rewrites
@@ -88,7 +88,7 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 		// priority tier so getChannel selects the next channel; it re-triggers on
 		// each channel until one succeeds or channels/RetryTimes are exhausted.
 		// Returning true still bypasses the "not retryable" gate (incl. 200-body).
-		logger.LogDebug(c, fmt.Sprintf("retry-override: handing off channel #%d to next-channel fallback", channel.Id))
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: handing off channel #%d to next-channel fallback", channel.Id))
 		return true, detail
 	}
 	// Same-channel retry is one-shot: pin the channel and grant a retry that does
