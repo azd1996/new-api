@@ -29,6 +29,10 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 		RequestId:         c.Query("request_id"),
 		UpstreamRequestId: c.Query("upstream_request_id"),
 		SessionId:         c.Query("session_id"),
+		ErrorKeyword:      c.Query("error_keyword"),
+	}
+	if sc, e := strconv.Atoi(c.Query("status_code")); e == nil {
+		filter.StatusCode = sc
 	}
 	if admin {
 		filter.Username = c.Query("username")

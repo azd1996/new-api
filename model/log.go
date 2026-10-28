@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -44,6 +45,27 @@ func buildLogLikeCondition(column string, value string) (string, string, error) 
 		return "", "", err
 	}
 	return column + " LIKE ? ESCAPE '!'", pattern, nil
+}
+
+// statusCodeOtherCondition matches error logs whose Other JSON carries the
+// given HTTP status_code (written as `"status_code":NNN`), bounded by the
+// trailing `,` or `}` so 400 does not match 4000. Scans the unindexed Other
+// blob; pair with a time range. Digits carry no LIKE metacharacters.
+func statusCodeOtherCondition(column string, statusCode int) (string, []any) {
+	prefix := fmt.Sprintf(`"status_code":%d`, statusCode)
+	return "(" + column + " LIKE ? OR " + column + " LIKE ?)",
+		[]any{"%" + prefix + ",%", "%" + prefix + "}%"}
+}
+
+// errorContentLikeCondition matches logs whose content contains keyword
+// (unanchored substring), escaping LIKE metacharacters per dialect.
+func errorContentLikeCondition(column string, keyword string) (string, string) {
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(keyword)
+		return column + " LIKE ?", "%" + esc + "%"
+	}
+	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(keyword)
+	return column + " LIKE ? ESCAPE '!'", "%" + esc + "%"
 }
 
 func sanitizeClickHouseLikePattern(input string) (string, error) {
@@ -567,6 +589,8 @@ type LogFilter struct {
 	SessionId           string
 	DownstreamRequestId string
 	CustomerId          string
+	StatusCode          int
+	ErrorKeyword        string
 }
 
 func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
@@ -597,6 +621,14 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	}
 	if f.CustomerId != "" {
 		tx = tx.Where("logs.customer_id = ?", f.CustomerId)
+	}
+	if f.StatusCode != 0 {
+		cond, args := statusCodeOtherCondition("logs.other", f.StatusCode)
+		tx = tx.Where(cond, args...)
+	}
+	if f.Type == LogTypeError && f.ErrorKeyword != "" {
+		cond, pat := errorContentLikeCondition("logs.content", f.ErrorKeyword)
+		tx = tx.Where(cond, pat)
 	}
 	if f.StartTimestamp != 0 {
 		tx = tx.Where("logs.created_at >= ?", f.StartTimestamp)
