@@ -188,30 +188,50 @@ func buildLegacyParamOverride(paramOverride map[string]any) map[string]any {
 }
 
 func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, error) {
+	result := jsonData
 	paramOverride := getParamOverrideMap(info)
-	if len(paramOverride) == 0 {
-		return jsonData, nil
+	if len(paramOverride) > 0 {
+		overrideCtx := BuildParamOverrideContext(info)
+		var recorder *paramOverrideAuditRecorder
+		if shouldEnableParamOverrideAudit(paramOverride) {
+			recorder = &paramOverrideAuditRecorder{}
+			overrideCtx[paramOverrideContextAuditRecorder] = recorder
+		}
+		var err error
+		result, err = ApplyParamOverride(jsonData, paramOverride, overrideCtx)
+		if err != nil {
+			return nil, err
+		}
+		syncReasoningEffortAfterParamOverride(info, jsonData, result)
+		syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
+		if info != nil {
+			if recorder != nil {
+				info.ParamOverrideAudit = recorder.lines
+			} else {
+				info.ParamOverrideAudit = nil
+			}
+		}
 	}
-
-	overrideCtx := BuildParamOverrideContext(info)
-	var recorder *paramOverrideAuditRecorder
-	if shouldEnableParamOverrideAudit(paramOverride) {
-		recorder = &paramOverrideAuditRecorder{}
-		overrideCtx[paramOverrideContextAuditRecorder] = recorder
-	}
-	result, err := ApplyParamOverride(jsonData, paramOverride, overrideCtx)
+	// One-shot error-triggered retry rewrite (retry-override). Applied here so it
+	// works for every relay format that funnels through this entry, not just Claude.
+	result, err := applyPendingRetryRewrite(result, info)
 	if err != nil {
 		return nil, err
 	}
-	syncReasoningEffortAfterParamOverride(info, jsonData, result)
-	syncRuntimeHeaderOverrideFromContext(info, overrideCtx)
-	if info != nil {
-		if recorder != nil {
-			info.ParamOverrideAudit = recorder.lines
-		} else {
-			info.ParamOverrideAudit = nil
-		}
+	return result, nil
+}
+
+// applyPendingRetryRewrite applies (and then clears) info.PendingRetryRewrite as
+// unconditional param-override operations. It is a no-op when nothing is staged.
+func applyPendingRetryRewrite(jsonData []byte, info *RelayInfo) ([]byte, error) {
+	if info == nil || len(info.PendingRetryRewrite) == 0 {
+		return jsonData, nil
 	}
+	result, err := ApplyParamOverride(jsonData, map[string]any{"operations": info.PendingRetryRewrite}, nil)
+	if err != nil {
+		return nil, err
+	}
+	info.PendingRetryRewrite = nil
 	return result, nil
 }
 
@@ -649,6 +669,26 @@ func checkConditions(data []byte, contextJSON string, conditions []ConditionOper
 		return lo.EveryBy(results, func(item bool) bool { return item }), nil
 	}
 	return lo.SomeBy(results, func(item bool) bool { return item }), nil
+}
+
+// EvaluateConditions evaluates raw condition entries (as authored in
+// param-override / retry-override JSON) against doc, falling back to contextJSON
+// when a path is absent in doc. It exposes the exact param-override condition
+// semantics so other packages (e.g. relay/retryrule) share one evaluator instead
+// of reimplementing it. Empty conditions match.
+func EvaluateConditions(doc []byte, contextJSON string, conditions []map[string]any, logic string) (bool, error) {
+	if len(conditions) == 0 {
+		return true, nil
+	}
+	raw := make([]any, len(conditions))
+	for i := range conditions {
+		raw[i] = conditions[i]
+	}
+	parsed, err := parseConditionOperations(raw)
+	if err != nil {
+		return false, err
+	}
+	return checkConditions(doc, contextJSON, parsed, logic)
 }
 
 func checkSingleCondition(data []byte, contextJSON string, condition *ConditionOperation) (bool, error) {

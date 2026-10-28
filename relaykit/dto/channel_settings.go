@@ -41,6 +41,35 @@ type ChannelSettings struct {
 	// TLSInsecureSkipVerify accepts upstream certificates that fail
 	// verification, such as self-signed ones, for this channel only.
 	TLSInsecureSkipVerify bool `json:"tls_insecure_skip_verify,omitempty"`
+	// RetryOverride configures error-triggered request rewrites as an ordered list
+	// of four-phase rules. See relay/retryrule.
+	RetryOverride []RetryRule `json:"retry_override,omitempty"`
+	// RetryOverrideStreamPrecommitChunks bounds how many leading stream chunks are
+	// held back for 200-body error detection before the response is committed to
+	// the client. Zero/unset uses the handler default.
+	RetryOverrideStreamPrecommitChunks int `json:"retry_override_stream_precommit_chunks,omitempty"`
+	// ParamOverrideTemplateRefs are names of shared parameter-override templates
+	// merged into the channel's own param override, in selection order.
+	ParamOverrideTemplateRefs []string `json:"param_override_template_refs,omitempty"`
+	// RetryOverrideTemplateRefs are names of shared retry-override templates whose
+	// rules are merged with the channel's own RetryOverride rules, in selection order.
+	RetryOverrideTemplateRefs []string `json:"retry_override_template_refs,omitempty"`
+}
+
+// RetryRulePhaseCondition is a phase's condition block. Conditions are raw JSON
+// objects carrying param-override condition semantics; Logic defaults to OR.
+type RetryRulePhaseCondition struct {
+	Conditions []map[string]any `json:"conditions,omitempty"`
+	Logic      string           `json:"logic,omitempty"`
+}
+
+// RetryRule is one four-phase retry-override rule. See ChannelSettings.RetryOverride.
+type RetryRule struct {
+	Description              string                   `json:"description,omitempty"`
+	Phase1RequestCondition   *RetryRulePhaseCondition `json:"phase1_request_condition,omitempty"`
+	Phase2ResponseConditions *RetryRulePhaseCondition `json:"phase2_response_conditions,omitempty"`
+	Phase3RequestRewrite     []map[string]any         `json:"phase3_request_rewrite,omitempty"`
+	Phase4RetryAction        string                   `json:"phase4_retry_action,omitempty"`
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

@@ -169,6 +169,13 @@ type RelayInfo struct {
 	UseRuntimeHeadersOverride             bool
 	ParamOverrideAudit                    []string
 
+	// PendingRetryRewrite holds param-override operations to apply once to the
+	// outgoing request body on an error-triggered fallback retry (retry-override).
+	PendingRetryRewrite []map[string]any
+	// RetryFallbackDone guards the error-triggered retry-override so it fires at
+	// most once per request.
+	RetryFallbackDone bool
+
 	PriceData hosttypes.PriceData
 
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
