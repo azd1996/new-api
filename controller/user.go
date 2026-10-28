@@ -1056,11 +1056,45 @@ func CreateUser(c *gin.Context) {
 	}
 	cleanUser.FinishInsert(0)
 
+	// When the request carries default_token=true, the admin additionally
+	// provisions a "default" key for the new user and returns it once for the
+	// UI to display. Group is left empty so the key follows the user's current
+	// group at runtime. Key creation is best-effort: a generation or insert
+	// failure never fails user creation, it only attaches an error for the UI.
+	responseData := gin.H{}
+	if c.Query("default_token") == "true" {
+		if key, genErr := common.GenerateKey(); genErr != nil {
+			common.SysLog(fmt.Sprintf("failed to generate default token key for user %s: %s", cleanUser.Username, genErr.Error()))
+			responseData["default_token_error"] = genErr.Error()
+		} else {
+			defaultToken := model.Token{
+				UserId:              cleanUser.Id,
+				Name:                "default",
+				Key:                 key,
+				CreatedTime:         common.GetTimestamp(),
+				AccessedTime:        common.GetTimestamp(),
+				ExpiredTime:         -1,
+				RemainQuota:         0,
+				UnlimitedQuota:      true,
+				Status:              common.TokenStatusEnabled,
+				Group:               "",
+				AllowUserQuotaQuery: true,
+			}
+			if insErr := defaultToken.Insert(); insErr != nil {
+				common.SysLog(fmt.Sprintf("failed to create default token for user %s: %s", cleanUser.Username, insErr.Error()))
+				responseData["default_token_error"] = insErr.Error()
+			} else {
+				responseData["default_token_key"] = "sk-" + key
+			}
+		}
+	}
+
 	auditParams["username"] = cleanUser.Username
 	recordManageAuditFor(c, cleanUser.Id, "user.create", auditParams)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+		"data":    responseData,
 	})
 	return
 }
