@@ -54,6 +54,11 @@ type ChannelSettings struct {
 	// RetryOverrideTemplateRefs are names of shared retry-override templates whose
 	// rules are merged with the channel's own RetryOverride rules, in selection order.
 	RetryOverrideTemplateRefs []string `json:"retry_override_template_refs,omitempty"`
+	// StatGroupRatio is a channel-level statistics/discount ratio used only for
+	// the reporting-only StatQuota caliber (never for actual billing). Unset,
+	// non-positive, Inf or NaN falls back to 1, so StatQuota equals the
+	// undiscounted RawQuota. Stored in the channel setting JSON; zero migration.
+	StatGroupRatio *float64 `json:"stat_group_ratio,omitempty"`
 }
 
 // RetryRulePhaseCondition is a phase's condition block. Conditions are raw JSON
