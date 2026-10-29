@@ -257,13 +257,23 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		// Error-triggered retry-override: stage a one-shot request rewrite and retry
 		// on the same channel (or hand off to next-channel fallback), bypassing the
-		// normal retry gate below. Must run before the gate decision.
-		retryTriggered, retryDetail := maybeApplyRetryRuleFallback(c, relayInfo, channel, newAPIError, relayFormat, retryParam)
+		// normal retry gate below. Must run before the gate decision. A return_error
+		// rule instead terminates: the error log below records the original upstream
+		// status/message, then we rewrite the response error to the configured status
+		// code so only the caller sees the override.
+		retryTriggered, retryTerminate, retryDetail := maybeApplyRetryRuleFallback(c, relayInfo, channel, newAPIError, relayFormat, retryParam)
 
 		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo, retryDetail)
 
+		if retryTerminate != nil {
+			newAPIError.StatusCode = retryTerminate.StatusCode
+			if retryTerminate.Message != "" {
+				newAPIError.SetMessage(retryTerminate.Message)
+			}
+			break
+		}
 		if retryTriggered {
 			continue
 		}

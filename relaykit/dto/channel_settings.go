@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
@@ -74,7 +75,62 @@ type RetryRule struct {
 	Phase1RequestCondition   *RetryRulePhaseCondition `json:"phase1_request_condition,omitempty"`
 	Phase2ResponseConditions *RetryRulePhaseCondition `json:"phase2_response_conditions,omitempty"`
 	Phase3RequestRewrite     []map[string]any         `json:"phase3_request_rewrite,omitempty"`
-	Phase4RetryAction        string                   `json:"phase4_retry_action,omitempty"`
+	Phase4RetryAction        *RetryAction             `json:"phase4_retry_action,omitempty"`
+}
+
+// RetryAction is phase4 of a retry-override rule: what to do once a rule matches.
+// It accepts two JSON forms for backward compatibility:
+//
+//   - a bare string, e.g. "retry_same_channel" / "fallback_next_channel" /
+//     "return_error" (StatusCode/StatusMsg default to zero/empty);
+//   - an object, e.g. {"action": "return_error", "status_code": 429,
+//     "status_msg": "rate limited"}.
+//
+// StatusCode/StatusMsg apply only to the "return_error" action, which stops all
+// retrying and returns the given HTTP status (and optional message) to the
+// caller. An unknown or empty action resolves to retry_same_channel.
+type RetryAction struct {
+	Action     string `json:"action,omitempty"`
+	StatusCode int    `json:"status_code,omitempty"`
+	StatusMsg  string `json:"status_msg,omitempty"`
+}
+
+// UnmarshalJSON accepts both the bare-string and object forms. It is tolerant by
+// design: an unexpected shape yields the zero value (which resolves to the
+// default action) instead of an error, because a hard error here would make
+// Channel.GetSetting discard the entire channel setting blob.
+func (a *RetryAction) UnmarshalJSON(data []byte) error {
+	switch kitutil.GetJsonType(data) {
+	case "string":
+		var s string
+		if err := kitutil.Unmarshal(data, &s); err != nil {
+			*a = RetryAction{}
+			return nil
+		}
+		*a = RetryAction{Action: s}
+	case "object":
+		type retryActionAlias RetryAction
+		var alias retryActionAlias
+		if err := kitutil.Unmarshal(data, &alias); err != nil {
+			*a = RetryAction{}
+			return nil
+		}
+		*a = RetryAction(alias)
+	default:
+		*a = RetryAction{}
+	}
+	return nil
+}
+
+// MarshalJSON emits the bare-string form when only the action is set, keeping
+// stored configs compatible with the original string-only representation; it
+// emits the object form once status_code/status_msg carry a value.
+func (a RetryAction) MarshalJSON() ([]byte, error) {
+	if a.StatusCode == 0 && a.StatusMsg == "" {
+		return kitutil.Marshal(a.Action)
+	}
+	type retryActionAlias RetryAction
+	return kitutil.Marshal(retryActionAlias(a))
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

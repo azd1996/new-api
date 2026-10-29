@@ -15,25 +15,35 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// retryOverrideTerminate carries a return_error decision back to the relay loop.
+// It is applied to the response error only AFTER the attempt's error log is
+// written, so logs/metrics keep the original upstream status/message while the
+// caller receives the configured override.
+type retryOverrideTerminate struct {
+	StatusCode int
+	Message    string
+}
+
 // maybeApplyRetryRuleFallback drives the channel's retry-override: it evaluates
-// each configured operation's conditions against the just-failed upstream
-// response ({status_code, error_message}), and on a match arranges a single
-// error-triggered retry and returns true so the caller continues the loop:
+// the configured rules against the just-failed upstream response, and on a match
+// of the first (priority-ordered) rule arranges the next step. It returns
+// (retryTriggered, terminate, auditDetail):
 //
-//   - stages the matching operations (with conditions/action stripped) as the
-//     one-shot request rewrite applied by the relay handler on the next attempt;
-//   - the resolved action decides where the rewritten request is retried:
-//   - retry_same_channel (default for non-200): soft-pin the same channel and
-//     grant a one-shot retry via ResetRetryNextTry (does not consume RetryTimes
-//     budget); guarded one-shot per request via RetryFallbackDone.
+//   - retry_same_channel (default): soft-pin the same channel and grant a
+//     one-shot retry via ResetRetryNextTry (does not consume RetryTimes budget);
+//     guarded one-shot per request via RetryFallbackDone. retryTriggered=true.
 //   - fallback_next_channel: neither pin nor reset, so the loop advances to the
 //     next channel; multi-hop (not one-shot), bounded by RetryTimes and channel
-//     availability.
-func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel, apiErr *types.NewAPIError, relayFormat types.RelayFormat, retryParam *service.RetryParam) (bool, map[string]interface{}) {
+//     availability. retryTriggered=true.
+//   - return_error: stop retrying entirely. terminate is non-nil and carries the
+//     configured status/message; it is NOT applied to apiErr here, so the error
+//     log records the original upstream status/message. The caller logs the
+//     attempt, then applies terminate to the response error and breaks.
+func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel, apiErr *types.NewAPIError, relayFormat types.RelayFormat, retryParam *service.RetryParam) (bool, *retryOverrideTerminate, map[string]interface{}) {
 	if info == nil || channel == nil || apiErr == nil || info.RetryFallbackDone {
 		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: hook skipped by guard (info=%t channel=%t apiErr=%t fallbackDone=%t)",
 			info != nil, channel != nil, apiErr != nil, info != nil && info.RetryFallbackDone))
-		return false, nil
+		return false, nil, nil
 	}
 	chSetting := channel.GetSetting()
 	ops := chSetting.RetryOverride
@@ -55,7 +65,7 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 	}
 	logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: hook reached on channel #%d, configured operations=%d", channel.Id, len(ops)))
 	if len(ops) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
 	reqCtx := relaycommon.BuildParamOverrideContext(info)
 	if reqCtx == nil {
@@ -68,49 +78,65 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 	}
 	logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: evaluating %d rule(s) on channel #%d, status_code=%d, error_message=%q",
 		len(ops), channel.Id, apiErr.StatusCode, apiErr.Error()))
-	rewrites, matched, action, ruleIDs := retryrule.CollectRewrites(ops, reqCtx, respCtx)
-	if !matched {
-		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: no operation matched on channel #%d, not retrying", channel.Id))
-		return false, nil
+	decision := retryrule.CollectRewrites(ops, reqCtx, respCtx)
+	if !decision.Matched {
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: no rule matched on channel #%d, not retrying", channel.Id))
+		return false, nil, nil
 	}
-	if data, err := common.Marshal(rewrites); err == nil {
-		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: matched (action=%s), staging %d rewrite(s) on channel #%d: %s",
-			action, len(rewrites), channel.Id, string(data)))
+	if data, err := common.Marshal(decision.Rewrites); err == nil {
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: matched rule #%d (action=%s), staging %d rewrite(s) on channel #%d: %s",
+			decision.MatchedIndex, decision.Action, len(decision.Rewrites), channel.Id, string(data)))
 	} else {
-		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: matched (action=%s), staging %d rewrite(s) on channel #%d",
-			action, len(rewrites), channel.Id))
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: matched rule #%d (action=%s), staging %d rewrite(s) on channel #%d",
+			decision.MatchedIndex, decision.Action, len(decision.Rewrites), channel.Id))
 	}
-	info.PendingRetryRewrite = rewrites
-	detail := recordRetryOverrideAudit(c, info, channel.Id, apiErr, relayFormat, action, ruleIDs, ruleDescriptions(ops, ruleIDs), rewrites)
-	if action == retryrule.ActionFallbackNextChannel {
+	// apiErr is intentionally NOT mutated here: the audit (below) and the caller's
+	// error log must record the original upstream status/message.
+	detail := recordRetryOverrideAudit(c, info, channel.Id, apiErr, relayFormat, decision, ruleDescriptions(ops, []int{decision.MatchedIndex}))
+	switch decision.Action {
+	case retryrule.ActionReturnError:
+		// Terminate: no retry, no body rewrite. Hand the configured status/message
+		// back to the caller, which applies it to the response after logging.
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: terminating channel #%d, caller will return status=%d", channel.Id, decision.ReturnStatus))
+		return false, &retryOverrideTerminate{StatusCode: decision.ReturnStatus, Message: decision.ReturnMessage}, detail
+	case retryrule.ActionFallbackNextChannel:
 		// Fallback is multi-hop: do NOT set the one-shot RetryFallbackDone, and do
 		// NOT pin or reset the budget. The normal loop's IncreaseRetry advances the
 		// priority tier so getChannel selects the next channel; it re-triggers on
 		// each channel until one succeeds or channels/RetryTimes are exhausted.
 		// Returning true still bypasses the "not retryable" gate (incl. 200-body).
+		info.PendingRetryRewrite = decision.Rewrites
 		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: handing off channel #%d to next-channel fallback", channel.Id))
-		return true, detail
+		return true, nil, detail
+	default:
+		// Same-channel retry is one-shot: pin the channel and grant a retry that
+		// does not consume budget. RetryFallbackDone prevents looping the same
+		// channel.
+		info.PendingRetryRewrite = decision.Rewrites
+		info.RetryFallbackDone = true
+		service.SetPinnedChannel(c, channel.Id)
+		retryParam.ResetRetryNextTry()
+		return true, nil, detail
 	}
-	// Same-channel retry is one-shot: pin the channel and grant a retry that does
-	// not consume budget. RetryFallbackDone prevents looping the same channel.
-	info.RetryFallbackDone = true
-	service.SetPinnedChannel(c, channel.Id)
-	retryParam.ResetRetryNextTry()
-	return true, detail
 }
 
-// recordRetryOverrideAudit writes an admin-only retry-override audit log
-// (LogTypeRetryOverride) when a rule fully matched and triggered a retry/fallback.
-// ruleIDs are the indices (into the channel's retry_override array) of every
-// matched rule; descriptions are the corresponding rule descriptions (aligned by
-// position, empty when a rule has none).
-func recordRetryOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, channelId int, apiErr *types.NewAPIError, relayFormat types.RelayFormat, action string, ruleIDs []int, descriptions []string, rewrites []map[string]any) map[string]interface{} {
+// recordRetryOverrideAudit builds an admin-only retry-override audit detail
+// (LogTypeRetryOverride) when a rule matched and drove a retry/fallback/terminate.
+// descriptions holds the matched rule's description (aligned by position with the
+// single-element rule_ids written to the log).
+func recordRetryOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, channelId int, apiErr *types.NewAPIError, relayFormat types.RelayFormat, decision retryrule.Decision, descriptions []string) map[string]interface{} {
 	detail := map[string]interface{}{
-		"action":         action,
-		"rule_ids":       ruleIDs,
+		"action":         decision.Action,
+		"rule_ids":       []int{decision.MatchedIndex},
 		"status_code":    apiErr.StatusCode,
 		"relay_format":   string(relayFormat),
-		"rewrites_count": len(rewrites),
+		"rewrites_count": len(decision.Rewrites),
+	}
+	if decision.Action == retryrule.ActionReturnError {
+		detail["return_status"] = decision.ReturnStatus
+		if decision.ReturnMessage != "" {
+			detail["return_message"] = decision.ReturnMessage
+		}
 	}
 	if hasNonEmpty(descriptions) {
 		detail["rule_descriptions"] = descriptions
@@ -118,7 +144,7 @@ func recordRetryOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, chann
 	if msg := apiErr.Error(); msg != "" {
 		detail["error_message"] = common.LocalLogPreview(msg)
 	}
-	if summaries := summarizeRewriteOps(rewrites); len(summaries) > 0 {
+	if summaries := summarizeRewriteOps(decision.Rewrites); len(summaries) > 0 {
 		detail["rewrites"] = summaries
 	}
 	// NOTE: admin audit-log write (model.RecordRetryOverrideLog) is deferred to the
