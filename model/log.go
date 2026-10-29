@@ -605,6 +605,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			TokenID:             params.TokenId,
 			ChannelID:           params.ChannelId,
 			NodeName:            common.NodeName,
+			CustomerId:          customerID,
 			ChannelStatQuota:    statQuota,
 			CustomerStatQuota:   customerStatQuota,
 		})

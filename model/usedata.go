@@ -12,15 +12,20 @@ import (
 
 // QuotaData 柱状图数据
 type QuotaData struct {
-	Id                  int    `json:"id"`
-	UserID              int    `json:"user_id" gorm:"index"`
-	Username            string `json:"username" gorm:"index:idx_qdt_model_user_name,priority:2;size:64;default:''"`
-	ModelName           string `json:"model_name" gorm:"index:idx_qdt_model_user_name,priority:1;size:64;default:''"`
-	CreatedAt           int64  `json:"created_at" gorm:"bigint;index:idx_qdt_created_at,priority:2"`
-	UseGroup            string `json:"use_group" gorm:"index;size:64;default:''"`
-	TokenID             int    `json:"token_id" gorm:"index;default:0"`
-	ChannelID           int    `json:"channel_id" gorm:"index;default:0"`
-	NodeName            string `json:"node_name" gorm:"index;size:64;default:''"`
+	Id        int    `json:"id"`
+	UserID    int    `json:"user_id" gorm:"index"`
+	Username  string `json:"username" gorm:"index:idx_qdt_model_user_name,priority:2;size:64;default:''"`
+	ModelName string `json:"model_name" gorm:"index:idx_qdt_model_user_name,priority:1;size:64;default:''"`
+	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_qdt_created_at,priority:2"`
+	UseGroup  string `json:"use_group" gorm:"index;size:64;default:''"`
+	TokenID   int    `json:"token_id" gorm:"index;default:0"`
+	ChannelID int    `json:"channel_id" gorm:"index;default:0"`
+	NodeName  string `json:"node_name" gorm:"index;size:64;default:''"`
+	// CustomerId is the downstream customer id decoded from the trace-tag header
+	// (empty for traffic without a customer). It is a grouping dimension so the
+	// customer-statistics dashboard can rank/trend by customer. Rows written
+	// before this column exists carry the empty-string default.
+	CustomerId          string `json:"customer_id" gorm:"index;size:64;default:''"`
 	TokenUsed           int    `json:"token_used" gorm:"default:0"`
 	Count               int    `json:"count" gorm:"default:0"`
 	Quota               int    `json:"quota" gorm:"default:0"`
@@ -46,6 +51,7 @@ type QuotaDataLogParams struct {
 	TokenID             int
 	ChannelID           int
 	NodeName            string
+	CustomerId          string
 	ChannelStatQuota    int
 	CustomerStatQuota   int
 }
@@ -64,7 +70,7 @@ var CacheQuotaData = make(map[string]*QuotaData)
 var CacheQuotaDataLock = sync.Mutex{}
 
 func logQuotaDataCache(quotaData *QuotaData) {
-	key := fmt.Sprintf("%d\x00%s\x00%s\x00%d\x00%s\x00%d\x00%d\x00%s",
+	key := fmt.Sprintf("%d\x00%s\x00%s\x00%d\x00%s\x00%d\x00%d\x00%s\x00%s",
 		quotaData.UserID,
 		quotaData.Username,
 		quotaData.ModelName,
@@ -73,6 +79,7 @@ func logQuotaDataCache(quotaData *QuotaData) {
 		quotaData.TokenID,
 		quotaData.ChannelID,
 		quotaData.NodeName,
+		quotaData.CustomerId,
 	)
 	count := quotaData.Count
 	quota := quotaData.Quota
@@ -103,6 +110,7 @@ func LogQuotaData(params QuotaDataLogParams) {
 		TokenID:             params.TokenID,
 		ChannelID:           params.ChannelID,
 		NodeName:            params.NodeName,
+		CustomerId:          params.CustomerId,
 		Count:               1,
 		Quota:               params.Quota,
 		TokenUsed:           params.TokenUsed,
@@ -127,8 +135,8 @@ func SaveQuotaDataCache() {
 	for _, quotaData := range CacheQuotaData {
 		quotaDataDB := &QuotaData{}
 		err := DB.Table("quota_data").
-			Where("user_id = ? and username = ? and model_name = ? and created_at = ? and use_group = ? and token_id = ? and channel_id = ? and node_name = ?",
-				quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt, quotaData.UseGroup, quotaData.TokenID, quotaData.ChannelID, quotaData.NodeName).
+			Where("user_id = ? and username = ? and model_name = ? and created_at = ? and use_group = ? and token_id = ? and channel_id = ? and node_name = ? and customer_id = ?",
+				quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt, quotaData.UseGroup, quotaData.TokenID, quotaData.ChannelID, quotaData.NodeName, quotaData.CustomerId).
 			First(quotaDataDB).Error
 		// ErrRecordNotFound is the normal "new bucket" case -> insert; any other
 		// error means row existence is unknown, so skip to avoid double counting.
@@ -159,8 +167,8 @@ func SaveQuotaDataCache() {
 
 func increaseQuotaData(quotaData *QuotaData) error {
 	err := DB.Table("quota_data").
-		Where("user_id = ? and username = ? and model_name = ? and created_at = ? and use_group = ? and token_id = ? and channel_id = ? and node_name = ?",
-			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt, quotaData.UseGroup, quotaData.TokenID, quotaData.ChannelID, quotaData.NodeName).
+		Where("user_id = ? and username = ? and model_name = ? and created_at = ? and use_group = ? and token_id = ? and channel_id = ? and node_name = ? and customer_id = ?",
+			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt, quotaData.UseGroup, quotaData.TokenID, quotaData.ChannelID, quotaData.NodeName, quotaData.CustomerId).
 		Updates(map[string]any{
 			"count":                 gorm.Expr("count + ?", quotaData.Count),
 			"quota":                 gorm.Expr("quota + ?", quotaData.Quota),
@@ -204,6 +212,21 @@ func GetQuotaDataGroupByUser(startTime int64, endTime int64) (quotaData []*Quota
 		Select("username, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, sum(cache_read_tokens) as cache_read_tokens, sum(cache_creation_tokens) as cache_creation_tokens, sum(customer_stat_quota) as customer_stat_quota").
 		Where("created_at >= ? and created_at <= ?", startTime, endTime).
 		Group("username, created_at").
+		Find(&quotaDatas).Error
+	return quotaDatas, err
+}
+
+// GetQuotaDataGroupByCustomer aggregates per (customer_id, hour) for the
+// customer-statistics dashboard. Only rows carrying a customer id are returned.
+// Both channel-discounted and customer-discounted stat amounts are summed so the
+// caller can fall back to the channel amount for customers that are not yet
+// configured with a per-customer discount.
+func GetQuotaDataGroupByCustomer(startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
+	var quotaDatas []*QuotaData
+	err = DB.Table("quota_data").
+		Select("customer_id, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, sum(channel_stat_quota) as channel_stat_quota, sum(customer_stat_quota) as customer_stat_quota").
+		Where("created_at >= ? and created_at <= ? and customer_id <> ''", startTime, endTime).
+		Group("customer_id, created_at").
 		Find(&quotaDatas).Error
 	return quotaDatas, err
 }
