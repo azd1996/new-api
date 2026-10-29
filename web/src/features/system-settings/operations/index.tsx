@@ -35,6 +35,7 @@ const defaultOperationsSettings: OperationsSettings = {
   'extended_cache_ttl_setting.rules': [],
   'metadata_injection_disable_setting.rules': [],
   'client_disconnect_setting.rules': [],
+  'debug_scope_setting.rules': [],
   QuotaRemindEnabled: true,
   QuotaRemindThreshold: '',
   EmailProvider: 'smtp',

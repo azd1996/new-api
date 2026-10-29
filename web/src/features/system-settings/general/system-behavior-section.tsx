@@ -43,8 +43,13 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
-import type { ClientDisconnectRule, GroupModelRule } from '../types'
+import type {
+  ClientDisconnectRule,
+  DebugScopeRule,
+  GroupModelRule,
+} from '../types'
 import { ClientDisconnectRulesField } from './client-disconnect-rules-field'
+import { DebugScopeRulesField } from './debug-scope-rules-field'
 import { GroupModelRulesField } from './group-model-rules-field'
 
 const behaviorSchema = z.object({
@@ -62,6 +67,7 @@ type SystemBehaviorSectionProps = {
     'extended_cache_ttl_setting.rules': GroupModelRule[]
     'metadata_injection_disable_setting.rules': GroupModelRule[]
     'client_disconnect_setting.rules': ClientDisconnectRule[]
+    'debug_scope_setting.rules': DebugScopeRule[]
   }
 }
 
@@ -93,6 +99,9 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
   const [clientDisconnectRules, setClientDisconnectRules] = useState(
     props.defaultValues['client_disconnect_setting.rules']
   )
+  const [debugScopeRules, setDebugScopeRules] = useState(
+    props.defaultValues['debug_scope_setting.rules']
+  )
 
   useEffect(() => {
     setExtendedCacheRules(props.defaultValues['extended_cache_ttl_setting.rules'])
@@ -102,6 +111,7 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
     setClientDisconnectRules(
       props.defaultValues['client_disconnect_setting.rules']
     )
+    setDebugScopeRules(props.defaultValues['debug_scope_setting.rules'])
   }, [props.defaultValues])
 
   const [confirmDisableRatioOpen, setConfirmDisableRatioOpen] = useState(false)
@@ -150,6 +160,17 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
       updates.push({
         key: 'client_disconnect_setting.rules',
         value: clientDisconnectSerialized,
+      })
+    }
+
+    const debugScopeSerialized = JSON.stringify(debugScopeRules)
+    if (
+      debugScopeSerialized !==
+      JSON.stringify(props.defaultValues['debug_scope_setting.rules'])
+    ) {
+      updates.push({
+        key: 'debug_scope_setting.rules',
+        value: debugScopeSerialized,
       })
     }
 
@@ -291,6 +312,17 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
               )}
               value={clientDisconnectRules}
               onChange={setClientDisconnectRules}
+            />
+
+            <Separator />
+
+            <DebugScopeRulesField
+              label={t('Scoped Debug Logging (API Key + Model)')}
+              description={t(
+                'Log full request/response bodies only for the listed API key (token name) + model pairs, even when global Debug Mode is off. Both fields are required per rule; add multiple rows to cover more scopes. Leave empty to disable scoped debug logging.'
+              )}
+              value={debugScopeRules}
+              onChange={setDebugScopeRules}
             />
 
             <Separator />

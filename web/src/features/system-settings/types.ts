@@ -394,6 +394,11 @@ export type ClientDisconnectRule = {
   model: string
 }
 
+export type DebugScopeRule = {
+  token_name: string
+  model: string
+}
+
 export type OperationsSettings = {
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
@@ -403,6 +408,7 @@ export type OperationsSettings = {
   'extended_cache_ttl_setting.rules': GroupModelRule[]
   'metadata_injection_disable_setting.rules': GroupModelRule[]
   'client_disconnect_setting.rules': ClientDisconnectRule[]
+  'debug_scope_setting.rules': DebugScopeRule[]
   QuotaRemindEnabled: boolean
   QuotaRemindThreshold: string
   EmailProvider: 'smtp' | 'resend'

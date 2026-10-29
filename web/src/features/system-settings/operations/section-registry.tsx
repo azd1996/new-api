@@ -44,6 +44,8 @@ const OPERATIONS_SECTIONS = [
             settings['metadata_injection_disable_setting.rules'],
           'client_disconnect_setting.rules':
             settings['client_disconnect_setting.rules'],
+          'debug_scope_setting.rules':
+            settings['debug_scope_setting.rules'],
         }}
       />
     ),
