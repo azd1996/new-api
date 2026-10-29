@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -12,6 +13,44 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// logFilterValues reads a log filter field as a multi-value list. A field may
+// repeat in the query string and/or carry comma-separated values; blanks are
+// dropped. A single value yields a one-element list, matching the former
+// scalar query params.
+func logFilterValues(c *gin.Context, key string) []string {
+	var values []string
+	for _, raw := range c.QueryArray(key) {
+		for _, value := range strings.Split(raw, ",") {
+			value = strings.TrimSpace(value)
+			if value != "" {
+				values = append(values, value)
+			}
+		}
+	}
+	return values
+}
+
+// logFilterExclude reports whether the companion "<key>_op" param selects the
+// exclude (not-equals) operator. Any other value, including absence, means
+// include (the default).
+func logFilterExclude(c *gin.Context, key string) bool {
+	return strings.EqualFold(strings.TrimSpace(c.Query(key+"_op")), "exclude")
+}
+
+func logFieldFilterFromQuery(c *gin.Context, key string) model.LogFieldFilter {
+	return model.LogFieldFilter{Values: logFilterValues(c, key), Exclude: logFilterExclude(c, key)}
+}
+
+func logChannelFilterFromQuery(c *gin.Context) model.LogChannelFilter {
+	var values []int
+	for _, value := range logFilterValues(c, "channel") {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			values = append(values, parsed)
+		}
+	}
+	return model.LogChannelFilter{Values: values, Exclude: logFilterExclude(c, "channel")}
+}
 
 // logFilterFromQuery reads the log search shared by the log list and the log
 // export. Username and channel are read only for administrators.
@@ -23,9 +62,9 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 		Type:              logType,
 		StartTimestamp:    startTimestamp,
 		EndTimestamp:      endTimestamp,
-		ModelName:         c.Query("model_name"),
-		TokenName:         c.Query("token_name"),
-		Group:             c.Query("group"),
+		ModelName:         logFieldFilterFromQuery(c, "model_name"),
+		TokenName:         logFieldFilterFromQuery(c, "token_name"),
+		Group:             logFieldFilterFromQuery(c, "group"),
 		RequestId:         c.Query("request_id"),
 		UpstreamRequestId: c.Query("upstream_request_id"),
 		SessionId:         c.Query("session_id"),
@@ -35,8 +74,8 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 		filter.StatusCode = sc
 	}
 	if admin {
-		filter.Username = c.Query("username")
-		filter.Channel, _ = strconv.Atoi(c.Query("channel"))
+		filter.Username = logFieldFilterFromQuery(c, "username")
+		filter.Channel = logChannelFilterFromQuery(c)
 		filter.DownstreamRequestId = c.Query("downstream_request_id")
 		filter.CustomerId = c.Query("customer_id")
 		filter.ErrorSignatureHash = c.Query("error_signature_hash")
@@ -222,11 +261,11 @@ func GetLogsStat(c *gin.Context) {
 	logType, _ := strconv.Atoi(c.Query("type"))
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	tokenName := c.Query("token_name")
-	username := c.Query("username")
-	modelName := c.Query("model_name")
-	channel, _ := strconv.Atoi(c.Query("channel"))
-	group := c.Query("group")
+	tokenName := logFieldFilterFromQuery(c, "token_name")
+	username := logFieldFilterFromQuery(c, "username")
+	modelName := logFieldFilterFromQuery(c, "model_name")
+	channel := logChannelFilterFromQuery(c)
+	group := logFieldFilterFromQuery(c, "group")
 	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
 	if err != nil {
 		common.ApiError(c, err)
@@ -257,11 +296,12 @@ func GetLogsSelfStat(c *gin.Context) {
 			return
 		}
 	}
-	tokenName := c.Query("token_name")
-	modelName := c.Query("model_name")
-	channel, _ := strconv.Atoi(c.Query("channel"))
-	group := c.Query("group")
-	quotaNum, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+	tokenName := logFieldFilterFromQuery(c, "token_name")
+	modelName := logFieldFilterFromQuery(c, "model_name")
+	channel := logChannelFilterFromQuery(c)
+	group := logFieldFilterFromQuery(c, "group")
+	usernameFilter := model.LogFieldFilter{Values: []string{username}}
+	quotaNum, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, usernameFilter, tokenName, channel, group)
 	if err != nil {
 		common.ApiError(c, err)
 		return

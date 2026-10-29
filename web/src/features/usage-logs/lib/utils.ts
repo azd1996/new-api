@@ -184,14 +184,45 @@ export function buildApiParams(config: {
     p: page,
     page_size: pageSize,
     ...(searchParams.type ? { type: processType(searchParams.type) } : {}),
-    ...(searchParams.model ? { model_name: String(searchParams.model) } : {}),
-    ...(searchParams.token ? { token_name: String(searchParams.token) } : {}),
-    ...(searchParams.group ? { group: String(searchParams.group) } : {}),
+    ...(searchParams.model
+      ? {
+          model_name: String(searchParams.model),
+          ...(searchParams.modelOp === 'exclude'
+            ? { model_name_op: 'exclude' as const }
+            : {}),
+        }
+      : {}),
+    ...(searchParams.token
+      ? {
+          token_name: String(searchParams.token),
+          ...(searchParams.tokenOp === 'exclude'
+            ? { token_name_op: 'exclude' as const }
+            : {}),
+        }
+      : {}),
+    ...(searchParams.group
+      ? {
+          group: String(searchParams.group),
+          ...(searchParams.groupOp === 'exclude'
+            ? { group_op: 'exclude' as const }
+            : {}),
+        }
+      : {}),
     ...(isAdmin && searchParams.channel
-      ? { channel: Number(searchParams.channel) || 0 }
+      ? {
+          channel: String(searchParams.channel),
+          ...(searchParams.channelOp === 'exclude'
+            ? { channel_op: 'exclude' as const }
+            : {}),
+        }
       : {}),
     ...(isAdmin && searchParams.username
-      ? { username: String(searchParams.username) }
+      ? {
+          username: String(searchParams.username),
+          ...(searchParams.usernameOp === 'exclude'
+            ? { username_op: 'exclude' as const }
+            : {}),
+        }
       : {}),
     ...(searchParams.requestId
       ? { request_id: String(searchParams.requestId) }
@@ -237,7 +268,7 @@ export function buildApiParams(config: {
           params.group = String(value)
           break
         case 'channel':
-          if (isAdmin) params.channel = Number(value) || 0
+          if (isAdmin) params.channel = String(value)
           break
         case 'username':
           if (isAdmin) params.username = String(value)

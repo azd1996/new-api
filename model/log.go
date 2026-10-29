@@ -31,6 +31,80 @@ func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm
 	return tx.Where(column+" = ?", value), nil
 }
 
+// LogFieldFilter selects log rows by a text column using one or more values and
+// an include (equals / LIKE) or exclude (not-equals / NOT LIKE) operator. An
+// empty Values slice applies no filter, so a single include value behaves
+// exactly like the former scalar text filter.
+type LogFieldFilter struct {
+	Values  []string
+	Exclude bool
+}
+
+// LogChannelFilter is the numeric counterpart of LogFieldFilter for the
+// channel_id column, applied with IN / NOT IN.
+type LogChannelFilter struct {
+	Values  []int
+	Exclude bool
+}
+
+// applyLogFieldFilter adds an include/exclude filter over column for every value
+// in filter. Include values are OR-combined (equals, or LIKE when the value
+// carries a % wildcard and allowLike is set); exclude values are AND-combined
+// with the negated operator. An empty filter leaves tx unchanged, so a lone
+// include value reproduces the previous scalar behavior.
+func applyLogFieldFilter(tx *gorm.DB, column string, filter LogFieldFilter, allowLike bool) (*gorm.DB, error) {
+	if len(filter.Values) == 0 {
+		return tx, nil
+	}
+
+	conditions := make([]string, 0, len(filter.Values))
+	args := make([]any, 0, len(filter.Values))
+	for _, value := range filter.Values {
+		if value == "" {
+			continue
+		}
+		if allowLike && strings.Contains(value, "%") {
+			condition, pattern, err := buildLogLikeCondition(column, value)
+			if err != nil {
+				return nil, err
+			}
+			if filter.Exclude {
+				condition = strings.Replace(condition, " LIKE ", " NOT LIKE ", 1)
+			}
+			conditions = append(conditions, condition)
+			args = append(args, pattern)
+			continue
+		}
+		if filter.Exclude {
+			conditions = append(conditions, column+" <> ?")
+		} else {
+			conditions = append(conditions, column+" = ?")
+		}
+		args = append(args, value)
+	}
+	if len(conditions) == 0 {
+		return tx, nil
+	}
+
+	joiner := " OR "
+	if filter.Exclude {
+		joiner = " AND "
+	}
+	return tx.Where("("+strings.Join(conditions, joiner)+")", args...), nil
+}
+
+// applyLogChannelFilter adds an IN / NOT IN filter over the channel_id column.
+// An empty filter leaves tx unchanged.
+func applyLogChannelFilter(tx *gorm.DB, column string, filter LogChannelFilter) *gorm.DB {
+	if len(filter.Values) == 0 {
+		return tx
+	}
+	if filter.Exclude {
+		return tx.Where(column+" NOT IN ?", filter.Values)
+	}
+	return tx.Where(column+" IN ?", filter.Values)
+}
+
 func buildLogLikeCondition(column string, value string) (string, string, error) {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		pattern, err := sanitizeClickHouseLikePattern(value)
@@ -676,16 +750,18 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 }
 
 // LogFilter is the usage-log search shared by the log list and the log export.
-// Username and Channel are administrator filters.
+// Username and Channel are administrator filters. ModelName/Username/TokenName/
+// Channel/Group each accept multiple values with an include/exclude operator; a
+// single include value reproduces the former scalar behavior.
 type LogFilter struct {
 	Type                int
 	StartTimestamp      int64
 	EndTimestamp        int64
-	ModelName           string
-	Username            string
-	TokenName           string
-	Channel             int
-	Group               string
+	ModelName           LogFieldFilter
+	Username            LogFieldFilter
+	TokenName           LogFieldFilter
+	Channel             LogChannelFilter
+	Group               LogFieldFilter
 	RequestId           string
 	UpstreamRequestId   string
 	SessionId           string
@@ -704,14 +780,14 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	if f.Type != LogTypeUnknown {
 		tx = tx.Where("logs.type = ?", f.Type)
 	}
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", f.ModelName); err != nil {
+	if tx, err = applyLogFieldFilter(tx, "logs.model_name", f.ModelName, true); err != nil {
 		return nil, err
 	}
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.username", f.Username); err != nil {
+	if tx, err = applyLogFieldFilter(tx, "logs.username", f.Username, true); err != nil {
 		return nil, err
 	}
-	if f.TokenName != "" {
-		tx = tx.Where("logs.token_name = ?", f.TokenName)
+	if tx, err = applyLogFieldFilter(tx, "logs.token_name", f.TokenName, false); err != nil {
+		return nil, err
 	}
 	if f.RequestId != "" {
 		tx = tx.Where("logs.request_id = ?", f.RequestId)
@@ -748,11 +824,9 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	if f.EndTimestamp != 0 {
 		tx = tx.Where("logs.created_at <= ?", f.EndTimestamp)
 	}
-	if f.Channel != 0 {
-		tx = tx.Where("logs.channel_id = ?", f.Channel)
-	}
-	if f.Group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", f.Group)
+	tx = applyLogChannelFilter(tx, "logs.channel_id", f.Channel)
+	if tx, err = applyLogFieldFilter(tx, "logs."+logGroupCol, f.Group, false); err != nil {
+		return nil, err
 	}
 	return tx, nil
 }
@@ -920,21 +994,23 @@ type Stat struct {
 	Tpm   int `json:"tpm"`
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName LogFieldFilter, username LogFieldFilter, tokenName LogFieldFilter, channel LogChannelFilter, group LogFieldFilter) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
 
-	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
+	if tx, err = applyLogFieldFilter(tx, "username", username, true); err != nil {
 		return stat, err
 	}
-	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "username", username); err != nil {
+	if rpmTpmQuery, err = applyLogFieldFilter(rpmTpmQuery, "username", username, true); err != nil {
 		return stat, err
 	}
-	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
-		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", tokenName)
+	if tx, err = applyLogFieldFilter(tx, "token_name", tokenName, false); err != nil {
+		return stat, err
+	}
+	if rpmTpmQuery, err = applyLogFieldFilter(rpmTpmQuery, "token_name", tokenName, false); err != nil {
+		return stat, err
 	}
 	if startTimestamp != 0 {
 		tx = tx.Where("created_at >= ?", startTimestamp)
@@ -942,19 +1018,19 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if endTimestamp != 0 {
 		tx = tx.Where("created_at <= ?", endTimestamp)
 	}
-	if tx, err = applyExplicitLogTextFilter(tx, "model_name", modelName); err != nil {
+	if tx, err = applyLogFieldFilter(tx, "model_name", modelName, true); err != nil {
 		return stat, err
 	}
-	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "model_name", modelName); err != nil {
+	if rpmTpmQuery, err = applyLogFieldFilter(rpmTpmQuery, "model_name", modelName, true); err != nil {
 		return stat, err
 	}
-	if channel != 0 {
-		tx = tx.Where("channel_id = ?", channel)
-		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
+	tx = applyLogChannelFilter(tx, "channel_id", channel)
+	rpmTpmQuery = applyLogChannelFilter(rpmTpmQuery, "channel_id", channel)
+	if tx, err = applyLogFieldFilter(tx, logGroupCol, group, false); err != nil {
+		return stat, err
 	}
-	if group != "" {
-		tx = tx.Where(logGroupCol+" = ?", group)
-		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
+	if rpmTpmQuery, err = applyLogFieldFilter(rpmTpmQuery, logGroupCol, group, false); err != nil {
+		return stat, err
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)
