@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
@@ -54,8 +55,23 @@ export function CommonLogsStats() {
   const searchParams = route.useSearch()
   const { sensitiveVisible } = useUsageLogsContext()
 
-  const { data: stats, isLoading } = useQuery({
+  // Defer the stats query until the browser is idle after first paint so the
+  // log list renders first; the stats aggregate scans the whole time range and
+  // should not compete with the list request on initial open.
+  const [deferred, setDeferred] = useState(false)
+  useEffect(() => {
+    const idle = window.requestIdleCallback
+    if (idle) {
+      const handle = idle(() => setDeferred(true), { timeout: 1500 })
+      return () => window.cancelIdleCallback?.(handle)
+    }
+    const timer = window.setTimeout(() => setDeferred(true), 300)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  const { data: stats } = useQuery({
     queryKey: ['usage-logs-stats', isAdmin, searchParams],
+    enabled: deferred,
     queryFn: async () => {
       const params = buildApiParams({
         page: 1,
@@ -76,7 +92,7 @@ export function CommonLogsStats() {
     placeholderData: (previousData) => previousData,
   })
 
-  if (isLoading) {
+  if (!stats) {
     return (
       <div className='flex items-center gap-2'>
         <Skeleton className='h-7 w-[150px] rounded-md' />
