@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 )
 
@@ -28,11 +29,13 @@ type ChannelSettings struct {
 	// (X-Oneapi-Request-Id). Matched case-insensitively via http.Header.Get.
 	UpstreamRequestIdHeader string `json:"upstream_request_id_header,omitempty"`
 	// RetryOverride configures error-triggered request rewrites as an ordered list
-	// of four-phase rules. Each rule runs its phases in order and short-circuits:
-	// phase1 filters the request (model/relay_format/group, etc.); phase2 matches
-	// the upstream response ({status_code, error_message, response_body}); phase3
-	// rewrites the request body (a list of param-override operations); phase4
-	// chooses the retry action. phase1/2/3 conditions share the exact
+	// of four-phase rules. Rules are priority-ordered: the FIRST rule whose
+	// phase1 (request: model/relay_format/group, etc.) and phase2 (upstream
+	// response: {status_code, error_message, response_body}) both match fully
+	// decides the outcome (its phase3 body rewrite and its phase4 action);
+	// evaluation stops at that rule. phase4 is retry_same_channel (default),
+	// fallback_next_channel, or return_error (stop retrying, return a configured
+	// status/message to the caller). phase1/2/3 conditions share the exact
 	// param-override condition semantics (see relay/common.EvaluateConditions).
 	// Empty = disabled; a rule that fails to parse is skipped, never fatal.
 	RetryOverride []RetryRule `json:"retry_override,omitempty"`
@@ -86,7 +89,62 @@ type RetryRule struct {
 	Phase1RequestCondition   *RetryRulePhaseCondition `json:"phase1_request_condition,omitempty"`
 	Phase2ResponseConditions *RetryRulePhaseCondition `json:"phase2_response_conditions,omitempty"`
 	Phase3RequestRewrite     []map[string]any         `json:"phase3_request_rewrite,omitempty"`
-	Phase4RetryAction        string                   `json:"phase4_retry_action,omitempty"`
+	Phase4RetryAction        *RetryAction             `json:"phase4_retry_action,omitempty"`
+}
+
+// RetryAction is phase4 of a retry-override rule: what to do once a rule matches.
+// It accepts two JSON forms for backward compatibility:
+//
+//   - a bare string, e.g. "retry_same_channel" / "fallback_next_channel" /
+//     "return_error" (StatusCode/StatusMsg default to zero/empty);
+//   - an object, e.g. {"action": "return_error", "status_code": 429,
+//     "status_msg": "rate limited"}.
+//
+// StatusCode/StatusMsg apply only to the "return_error" action, which stops all
+// retrying and returns the given HTTP status (and optional message) to the
+// caller. An unknown or empty action resolves to retry_same_channel.
+type RetryAction struct {
+	Action     string `json:"action,omitempty"`
+	StatusCode int    `json:"status_code,omitempty"`
+	StatusMsg  string `json:"status_msg,omitempty"`
+}
+
+// UnmarshalJSON accepts both the bare-string and object forms. It is tolerant by
+// design: an unexpected shape yields the zero value (which resolves to the
+// default action) instead of an error, because a hard error here would make
+// Channel.GetSetting discard the entire channel setting blob.
+func (a *RetryAction) UnmarshalJSON(data []byte) error {
+	switch common.GetJsonType(data) {
+	case "string":
+		var s string
+		if err := common.Unmarshal(data, &s); err != nil {
+			*a = RetryAction{}
+			return nil
+		}
+		*a = RetryAction{Action: s}
+	case "object":
+		type retryActionAlias RetryAction
+		var alias retryActionAlias
+		if err := common.Unmarshal(data, &alias); err != nil {
+			*a = RetryAction{}
+			return nil
+		}
+		*a = RetryAction(alias)
+	default:
+		*a = RetryAction{}
+	}
+	return nil
+}
+
+// MarshalJSON emits the bare-string form when only the action is set, keeping
+// stored configs compatible with the original string-only representation; it
+// emits the object form once status_code/status_msg carry a value.
+func (a RetryAction) MarshalJSON() ([]byte, error) {
+	if a.StatusCode == 0 && a.StatusMsg == "" {
+		return common.Marshal(a.Action)
+	}
+	type retryActionAlias RetryAction
+	return common.Marshal(retryActionAlias(a))
 }
 
 type VertexKeyType string

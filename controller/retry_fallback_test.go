@@ -47,8 +47,9 @@ func TestRetryOverrideErrorAttemptAudit(t *testing.T) {
 			channel := &model.Channel{Id: 17, Setting: &setting}
 			info := &relaycommon.RelayInfo{UserId: 1}
 			apiErr := types.NewErrorWithStatusCode(errors.New("thinking unsupported"), types.ErrorCodeBadResponse, 400)
-			triggered, detail := maybeApplyRetryRuleFallback(c, info, channel, apiErr, types.RelayFormatOpenAI, &service.RetryParam{})
+			triggered, terminated, detail := maybeApplyRetryRuleFallback(c, info, channel, apiErr, types.RelayFormatOpenAI, &service.RetryParam{})
 			require.True(t, triggered)
+			require.False(t, terminated)
 			require.NotNil(t, detail)
 			processChannelError(c, types.ChannelError{ChannelId: 17}, apiErr, types.RelayFormatOpenAI, detail)
 
@@ -56,8 +57,9 @@ func TestRetryOverrideErrorAttemptAudit(t *testing.T) {
 			if action == retryrule.ActionFallbackNextChannel {
 				apiErr = types.NewErrorWithStatusCode(errors.New("unavailable"), types.ErrorCodeBadResponse, 503)
 			}
-			triggered, detail = maybeApplyRetryRuleFallback(c, info, channel, apiErr, types.RelayFormatOpenAI, &service.RetryParam{})
+			triggered, terminated, detail = maybeApplyRetryRuleFallback(c, info, channel, apiErr, types.RelayFormatOpenAI, &service.RetryParam{})
 			assert.False(t, triggered)
+			assert.False(t, terminated)
 			assert.Nil(t, detail)
 			processChannelError(c, types.ChannelError{ChannelId: 17}, apiErr, types.RelayFormatOpenAI, detail)
 			// Ordinary retry/error writers do not receive override metadata.
@@ -86,6 +88,45 @@ func TestRetryOverrideErrorAttemptAudit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRetryOverrideReturnErrorTerminates(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.User{}))
+	require.NoError(t, db.Create(&model.User{Id: 1, Username: "retry-terminate", Setting: "{}"}).Error)
+	oldDB, oldLogDB := model.DB, model.LOG_DB
+	oldEnabled, oldRedis := constant.ErrorLogEnabled, common.RedisEnabled
+	model.DB, model.LOG_DB = db, db
+	constant.ErrorLogEnabled, common.RedisEnabled = true, false
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = oldDB, oldLogDB
+		constant.ErrorLogEnabled, common.RedisEnabled = oldEnabled, oldRedis
+	})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	c.Set("id", 1)
+	c.Set("channel_id", 21)
+	// Object form of phase4 with a return_error action, custom code and message.
+	setting := `{"retry_override":[{"description":"hard stop on policy block","phase2_response_conditions":{"conditions":[{"path":"status_code","mode":"full","value":400}]},"phase4_retry_action":{"action":"return_error","status_code":451,"status_msg":"blocked by policy"}}]}`
+	channel := &model.Channel{Id: 21, Setting: &setting}
+	info := &relaycommon.RelayInfo{UserId: 1}
+	apiErr := types.NewErrorWithStatusCode(errors.New("upstream rejected"), types.ErrorCodeBadResponse, 400)
+
+	triggered, terminated, detail := maybeApplyRetryRuleFallback(c, info, channel, apiErr, types.RelayFormatOpenAI, &service.RetryParam{})
+	assert.False(t, triggered, "terminate must not request a retry")
+	assert.True(t, terminated, "return_error terminates the relay loop")
+	require.NotNil(t, detail)
+	// apiErr is rewritten to the configured status + message returned to the caller.
+	assert.Equal(t, 451, apiErr.StatusCode)
+	assert.Equal(t, "blocked by policy", apiErr.Error())
+	assert.False(t, info.RetryFallbackDone, "terminate neither pins nor consumes the one-shot retry")
+	assert.Equal(t, retryrule.ActionReturnError, detail["action"])
+	assert.Equal(t, 451, detail["return_status"])
 }
 
 func TestParseAdminRetryTriggered(t *testing.T) {

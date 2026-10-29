@@ -13,12 +13,12 @@
 
 ## 2. 核心模型：四段式规则
 
-一条规则（`dto.RetryRule`）由四段组成，按顺序**短路**：任一判定阶段不通过则整条跳过。
+一条规则（`dto.RetryRule`）由四段组成，按顺序**短路**：任一判定阶段不通过则整条跳过。规则数组按**优先级排序**，一次响应只采用**首条**phase1&2 均命中的规则（命中即停，由该规则的 phase3+phase4 全权决定结果）。
 
 - **phase1 请求侧过滤**：匹配「请求体 + 请求上下文」（`model`/`upstream_model`/`original_model`/`user_group`/`token_group`/`using_group`/`request_path`/`retry_index`/`is_retry`/`last_error.*` + `relay_format`）。不满足 → 跳过本规则。
 - **phase2 响应侧判定**：匹配响应上下文 `status_code`/`error_message`/`response_body`/`relay_format`/`model`。不满足 → 不重试、不改写。
 - **phase3 条件化改写**：phase1&2 通过后，按数组顺序把每个改写算子应用到请求体（复用 param-override 算子，如 `prune_objects`/`delete`/`set`）。空数组 = 纯「检测 + 动作」。
-- **phase4 重试动作**：`retry_same_channel`（默认）或 `fallback_next_channel`。
+- **phase4 重试动作**：`retry_same_channel`（默认）、`fallback_next_channel`，或 `return_error`（终止重试，向调用方返回指定错误码/消息）。
 
 关键设计：**phase1/2/3 条件语义与「参数覆盖」完全一致**（复用同一求值器，无第二套条件语法），改写也直接复用 param-override 算子。重试覆盖相对参数覆盖真正的净增只有：挂在「上游报错之后」的时机 + 改写后回原渠道/下一渠道重试。
 
@@ -33,12 +33,14 @@
     "phase1_request_condition":   { "conditions": [ ... ], "logic": "AND|OR" },
     "phase2_response_conditions": { "conditions": [ ... ], "logic": "AND|OR" },
     "phase3_request_rewrite":     [ { "mode": "...", "path": "...", "value": ... } ],
-    "phase4_retry_action": "retry_same_channel | fallback_next_channel"
+    "phase4_retry_action": "retry_same_channel | fallback_next_channel | return_error"
   }
 ]
 ```
 
-约束：`phase3_request_rewrite` 恒为数组（可空=只检测不改写）；phase1/phase2 可省略（省略即恒通过）；`logic` 省略默认 **OR**；`phase4_retry_action` 省略默认 `retry_same_channel`，非法值回退 `retry_same_channel` + 日志。
+`phase4_retry_action` 兼容两种写法：**字符串**（如 `"fallback_next_channel"`）或**对象** `{"action": "...", "status_code": 429, "status_msg": "..."}`。`status_code`/`status_msg` 仅对 `return_error` 生效——终止重试并把该状态码（及可选消息）返回给调用方；`status_code` 缺省/越界时回退 **429**。对象/字符串可混用，序列化时仅动作（无 status）回落为字符串形式，保持旧配置不变。
+
+约束：`phase3_request_rewrite` 恒为数组（可空=只检测不改写）；phase1/phase2 可省略（省略即恒通过）；`logic` 省略默认 **OR**；`phase4_retry_action` 省略默认 `retry_same_channel`，非法/未知动作回退 `retry_same_channel`（解析容错，绝不使整段 setting 失效）。
 
 ## 4. 条件语法（与参数覆盖一致）
 
@@ -65,7 +67,8 @@ phase1/2/3 条件统一走 `relay/common` 求值器（`EvaluateConditions`，包
 
 - **soft-pin 原语**（`service/channel_pin.go`）区别于会直接关闭重试的 `specific_channel_id`。选原渠道而非从头重排的理由：兜底常因高优渠道满负荷才切下来，重排大概率又打回满负荷渠道；问题只在请求形态，原渠道改写后即可通过。
 - **一次性语义拆分**：`retry_same_channel` 一次性（`RetryFallbackDone` 保证整请求最多触发一次，防同渠道死循环）；`fallback_next_channel` **不受一次性限制**，可连续多跳直到最后一个渠道，由 `RetryTimes` 预算与渠道用尽收敛（要跳完所有渠道，`RetryTimes` 须 ≥ 可用渠道数 − 1）。
-- **动作聚合**：多规则命中时，只要有一条为 `fallback_next_channel` → 整体 fallback；phase3 改写按规则/组内顺序叠加。
+- **第三种动作 `return_error`**：命中即终止——不钉渠道、不重置预算、不改写请求体；把失败响应的 `apiErr` 重写为配置的 `status_code`（缺省 429）与可选 `status_msg`，主循环直接 `break`，由顶层 deferred 把该错误返回给调用方。审计日志额外记 `return_status`/`return_message`，`status_code` 仍记原始上游状态码（触发原因）。
+- **动作裁决（首条命中生效）**：规则按数组顺序优先级排列，取**首条**phase1&2 均命中的规则，由它的 phase4 动作与 phase3 改写全权决定，命中即停、不再看后续规则；无规则命中则不触发（默认 `retry_same_channel` 语义）。（历史行为是「任一命中为 fallback 则整体 fallback、phase3 跨规则叠加」，现已改为首条命中。）
 
 ## 6. 200 响应体错误检测
 
@@ -94,16 +97,17 @@ phase1/2/3 条件统一走 `relay/common` 求值器（`EvaluateConditions`，包
 
 **错误路径数据流**：
 1. 上游返回错误 → 主循环命中 `controller/retry_fallback.go` 的 `maybeApplyRetryRuleFallback` → 构造 reqCtx（`BuildParamOverrideContext` + relay_format）与 respCtx（注入 model）。
-2. `retryrule.CollectRewrites(rules, reqCtx, respCtx)` 返回 `rewrites, matched, action`：phase1 用 reqCtx、phase2 用 respCtx；命中收集 phase3、聚合 action。
-3. 命中 → 暂存 `PendingRetryRewrite`、标记 `RetryFallbackDone`；`same` → pin + reset；`fallback` → 直接放行；`return true` → 主循环 `continue`，绕过 `shouldRetry`。
-4. 下一次迭代由 relay handler 在公共入口应用改写后发出。
+2. `retryrule.CollectRewrites(rules, reqCtx, respCtx)` 返回 `Decision{Matched, Rewrites, Action, ReturnStatus, ReturnMessage, MatchedIndex}`：phase1 用 reqCtx、phase2 用 respCtx；取首条命中规则，用其 phase3 改写与 phase4 动作。
+3. 命中后按动作分流：`same` → 暂存 `PendingRetryRewrite`、标记 `RetryFallbackDone`、pin + reset，`return (retry=true, terminate=false)`，主循环 `continue`；`fallback` → 暂存改写、直接放行，`continue`；`return_error` → 重写 `apiErr` 状态码/消息，`return (retry=false, terminate=true)`，主循环 `break`。
+4. 下一次迭代由 relay handler 在公共入口应用改写后发出（terminate 不进入下一次迭代）。
 
 **成功路径（200 检测）**：`relay/channel/openai/retry_body_guard.go` 的 `precommitGuard`——无 `retry_override` 规则时初始即 committed（零开销透传）；有规则则按 §6 缓冲 + 扫描 + 提交。
 
 ## 9. 边界与异常
 
 - 无 `retry_override` / 解析失败：视为空，**禁用 + warn**，不影响正常转发与用户模型调用（无迁移，运维手工重填）。
-- phase 省略 → 恒通过；`logic` 省略 → OR；`phase4` 非法 → `retry_same_channel` + 日志。
+- phase 省略 → 恒通过；`logic` 省略 → OR；`phase4` 非法/未知 → `retry_same_channel`（容错解析，不使整段 setting 失效）；`return_error` 缺省/越界 `status_code` → 429。
+- `return_error` 走正常错误返回路径：预扣费在顶层 deferred 里照常退还，不产生计费。
 - `fallback_next_channel` 但 `RetryTimes==0` 或无其他可用渠道 → 请求以原始错误结束（如实反映，不额外造预算）。
 - 命中错误不外发：逐渠道兜底，**仅当重试到最后一个渠道仍失败**才暴露最后渠道的错误；流式下客户端若已收到正文，则在末尾追加最后错误。
 - body 检测限制单块体量（`retryBodyGuardMaxBytes` 16KB），避免性能问题。

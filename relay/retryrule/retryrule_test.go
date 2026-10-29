@@ -17,6 +17,10 @@ func phase(logic string, conds ...map[string]any) *dto.RetryRulePhaseCondition {
 	return &dto.RetryRulePhaseCondition{Conditions: conds, Logic: logic}
 }
 
+func action(a string) *dto.RetryAction {
+	return &dto.RetryAction{Action: a}
+}
+
 func pruneReasoning() map[string]any {
 	return map[string]any{
 		"mode":  "prune_objects",
@@ -36,7 +40,7 @@ func encryptedContentRule() dto.RetryRule {
 			cond("error_message", "contains", "encrypted content"),
 		),
 		Phase3RequestRewrite: []map[string]any{pruneReasoning()},
-		Phase4RetryAction:    ActionRetrySameChannel,
+		Phase4RetryAction:    action(ActionRetrySameChannel),
 	}
 }
 
@@ -61,14 +65,14 @@ func TestCollectRewritesPhaseGating(t *testing.T) {
 			reqCtx := map[string]any{"model": tc.model, "relay_format": "openai_responses"}
 			respCtx := ResponseContext(tc.status, tc.message, "openai_responses")
 			respCtx["model"] = tc.model
-			rewrites, matched, action, _ := CollectRewrites(rules, reqCtx, respCtx)
-			assert.Equal(t, tc.wantMatch, matched)
-			assert.Equal(t, ActionRetrySameChannel, action)
+			d := CollectRewrites(rules, reqCtx, respCtx)
+			assert.Equal(t, tc.wantMatch, d.Matched)
+			assert.Equal(t, ActionRetrySameChannel, d.Action)
 			if tc.wantMatch {
-				require.Len(t, rewrites, 1)
-				assert.Equal(t, "prune_objects", rewrites[0]["mode"])
+				require.Len(t, d.Rewrites, 1)
+				assert.Equal(t, "prune_objects", d.Rewrites[0]["mode"])
 			} else {
-				assert.Empty(t, rewrites)
+				assert.Empty(t, d.Rewrites)
 			}
 		})
 	}
@@ -76,9 +80,10 @@ func TestCollectRewritesPhaseGating(t *testing.T) {
 
 func TestCollectRewritesEmptyRules(t *testing.T) {
 	respCtx := ResponseContext(400, "x", "claude")
-	_, matched, action, _ := CollectRewrites(nil, map[string]any{}, respCtx)
-	assert.False(t, matched)
-	assert.Equal(t, ActionRetrySameChannel, action)
+	d := CollectRewrites(nil, map[string]any{}, respCtx)
+	assert.False(t, d.Matched)
+	assert.Equal(t, ActionRetrySameChannel, d.Action)
+	assert.Equal(t, -1, d.MatchedIndex)
 }
 
 func TestCollectRewritesLogicDefaultOr(t *testing.T) {
@@ -94,19 +99,18 @@ func TestCollectRewritesLogicDefaultOr(t *testing.T) {
 	}
 	rules := []dto.RetryRule{rule}
 
-	_, matched, _, _ := CollectRewrites(rules, map[string]any{}, ResponseContext(400, "bad signature", "claude"))
-	assert.True(t, matched, "default OR matches when one condition matches")
-
-	_, matched, _, _ = CollectRewrites(rules, map[string]any{}, ResponseContext(400, "content policy", "claude"))
-	assert.False(t, matched, "default OR does not match when none matches")
+	assert.True(t, CollectRewrites(rules, map[string]any{}, ResponseContext(400, "bad signature", "claude")).Matched,
+		"default OR matches when one condition matches")
+	assert.False(t, CollectRewrites(rules, map[string]any{}, ResponseContext(400, "content policy", "claude")).Matched,
+		"default OR does not match when none matches")
 
 	// Explicit AND requires both.
 	rule.Phase2ResponseConditions.Logic = "AND"
-	_, matched, _, _ = CollectRewrites([]dto.RetryRule{rule}, map[string]any{}, ResponseContext(400, "bad signature", "claude"))
-	assert.False(t, matched, "AND requires all conditions")
+	assert.False(t, CollectRewrites([]dto.RetryRule{rule}, map[string]any{}, ResponseContext(400, "bad signature", "claude")).Matched,
+		"AND requires all conditions")
 }
 
-func TestCollectRewritesMultipleRewrites(t *testing.T) {
+func TestCollectRewritesStagesAllRewritesOfMatchedRule(t *testing.T) {
 	rule := dto.RetryRule{
 		Phase2ResponseConditions: phase("AND", cond("status_code", "full", float64(400))),
 		Phase3RequestRewrite: []map[string]any{
@@ -114,47 +118,78 @@ func TestCollectRewritesMultipleRewrites(t *testing.T) {
 			{"mode": "prune_objects", "path": "messages", "value": map[string]any{"where": map[string]any{"type": "redacted_thinking"}}},
 		},
 	}
-	rewrites, matched, _, _ := CollectRewrites([]dto.RetryRule{rule}, map[string]any{}, ResponseContext(400, "boom", "claude"))
-	assert.True(t, matched)
-	require.Len(t, rewrites, 2)
+	d := CollectRewrites([]dto.RetryRule{rule}, map[string]any{}, ResponseContext(400, "boom", "claude"))
+	assert.True(t, d.Matched)
+	require.Len(t, d.Rewrites, 2)
 }
 
-func TestCollectRewritesFallbackWinsAndAction(t *testing.T) {
+func TestCollectRewritesFirstMatchWins(t *testing.T) {
+	// Rules are priority-ordered: the first matching rule fully decides the
+	// action, even if a later matching rule asks for a different one.
 	respCtx := ResponseContext(400, "boom", "claude")
 	rules := []dto.RetryRule{
-		{Phase3RequestRewrite: []map[string]any{{"mode": "delete", "path": "a"}}, Phase4RetryAction: ActionRetrySameChannel},
-		{Phase3RequestRewrite: []map[string]any{{"mode": "delete", "path": "b"}}, Phase4RetryAction: ActionFallbackNextChannel},
+		{Phase3RequestRewrite: []map[string]any{{"mode": "delete", "path": "a"}}, Phase4RetryAction: action(ActionRetrySameChannel)},
+		{Phase3RequestRewrite: []map[string]any{{"mode": "delete", "path": "b"}}, Phase4RetryAction: action(ActionFallbackNextChannel)},
 	}
-	_, matched, action, _ := CollectRewrites(rules, map[string]any{}, respCtx)
-	assert.True(t, matched)
-	assert.Equal(t, ActionFallbackNextChannel, action, "fallback wins when any matched rule requests it")
+	d := CollectRewrites(rules, map[string]any{}, respCtx)
+	assert.True(t, d.Matched)
+	assert.Equal(t, ActionRetrySameChannel, d.Action, "first matched rule's action wins")
+	assert.Equal(t, 0, d.MatchedIndex)
+	require.Len(t, d.Rewrites, 1)
+	assert.Equal(t, "a", d.Rewrites[0]["path"], "only the first matched rule's rewrites are staged")
+}
+
+func TestCollectRewritesReturnError(t *testing.T) {
+	respCtx := ResponseContext(400, "boom", "claude")
+
+	withStatus := dto.RetryRule{
+		Phase2ResponseConditions: phase("AND", cond("status_code", "full", float64(400))),
+		Phase4RetryAction:        &dto.RetryAction{Action: ActionReturnError, StatusCode: 403, StatusMsg: "blocked by policy"},
+	}
+	d := CollectRewrites([]dto.RetryRule{withStatus}, map[string]any{}, respCtx)
+	assert.True(t, d.Matched)
+	assert.Equal(t, ActionReturnError, d.Action)
+	assert.Equal(t, 403, d.ReturnStatus)
+	assert.Equal(t, "blocked by policy", d.ReturnMessage)
+
+	// Missing/invalid status code falls back to the default (429).
+	missingStatus := dto.RetryRule{
+		Phase2ResponseConditions: phase("AND", cond("status_code", "full", float64(400))),
+		Phase4RetryAction:        &dto.RetryAction{Action: ActionReturnError},
+	}
+	d = CollectRewrites([]dto.RetryRule{missingStatus}, map[string]any{}, respCtx)
+	assert.Equal(t, ActionReturnError, d.Action)
+	assert.Equal(t, defaultReturnErrorStatus, d.ReturnStatus)
+	assert.Empty(t, d.ReturnMessage)
 }
 
 func TestCollectRewrites200HonorsRuleAction(t *testing.T) {
-	// A 200-body trigger must honor the rule's own phase4_retry_action: when the
-	// rule asks for retry_same_channel, the action stays retry_same_channel (no
-	// forced coercion to fallback). An empty phase3 still matches (detect + action).
+	// A 200-body trigger must honor the rule's own phase4 action: when the rule
+	// asks for retry_same_channel, the action stays retry_same_channel (no forced
+	// coercion to fallback). An empty phase3 still matches (detect + action).
 	rule := dto.RetryRule{
 		Phase2ResponseConditions: phase("AND", cond("response_body", "contains", "rate limit")),
-		Phase4RetryAction:        ActionRetrySameChannel,
+		Phase4RetryAction:        action(ActionRetrySameChannel),
 	}
 	respCtx := SuccessContext("openai", 200, "account rate limit exceeded")
-	rewrites, matched, action, _ := CollectRewrites([]dto.RetryRule{rule}, map[string]any{}, respCtx)
-	assert.True(t, matched)
-	assert.Empty(t, rewrites, "no rewrite staged for a detect-only rule")
-	assert.Equal(t, ActionRetrySameChannel, action, "200-body trigger honors the rule's action")
+	d := CollectRewrites([]dto.RetryRule{rule}, map[string]any{}, respCtx)
+	assert.True(t, d.Matched)
+	assert.Empty(t, d.Rewrites, "no rewrite staged for a detect-only rule")
+	assert.Equal(t, ActionRetrySameChannel, d.Action, "200-body trigger honors the rule's action")
 }
 
-func TestCollectRewritesReturnsMatchedRuleIndices(t *testing.T) {
+func TestCollectRewritesReturnsFirstMatchedRuleIndex(t *testing.T) {
 	respCtx := ResponseContext(400, "boom", "claude")
 	rules := []dto.RetryRule{
 		{Phase2ResponseConditions: phase("AND", cond("error_message", "contains", "nope"))},
 		{Phase2ResponseConditions: phase("AND", cond("error_message", "contains", "boom")), Phase3RequestRewrite: []map[string]any{{"mode": "delete", "path": "a"}}},
 		{Phase2ResponseConditions: phase("AND", cond("status_code", "full", float64(400)))},
 	}
-	_, matched, _, indices := CollectRewrites(rules, map[string]any{}, respCtx)
-	assert.True(t, matched)
-	assert.Equal(t, []int{1, 2}, indices, "only matched rule indices are returned, in order")
+	d := CollectRewrites(rules, map[string]any{}, respCtx)
+	assert.True(t, d.Matched)
+	assert.Equal(t, 1, d.MatchedIndex, "only the first matching rule is selected, later matches ignored")
+	require.Len(t, d.Rewrites, 1)
+	assert.Equal(t, "a", d.Rewrites[0]["path"])
 }
 
 func TestShouldTriggerOnBody(t *testing.T) {
@@ -179,8 +214,8 @@ func TestCollectRewritesInvalidConditionIsGraceful(t *testing.T) {
 		},
 		Phase3RequestRewrite: []map[string]any{{"mode": "delete", "path": "x"}},
 	}}
-	rewrites, matched, action, _ := CollectRewrites(rules, map[string]any{}, ResponseContext(400, "boom", "claude"))
-	assert.False(t, matched, "unparseable condition -> rule skipped")
-	assert.Empty(t, rewrites)
-	assert.Equal(t, ActionRetrySameChannel, action)
+	d := CollectRewrites(rules, map[string]any{}, ResponseContext(400, "boom", "claude"))
+	assert.False(t, d.Matched, "unparseable condition -> rule skipped")
+	assert.Empty(t, d.Rewrites)
+	assert.Equal(t, ActionRetrySameChannel, d.Action)
 }

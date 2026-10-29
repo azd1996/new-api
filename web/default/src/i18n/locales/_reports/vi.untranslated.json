@@ -15,6 +15,7 @@
   "Filter by customer ID or name...": "Filter by customer ID or name...",
   "Force the 1-hour prompt-cache TTL for the listed group and model combinations (Claude). Leave empty to disable.": "Force the 1-hour prompt-cache TTL for the listed group and model combinations (Claude). Leave empty to disable.",
   "Leave blank to keep the stored password": "Leave blank to keep the stored password",
+  "Log full request/response bodies only for the listed API key (token name) + model pairs, even when global Debug Mode is off. Both fields are required per rule; add multiple rows to cover more scopes. Leave empty to disable scoped debug logging.": "Log full request/response bodies only for the listed API key (token name) + model pairs, even when global Debug Mode is off. Both fields are required per rule; add multiple rows to cover more scopes. Leave empty to disable scoped debug logging.",
   "No customers configured. Add your first customer to get started.": "No customers configured. Add your first customer to get started.",
   "Parameter template content must be a JSON object or array": "Parameter template content must be a JSON object or array",
   "Per-model discount multipliers that override the default.": "Per-model discount multipliers that override the default.",

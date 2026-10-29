@@ -5,6 +5,15 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-10-29]
+
+### 新增 Added
+- **重试覆盖规则新增「终止并返回指定错误码」动作（`return_error`）**：此前 `phase4_retry_action` 只有「重试当前渠道」`retry_same_channel` 与「兜底下一渠道」`fallback_next_channel` 两种动作。现新增第三种 `return_error`——命中即**终止全部重试**，把失败响应重写为配置的 HTTP 状态码（及可选消息）返回给调用方。该动作**不钉渠道、不重置预算、不改写请求体**；走正常错误返回路径（预扣费在顶层照常退还、不计费）。审计日志额外记录 `return_status`/`return_message`，`status_code` 仍记原始上游状态码（触发原因）。实现见 `relay/retryrule/retryrule.go`（`ActionReturnError` + 缺省/越界状态码回退 429）、`controller/retry_fallback.go`（终止时重写 `apiErr` 并让主循环 `break`）。
+- **`phase4_retry_action` 兼容字符串与对象两种写法**：可继续写字符串（如 `"fallback_next_channel"`），也可写对象 `{"action":"return_error","status_code":429,"status_msg":"..."}`。新增 `dto.RetryAction` 自定义 `UnmarshalJSON`（容错解析：坏值回落零值，避免因单条规则写错导致 `Channel.GetSetting` 丢弃整段渠道 setting）与 `MarshalJSON`（仅含 action 时回落为字符串形式，保持旧配置序列化不变）。
+
+### 优化 Changed
+- **重试覆盖动作裁决改为「首条命中生效」**：规则数组现按**优先级顺序**解释——一次失败响应只采用**首条** phase1&2 均命中的规则，由该规则的 phase3 改写与 phase4 动作**全权决定**，命中即停、不再看后续规则。此前的语义是「任一命中规则为 `fallback_next_channel` 则整体兜底，且 phase3 改写跨所有命中规则叠加」，会让规则顺序失效、并可能让宽泛的 fallback 规则静默压掉更具体的 retry 规则；新语义更可预测，顺序即优先级。`retryrule.CollectRewrites` 改为返回 `Decision{Matched,Rewrites,Action,ReturnStatus,ReturnMessage,MatchedIndex}`；`maybeApplyRetryRuleFallback` 改为返回 `(retry, terminate, detail)`，主循环遇 terminate 直接 `break`。审计日志 `rule_ids` 变为单元素（首条命中规则序号）。设计见 `docs/retry-override-design.md`。
+
 ## [2026-10-28]
 
 ### 优化 Changed

@@ -15,7 +15,10 @@ type RetryRulesSectionProps = {
 // Sample four-phase rule: on a Claude 400 whose error message mentions
 // "thinking", strip thinking / redacted_thinking blocks from the request and
 // retry the same channel. phase1 filters the request (here: any request),
-// phase2 matches the response, phase3 rewrites the body, phase4 picks the action.
+// phase2 matches the response, phase3 rewrites the body, phase4 picks the
+// action. phase4_retry_action also accepts the object form
+// {"action":"return_error","status_code":429,"status_msg":"..."} to stop
+// retrying and return a fixed error to the caller.
 const RETRY_RULE_TEMPLATE = JSON.stringify(
   [
     {
@@ -41,6 +44,21 @@ const RETRY_RULE_TEMPLATE = JSON.stringify(
       ],
       phase4_retry_action: 'retry_same_channel',
     },
+    {
+      description: 'Stop retrying on a hard policy block and return 451',
+      phase2_response_conditions: {
+        conditions: [
+          { path: 'status_code', mode: 'full', value: 403 },
+          { path: 'error_message', mode: 'contains', value: 'policy' },
+        ],
+        logic: 'AND',
+      },
+      phase4_retry_action: {
+        action: 'return_error',
+        status_code: 451,
+        status_msg: 'Blocked by policy',
+      },
+    },
   ],
   null,
   2
@@ -64,12 +82,12 @@ export function RetryRulesSection(props: RetryRulesSectionProps) {
           </span>
           <p className='text-sm text-muted-foreground'>
             {t(
-              'A JSON array of four-phase rules. Each rule runs in order: phase1_request_condition filters by request (model / relay_format / group); phase2_response_conditions matches the upstream response (status_code / error_message / response_body); phase3_request_rewrite rewrites the request body; phase4_retry_action is "retry_same_channel" (default) or "fallback_next_channel". All phase conditions use the same syntax as parameter override, and omitting "logic" defaults to OR. Leave empty to disable.'
+              'A JSON array of priority-ordered four-phase rules. The FIRST rule whose phase1_request_condition (model / relay_format / group) and phase2_response_conditions (status_code / error_message / response_body) both match fully decides the outcome: its phase3_request_rewrite rewrites the request body and its phase4_retry_action runs. phase4_retry_action is "retry_same_channel" (default), "fallback_next_channel", or the object form {"action":"return_error","status_code":429,"status_msg":"..."} to stop retrying and return a fixed error to the caller. All phase conditions use the same syntax as parameter override, and omitting "logic" defaults to OR. Leave empty to disable.'
             )}
           </p>
           <p className='text-sm text-muted-foreground'>
             {t(
-              'To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a phase2 "response_body" condition with status_code 200; such 200-body matches honor phase4_retry_action (default "retry_same_channel"). "fallback_next_channel" requires RetryTimes > 0 and another available channel.'
+              'To catch an error returned inside a 200 response body (e.g. a rate-limit message), add a phase2 "response_body" condition with status_code 200; such 200-body matches honor phase4_retry_action (default "retry_same_channel"). "fallback_next_channel" requires RetryTimes > 0 and another available channel; "return_error" stops retrying immediately and returns the configured status_code (default 429).'
             )}
           </p>
         </div>
