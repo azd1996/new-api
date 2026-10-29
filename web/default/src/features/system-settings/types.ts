@@ -333,10 +333,21 @@ export type BillingSettings = {
   'checkin_setting.max_quota': number
 }
 
+export type ProxyType = 'normal' | 'tp' | 'force_http'
+
 export type ProxyPoolEntry = {
   alias: string
   url: string
   description?: string
+  // proxy_type selects forwarding behavior. 'normal' (default) follows the
+  // target scheme; 'tp' reads the target protocol from the `scheme` header;
+  // 'force_http' blindly downgrades an https target to http.
+  proxy_type?: ProxyType
+  // auth: optional credential; sent as X-Tp-Authorization for tp proxies.
+  auth?: string
+  // locked: once true, ops froze this entry — the admin UI forbids editing any
+  // field except description and offers no unlock. Add a new entry to change it.
+  locked?: boolean
 }
 
 export type ProxyHealthStatus = 'healthy' | 'unknown' | 'unhealthy'

@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -306,6 +307,39 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 	}
 }
 
+// applySchemeHeaderProxyRewrite adapts an outbound request for a "tp" proxy that
+// does not follow the target URL scheme but reads the target protocol from the
+// `scheme` request header (see docs/proxy-pool.md). The URL scheme is downgraded
+// to http so the Go transport forwards it as a plain forward-proxy request
+// instead of opening a CONNECT tunnel; the tp proxy re-originates TLS to the
+// upstream based on the `scheme` header. tpAuth is sent as X-Tp-Authorization.
+func applySchemeHeaderProxyRewrite(req *http.Request, tpAuth string) {
+	if req == nil || req.URL == nil {
+		return
+	}
+	originalScheme := req.URL.Scheme
+	req.Header.Set("scheme", originalScheme)
+	req.Header.Set("host", req.URL.Host)
+	if tpAuth != "" {
+		req.Header.Set("X-Tp-Authorization", tpAuth)
+	}
+	if strings.EqualFold(originalScheme, "https") {
+		req.URL.Scheme = "http"
+	}
+}
+
+// forceHTTPProxyScheme implements the "force_http" proxy type: it behaves like a
+// normal proxy but blindly downgrades an https target URL to http before
+// forwarding. Unlike applySchemeHeaderProxyRewrite it adds no tp headers.
+func forceHTTPProxyScheme(req *http.Request) {
+	if req == nil || req.URL == nil {
+		return
+	}
+	if strings.EqualFold(req.URL.Scheme, "https") {
+		req.URL.Scheme = "http"
+	}
+}
+
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
@@ -492,6 +526,15 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		c.Set("used_proxy_url", proxyURL)
 		if proxyAlias != "" {
 			c.Set("used_proxy_alias", proxyAlias)
+		}
+		// Adapt the request to the resolved proxy's forwarding type. tp reads the
+		// target protocol from the `scheme` header; force_http blindly downgrades
+		// an https target to http; normal needs no rewrite.
+		switch proxyType, proxyAuth := service.ProxyBehaviorForAlias(proxyAlias); proxyType {
+		case system_setting.ProxyTypeTp:
+			applySchemeHeaderProxyRewrite(req, proxyAuth)
+		case system_setting.ProxyTypeForceHTTP:
+			forceHTTPProxyScheme(req)
 		}
 	} else {
 		client = service.GetHttpClient()

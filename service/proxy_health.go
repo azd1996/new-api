@@ -242,6 +242,30 @@ func normalizeProxyAliases(aliases []string) []string {
 	return out
 }
 
+// ProxyBehaviorForAlias returns the configured forwarding type and auth for a
+// named proxy. proxyType is one of system_setting.ProxyType* and defaults to
+// ProxyTypeNormal for an empty alias, an unknown alias, or an unset/invalid
+// type. auth is the entry's credential (sent as X-Tp-Authorization for tp
+// proxies).
+func ProxyBehaviorForAlias(alias string) (proxyType string, auth string) {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return system_setting.ProxyTypeNormal, ""
+	}
+	for _, p := range system_setting.GetProxySetting().Proxies {
+		if strings.TrimSpace(p.Alias) != alias {
+			continue
+		}
+		switch p.ProxyType {
+		case system_setting.ProxyTypeTp, system_setting.ProxyTypeForceHTTP:
+			return p.ProxyType, strings.TrimSpace(p.Auth)
+		default:
+			return system_setting.ProxyTypeNormal, strings.TrimSpace(p.Auth)
+		}
+	}
+	return system_setting.ProxyTypeNormal, ""
+}
+
 func proxyAliasURLMap() map[string]string {
 	proxies := system_setting.GetProxySetting().Proxies
 	m := make(map[string]string, len(proxies))

@@ -29,7 +29,7 @@
 
 ## 3. 存储与配置
 
-- **全局代理表**：`setting/system_setting/proxy_setting.go`，模块名 `proxy_setting`，结构 `ProxySetting{ Proxies []ProxyEntry{Alias,URL,Description} }`。复用 `setting/config` 的反射式 option 持久化（存入 `option` 表的 `proxy_setting.proxies`，值为 JSON 数组），**无需改 model/controller、无 DB 迁移**。`Description` 仅为代理备注，只在代理池配置页展示，不参与解析、不进日志/渠道多选等其他位置。
+- **全局代理表**：`setting/system_setting/proxy_setting.go`，模块名 `proxy_setting`，结构 `ProxySetting{ Proxies []ProxyEntry{Alias,URL,Description,ProxyType,Auth,Locked} }`。复用 `setting/config` 的反射式 option 持久化（存入 `option` 表的 `proxy_setting.proxies`，值为 JSON 数组），**无需改 model/controller、无 DB 迁移**。`Description` 仅为代理备注，只在代理池配置页展示，不参与解析、不进日志/渠道多选等其他位置。`ProxyType`（`normal`/`tp`/`force_http`，空=`normal`）选择转发行为（见 §11）；`Auth` 为可选凭证，tp 代理时作为 `X-Tp-Authorization` 头发出，其余类型当前忽略；`Locked` 见 §12。
 - **渠道引用**：`dto.ChannelSettings.ProxyAliases []string`（json `proxy_aliases,omitempty`），与既有 `Proxy string` 并存，存在渠道 `setting` JSON 里。
 - **前端**：
   - 代理表编辑：`web/default/src/features/system-settings/models/proxy-pool-section.tsx`（挂在「模型」分组，别名+地址多行增删 + 状态/耗时列）。
@@ -89,9 +89,9 @@
 
 - 后端
   - `setting/system_setting/proxy_setting.go` — 全局代理表 + 变更钩子
-  - `service/proxy_health.go` — 健康态/百分位/运行时顺序/`ResolveChannelProxy`/`RecordProxyConnectResult`/`ProxyHealthSnapshot`，并在 `init()` 注册缓存失效钩子
+  - `service/proxy_health.go` — 健康态/百分位/运行时顺序/`ResolveChannelProxy`/`RecordProxyConnectResult`/`ProxyHealthSnapshot`/`ProxyBehaviorForAlias`，并在 `init()` 注册缓存失效钩子
   - `service/http_client.go` — `NewProxyHttpClient`（按 url 缓存）/`ResetProxyClientCache`
-  - `relay/channel/api_request.go` — `doRequest`：解析代理 + httptrace 采样 + 记录结果 + 写 RelayInfo/context
+  - `relay/channel/api_request.go` — `doRequest`：解析代理 + httptrace 采样 + 记录结果 + 写 RelayInfo/context；按代理类型 `applySchemeHeaderProxyRewrite`(tp) / `forceHTTPProxyScheme`(force_http) 在发包前改写（见 §11）
   - `relay/common/relay_info.go` — `UsedProxyURL/UsedProxyAlias`
   - `dto/channel_settings.go` — `ProxyAliases`
   - `controller/proxy.go` + `router/api-router.go` — `GET /api/option/proxy_health`
@@ -126,4 +126,23 @@
 - 收敛期的可见失败数 ≈ 节点数 × 阈值。若要减少，可降低阈值（§5 常量 `proxyFailureThreshold`），代价是对瞬时抖动更敏感（有 60s 冷却兜底）。
 - 若要「停掉某代理后客户端完全无感」，需做**请求内即时故障转移**（连接层失败当次请求立刻改走下一个可用代理），这会消除收敛期的可见失败，但改动较大且流式仅能在首字节前切换。
 - 若要「一个节点学会、全集群立即受益」，需把健康态/顺序放到 Redis 做跨节点共享。
+
+## 11. 代理转发类型（ProxyType：normal / tp / force_http）
+
+`ProxyEntry.ProxyType` 决定「网关如何通过该代理访问目标」，由 `service.ProxyBehaviorForAlias(alias) (proxyType, auth)` 解析，`doRequest` 在解析出代理、`client.Do` 之前按类型改写请求（transport 不变，复用 `NewProxyHttpClient` 与按 url 的 client 缓存；明文代理下 §5 的 httptrace 被动采样 `TLSHandshakeDone` 不触发但 `GotConn` 会，判负逻辑兼容）：
+
+- **`normal`（默认/空）**：follow 目标协议。https 目标走 CONNECT 隧道、端到端 TLS，代理看不到明文。老条目（无 `proxy_type`）即此类，零改动兼容。
+- **`tp`**：不看目标 scheme，按请求头回源（`applySchemeHeaderProxyRewrite`）。设头 `scheme`=目标原始 scheme（http/https 都设）、`host`=目标 host（Go 会并入标准 Host 行）、`X-Tp-Authorization`=`Auth`(非空时)，并把 https 目标 URL 降级为 http（否则 Go 仍开 CONNECT 隧道、tp 头失效）。TLS 在代理侧终结/发起。好处：网关↔代理可明文正向代理、代理统一管出口 TLS 与路由观测；代价：网关↔代理不再端到端 TLS。参考实现 `jomo-ai-gateway/util/http.go` 的 `rewriteForProxy`。
+- **`force_http`**：相比 `normal` 只多一步——把 https 目标 URL **无脑降级为 http**（`forceHTTPProxyScheme`），不加任何 tp 头，其余与普通代理一致。
+
+`Auth` 仅 tp 类型使用（作 `X-Tp-Authorization`，允许为空、空则不发该头）。类型只对**命名代理条目**生效；`alias==""` 的文本框回退代理恒为 `normal`。与 §9 一致只覆盖主 relay 路径 `doRequest`，`DoWssRequest` 走 `websocket.DefaultDialer`、不经 `doRequest`，不受影响。回归测试：`relay/channel/api_request_test.go` 的 `TestApplySchemeHeaderProxyRewrite`/`TestForceHTTPProxyScheme`、`service/proxy_health_test.go` 的 `TestProxyBehaviorForAlias`。
+
+## 12. 条目锁定（防误触，前端强制）
+
+代理池配置页改动影响面大，误触修改已生效代理后果严重。为此每条代理有一个**锁定**开关（`ProxyEntry.Locked`）：
+
+- 运维点「锁定」按钮 → 弹二次确认（不可逆）→ 确认后该条 `locked=true`（**保存后持久化**）。
+- 锁定后：除**备注**外所有字段（别名/地址/类型/Auth）在 UI 置为只读，且**不提供删除按钮**；**不提供解锁入口**（刷新后仍锁定）。
+- 需要修改一条已锁定代理时，只能**新增一条记录**。
+- **强制点在前端**（`proxy-pool-section.tsx`）：禁用输入 + 隐藏删除 + 无解锁 UI。后端只存 `Locked`、不校验——直接改 option JSON 的 API 调用仍可绕过。若需防 API 级篡改（拒绝修改已锁定条目 / 拒绝把 `locked` 改回 false），需在 option 保存路径按别名比对新旧值做服务端校验，属后续增强。
 

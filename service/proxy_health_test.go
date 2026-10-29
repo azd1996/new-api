@@ -82,3 +82,35 @@ func TestProxyFallbackWhenAllCooling(t *testing.T) {
 	require.Equal(t, "", alias, "no alias eligible")
 	require.Equal(t, "socks5://fallback:1", url, "falls back to direct proxy")
 }
+
+// TestProxyBehaviorForAlias verifies forwarding-type resolution by alias:
+// explicit tp/force_http map through, everything else (normal, empty, unknown,
+// unset type) resolves to normal; auth is returned trimmed.
+func TestProxyBehaviorForAlias(t *testing.T) {
+	resetProxyHealthStateForTest(t, []system_setting.ProxyEntry{
+		{Alias: "tp-1", URL: "http://tp:8080", ProxyType: system_setting.ProxyTypeTp, Auth: "  secret  "},
+		{Alias: "fh-1", URL: "http://fh:8080", ProxyType: system_setting.ProxyTypeForceHTTP},
+		{Alias: "plain", URL: "http://p:1", ProxyType: system_setting.ProxyTypeNormal},
+		{Alias: "legacy", URL: "http://l:1"}, // unset type => normal
+	})
+
+	pt, auth := ProxyBehaviorForAlias("tp-1")
+	require.Equal(t, system_setting.ProxyTypeTp, pt)
+	require.Equal(t, "secret", auth, "auth is trimmed")
+
+	pt, auth = ProxyBehaviorForAlias("fh-1")
+	require.Equal(t, system_setting.ProxyTypeForceHTTP, pt)
+	require.Equal(t, "", auth)
+
+	pt, _ = ProxyBehaviorForAlias("plain")
+	require.Equal(t, system_setting.ProxyTypeNormal, pt)
+
+	pt, _ = ProxyBehaviorForAlias("legacy")
+	require.Equal(t, system_setting.ProxyTypeNormal, pt, "unset type defaults to normal")
+
+	pt, _ = ProxyBehaviorForAlias("missing")
+	require.Equal(t, system_setting.ProxyTypeNormal, pt, "unknown alias defaults to normal")
+
+	pt, _ = ProxyBehaviorForAlias("")
+	require.Equal(t, system_setting.ProxyTypeNormal, pt, "empty alias defaults to normal")
+}
