@@ -56,6 +56,7 @@ import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters, LogFilterOperator } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
+import { LogAnalysisDialog } from './log-analysis-dialog'
 import {
   LogsFilterField,
   LogsFilterInput,
@@ -855,7 +856,12 @@ export function CommonLogsFilterBar<TData>(
     <LogsFilterToolbar
       table={props.table}
       stats={props.showStats === false ? undefined : statsBar}
-      actionStart={sensitiveToggle}
+      actionStart={
+        <>
+          <LogAnalysisDialog />
+          {sensitiveToggle}
+        </>
+      }
       primaryFilters={
         <div className='flex min-w-0 flex-1 flex-col gap-2 sm:flex-row'>
           <div className='min-w-0 flex-[7]'>{dateRangeFilter}</div>

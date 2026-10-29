@@ -26,6 +26,7 @@ import type {
   GetLogStatsResponse,
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
+  LogAnalysisResponse,
   SessionLogSearchQuery,
   SessionLogSearchResult,
   SessionLogSearchStatus,
@@ -86,6 +87,18 @@ export const getLogStats = (params: GetLogStatsParams = {}) =>
 export const getUserLogStats = (
   params: Omit<GetLogStatsParams, 'username' | 'channel'> = {}
 ) => fetchLogStats('/api/log', params, false)
+
+// getLogsAnalysis aggregates the same filtered consume logs the list shows into
+// the prompt-size latency/FRT tables and the cache-hit table. Admin only.
+export async function getLogsAnalysis(
+  params: GetLogsParams = {}
+): Promise<LogAnalysisResponse> {
+  const queryParams = buildQueryParams(
+    params as unknown as Record<string, unknown>
+  )
+  const res = await api.get(`/api/log/analysis?${queryParams}`)
+  return res.data
+}
 
 // ============================================================================
 // Session-ID Log Search APIs (admin only, async + file-cached)

@@ -91,6 +91,32 @@ func GetAllLogs(c *gin.Context) {
 	return
 }
 
+// GetLogsAnalysis aggregates the admin log list (same filter set as GetAllLogs,
+// scoped to consume logs) into the prompt-size latency/FRT tables and the
+// cache-hit table shown in the log-analysis popup. Admin only.
+func GetLogsAnalysis(c *gin.Context) {
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	filters := parseLogFilters(c)
+	if err := parseAdminRetryTriggered(c, &filters); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	statusCode, _ := strconv.Atoi(c.Query("status_code"))
+	result, err := model.GetLogAnalysis(
+		startTimestamp, endTimestamp, filters,
+		c.Query("request_id"), c.Query("upstream_request_id"), statusCode,
+		c.Query("error_keyword"), c.Query("customer_id"), c.Query("customer_name"),
+		c.Query("downstream_request_id"), c.Query("downstream_trace_tag"),
+		c.Query("error_signature_hash"),
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
 func GetUserLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	userId := c.GetInt("id")
