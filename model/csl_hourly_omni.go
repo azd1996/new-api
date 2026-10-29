@@ -182,8 +182,8 @@ func getCslHourlyFromOmni(params CslHourlyQuery) ([]*CslHourly, error) {
 // generates. Business time therefore cannot be expressed through the window;
 // it goes into filterParams as an explicit start_time list. filterParams has no
 // range operator, but a multi-value `equal` becomes SQL `IN (...)`, and
-// start_time is always hour-aligned, so a range of at most 7 days enumerates to
-// at most 169 values.
+// start_time is always hour-aligned, so a range of at most 60 days enumerates to
+// at most 1441 values.
 //
 // The window still has to be supplied, so it is set to
 // [earliest requested hour, now + slack): a summary row is always written after
@@ -236,9 +236,9 @@ func buildCslHourlyOmniRequest(params CslHourlyQuery, metric string, pageSize, p
 }
 
 // cslHourlyMaxHours bounds the enumerated start_time list. The controller
-// already caps the span at 7 days; this guards the model layer independently,
+// already caps the span at 60 days; this guards the model layer independently,
 // because an unbounded list would be turned into an unbounded SQL IN clause.
-const cslHourlyMaxHours = 24*7 + 1
+const cslHourlyMaxHours = 24*60 + 1
 
 // cslHourlyStartTimes enumerates the hour-aligned start_time values covered by
 // [start, end], as decimal strings for filterParams.

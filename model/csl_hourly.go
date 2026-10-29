@@ -1,6 +1,10 @@
 package model
 
-import "github.com/QuantumNous/new-api/common"
+import (
+	"sort"
+
+	"github.com/QuantumNous/new-api/common"
+)
 
 // CslHourly is the ClickHouse hourly aggregated call log written by offline jobs.
 type CslHourly struct {
@@ -69,4 +73,94 @@ func GetCslHourly(params CslHourlyQuery) ([]*CslHourly, error) {
 	}
 	err := query.Order("start_time DESC").Find(&rows).Error
 	return rows, err
+}
+
+// CslMonthlyQuery selects the hourly rows that a monthly per-user total is
+// aggregated from. StartTimestamp/EndTimestamp bound the month (inclusive, in
+// Unix seconds); GroupName scopes the result to one group the way the admin
+// hourly query does.
+type CslMonthlyQuery struct {
+	StartTimestamp int64
+	EndTimestamp   int64
+	GroupName      string
+	ModelName      string
+}
+
+// CslMonthlyUserTotal is one user's total settlement spend over the queried
+// month, in both currencies the hourly rows carry.
+type CslMonthlyUserTotal struct {
+	UserId             int     `json:"user_id"`
+	Username           string  `json:"username"`
+	SettlementPriceCny float64 `json:"settlement_price_cny"`
+	SettlementPriceUsd float64 `json:"settlement_price_usd"`
+}
+
+// cslMonthlyChunkSeconds is the width of one GetCslHourly window used to sweep a
+// month. It is 168 hours so each window's enumerated start_time list on the
+// OmniDataSearch path stays well under cslHourlyMaxHours, keeping each upstream
+// IN clause modest regardless of how high that cap is raised.
+const cslMonthlyChunkSeconds = int64(168 * 3600)
+
+// CSL_MONTHLY_PLACEHOLDER
+
+// GetCslMonthlyUserTotals returns each user's total settlement spend over the
+// month described by params, summed per user.
+//
+// The month is swept in contiguous <=168-hour windows, each fetched through
+// GetCslHourly, so the OmniDataSearch start_time IN clause stays small per
+// request no matter how long the month is. Because a row's business key includes
+// its hour-aligned start_time, every hour belongs to exactly one window;
+// GetCslHourly already keeps only the newest rerun per business key within a
+// window, so concatenating windows never double-counts a rerun and never splits
+// one.
+func GetCslMonthlyUserTotals(params CslMonthlyQuery) ([]*CslMonthlyUserTotal, error) {
+	startHour := params.StartTimestamp - params.StartTimestamp%3600
+	endHour := params.EndTimestamp - params.EndTimestamp%3600
+	if startHour <= 0 || endHour < startHour {
+		return []*CslMonthlyUserTotal{}, nil
+	}
+
+	totals := make(map[int]*CslMonthlyUserTotal)
+	for winStart := startHour; winStart <= endHour; winStart += cslMonthlyChunkSeconds {
+		winEnd := winStart + cslMonthlyChunkSeconds - 3600
+		if winEnd > endHour {
+			winEnd = endHour
+		}
+		rows, err := GetCslHourly(CslHourlyQuery{
+			StartTimestamp: winStart,
+			EndTimestamp:   winEnd,
+			GroupName:      params.GroupName,
+			ModelName:      params.ModelName,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			total, ok := totals[row.UserId]
+			if !ok {
+				total = &CslMonthlyUserTotal{UserId: row.UserId, Username: row.Username}
+				totals[row.UserId] = total
+			}
+			total.SettlementPriceCny += row.SettlementPriceCny
+			total.SettlementPriceUsd += row.SettlementPriceUsd
+		}
+	}
+
+	result := make([]*CslMonthlyUserTotal, 0, len(totals))
+	for _, total := range totals {
+		result = append(result, total)
+	}
+	// Biggest spender first; username/user_id only make the order total so a
+	// repeated query returns rows in one order.
+	sort.Slice(result, func(i, j int) bool {
+		a, b := result[i], result[j]
+		if a.SettlementPriceCny != b.SettlementPriceCny {
+			return a.SettlementPriceCny > b.SettlementPriceCny
+		}
+		if a.Username != b.Username {
+			return a.Username < b.Username
+		}
+		return a.UserId < b.UserId
+	})
+	return result, nil
 }
