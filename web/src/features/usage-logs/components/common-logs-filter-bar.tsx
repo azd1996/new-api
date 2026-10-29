@@ -180,6 +180,7 @@ function buildSearchSourceKey(values: {
 
 interface CommonLogsFilterBarProps<TData> {
   table: Table<TData>
+  showStats?: boolean
 }
 
 export function CommonLogsFilterBar<TData>(
@@ -717,7 +718,7 @@ export function CommonLogsFilterBar<TData>(
     <LogsFilterToolbar
       table={props.table}
       compactMobile
-      stats={statsBar}
+      stats={props.showStats === false ? undefined : statsBar}
       actionStart={sensitiveToggle}
       actionEnd={<ExportLogsDialog />}
       primaryFilters={

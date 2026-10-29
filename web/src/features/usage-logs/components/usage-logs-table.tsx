@@ -51,6 +51,7 @@ import { CommonLogsFilterBar } from './common-logs-filter-bar'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
 import { useLogsViewScope, type LogsViewAccess } from './usage-logs-provider'
+import { UsageLogsStatistics } from './usage-logs-statistics'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 
@@ -82,9 +83,13 @@ function deserializeLogTypeFilter(value: unknown): unknown[] {
 
 interface UsageLogsTableProps {
   logCategory: LogCategory
+  viewMode?: 'list' | 'stats'
 }
 
-export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
+export function UsageLogsTable({
+  logCategory,
+  viewMode = 'list',
+}: UsageLogsTableProps) {
   const { t } = useTranslation()
   const getColumnClassName = useCallback(
     () => (logCategory === 'common' ? 'py-2' : 'py-3.5'),
@@ -171,6 +176,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       searchParams,
       t,
     ],
+    enabled: viewMode === 'list',
     queryFn: async () => {
       const result = await fetchLogsByCategory({
         logCategory,
@@ -226,6 +232,18 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const isCommon = logCategory === 'common'
+  const commonToolbar = (
+    <CommonLogsFilterBar table={table} showStats={viewMode !== 'stats'} />
+  )
+
+  if (isCommon && viewMode === 'stats') {
+    return (
+      <div className='flex h-full min-h-0 flex-col gap-4'>
+        {commonToolbar}
+        <UsageLogsStatistics />
+      </div>
+    )
+  }
 
   return (
     <DataTablePage
@@ -252,7 +270,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       }
       toolbar={
         isCommon ? (
-          <CommonLogsFilterBar table={table} />
+          commonToolbar
         ) : (
           <TaskLogsFilterBar table={table} logCategory={logCategory} />
         )
