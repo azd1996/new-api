@@ -574,7 +574,7 @@ export interface LogCacheCell {
   eligible_rate: number
   cache_read: number
   input_all: number
-  input_warm: number
+  input_eligible: number
   hit: number
   cold_write: number
   too_small: number
@@ -584,6 +584,19 @@ export interface LogCacheCell {
 export interface LogCacheTable {
   total: LogCacheCell
   channels: LogCacheCell[]
+}
+
+export interface LogSuccessCell {
+  total: number
+  success: number
+  error: number
+  retry_override: number
+  rate: number
+}
+
+export interface LogSuccessTable {
+  total: LogSuccessCell
+  channels: LogSuccessCell[]
 }
 
 export interface CacheMinTokenRule {
@@ -602,6 +615,7 @@ export interface LogAnalysisResult {
     p99: LogLatencyTable
   }
   cache: LogCacheTable
+  success: LogSuccessTable
   thresholds: CacheMinTokenRule[]
   threshold_default: number
   scanned: number

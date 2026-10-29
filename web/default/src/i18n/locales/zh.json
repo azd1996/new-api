@@ -1,6 +1,11 @@
 {
   "translation": {
     "Analysis": "统计分析",
+    "Success Rate": "成功率",
+    "Total requests": "总请求数",
+    "Success (consume)": "成功（消耗）",
+    "Retry override": "重试覆盖",
+    "Total requests ≈ consume + error - retry-override (retried intermediate attempts); success = consume count. Success rate = success / total.": "总请求数 ≈ 消耗 + 错误 - 重试覆盖（被重试的中间尝试）；成功 = 消耗数。成功率 = 成功 / 总数。",
     "Hit": "命中",
     "Series": "系列",
     "Cold write": "冷写入",
@@ -11,7 +16,7 @@
     "Cache minimum token thresholds (by model)": "各模型最小可缓存 token 阈值",
     "Min cacheable tokens": "最小可缓存 tokens",
     "Default (other models)": "默认（其他模型）",
-    "Rate = cache_read / total input tokens (for Claude, prompt_tokens excludes cache, so total = prompt + cache_read + cache_creation; OpenAI already includes cached tokens in prompt). Eligible excludes too-small and cold-write requests. OpenAI cold writes cannot be detected and fall into \"other miss\".": "命中率 = cache_read / 总输入 tokens（Claude 的 prompt_tokens 不含缓存，故总输入 = prompt + cache_read + cache_creation；OpenAI 的 prompt 已含缓存读取）。有效命中率剔除太小与冷写入请求。OpenAI 的冷写入无法识别，会计入“其他未命中”。",
+    "Rate = cache_read / total input tokens (for Claude, prompt_tokens excludes cache, so total = prompt + cache_read + cache_creation; OpenAI already includes cached tokens in prompt). Eligible excludes only too-small requests; cold writes count as misses. OpenAI cold writes cannot be detected and fall into \"other miss\".": "命中率 = cache_read / 总输入 tokens（Claude 的 prompt_tokens 不含缓存，故总输入 = prompt + cache_read + cache_creation；OpenAI 的 prompt 已含缓存读取）。有效命中率仅剔除太小请求，冷写入计为未命中。OpenAI 的冷写入无法识别，会计入“其他未命中”。",
     "Log Analysis": "日志统计分析",
     "Prompt-size latency & cache-hit analysis of the filtered logs": "针对筛选结果按 prompt 规模的延迟与缓存命中率分析",
     "Failed to load analysis": "加载统计分析失败",

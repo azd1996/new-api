@@ -6,6 +6,8 @@ import (
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
+
+	"gorm.io/gorm"
 )
 
 // logAnalysisScanLimit caps how many consume-log rows a single analysis request
@@ -71,25 +73,44 @@ type LogLatencyTable struct {
 // input tokens (for Claude, logged prompt_tokens excludes cache read/creation,
 // so total input = prompt + cache_read + cache_creation; for OpenAI the cached
 // tokens are already part of prompt_tokens). GrossRate uses all requests'
-// input; EligibleRate uses only "warm-eligible" input (excludes requests that
-// were too small to cache and cold cache-writes). The four counts classify
-// every request so the single rate has context.
+// input; EligibleRate excludes only the structurally-too-small requests (cold
+// writes are still counted — from the customer's view, frequent upstream key
+// rotation that forces cold writes is a real cache-hit loss). The four counts
+// classify every request so the rates have context.
 type LogCacheCell struct {
-	GrossRate    float64 `json:"gross_rate"`
-	EligibleRate float64 `json:"eligible_rate"`
-	CacheRead    int64   `json:"cache_read"`
-	InputAll     int64   `json:"input_all"`
-	InputWarm    int64   `json:"input_warm"`
-	Hit          int     `json:"hit"`
-	ColdWrite    int     `json:"cold_write"`
-	TooSmall     int     `json:"too_small"`
-	OtherMiss    int     `json:"other_miss"`
+	GrossRate     float64 `json:"gross_rate"`
+	EligibleRate  float64 `json:"eligible_rate"`
+	CacheRead     int64   `json:"cache_read"`
+	InputAll      int64   `json:"input_all"`
+	InputEligible int64   `json:"input_eligible"`
+	Hit           int     `json:"hit"`
+	ColdWrite     int     `json:"cold_write"`
+	TooSmall      int     `json:"too_small"`
+	OtherMiss     int     `json:"other_miss"`
 }
 
 // LogCacheTable is the cache-hit breakdown: summary plus per-channel cells.
 type LogCacheTable struct {
 	Total    LogCacheCell   `json:"total"`
 	Channels []LogCacheCell `json:"channels"`
+}
+
+// LogSuccessCell is one success-rate cell. Total is an approximate unique
+// request count = consume + error - retry-override (error logs whose
+// retry-override rule fired, i.e. intermediate retried attempts). Success is
+// the consume count. Rate = success / total.
+type LogSuccessCell struct {
+	Total         int64   `json:"total"`
+	Success       int64   `json:"success"`
+	Error         int64   `json:"error"`
+	RetryOverride int64   `json:"retry_override"`
+	Rate          float64 `json:"rate"`
+}
+
+// LogSuccessTable is the success-rate breakdown: summary plus per-channel cells.
+type LogSuccessTable struct {
+	Total    LogSuccessCell   `json:"total"`
+	Channels []LogSuccessCell `json:"channels"`
 }
 
 // LogAnalysisResult is the full payload for the log-analysis popup: the sorted
@@ -105,6 +126,7 @@ type LogAnalysisResult struct {
 		P99  LogLatencyTable `json:"p99"`
 	} `json:"latency"`
 	Cache            LogCacheTable           `json:"cache"`
+	Success          LogSuccessTable         `json:"success"`
 	Thresholds       []CacheMinTokenRuleView `json:"thresholds"`
 	ThresholdDefault int                     `json:"threshold_default"`
 	Scanned          int                     `json:"scanned"`
@@ -123,13 +145,13 @@ type logAnalysisSamples struct {
 // inputAll / inputWarm sum total input tokens (see LogCacheCell) rather than the
 // raw prompt column, so the hit rate denominator is comparable to cache_read.
 type cacheChannelAgg struct {
-	inputAll  int64
-	inputWarm int64 // total input tokens of hit + other-miss requests (the eligible-warm denominator)
-	cacheRead int64
-	hit       int
-	coldWrite int
-	tooSmall  int
-	otherMiss int
+	inputAll      int64
+	inputEligible int64 // total input tokens excluding only too-small requests (cold writes still counted)
+	cacheRead     int64
+	hit           int
+	coldWrite     int
+	tooSmall      int
+	otherMiss     int
 }
 
 // logAnalysisScanRow holds only the columns the analysis needs from each log.
@@ -216,9 +238,9 @@ func logCacheHitRate(cacheRead, prompt int64) float64 {
 // totalInput is cache_read + cache_creation + prompt for Claude (whose logged
 // prompt_tokens excludes cache read/creation) and just prompt for everyone else
 // (OpenAI already folds cached tokens into prompt_tokens). It is the hit-rate
-// denominator so the rate stays in [0,1]. InputWarm (the eligible-warm
-// denominator) counts only hit + other-miss input, so cold writes and too-small
-// requests don't drag it down.
+// denominator so the rate stays in [0,1]. InputEligible (the eligible-rate
+// denominator) sums every non-too-small request's input — cold writes included,
+// since from the customer's view a forced cold write is a real cache miss.
 func classifyCacheRow(agg *cacheChannelAgg, promptTokens int, cacheRead, cacheCreation, minTokens int64, isClaude bool) {
 	totalInput := int64(promptTokens)
 	if isClaude {
@@ -229,28 +251,29 @@ func classifyCacheRow(agg *cacheChannelAgg, promptTokens int, cacheRead, cacheCr
 	switch {
 	case cacheRead > 0:
 		agg.hit++
-		agg.inputWarm += totalInput
+		agg.inputEligible += totalInput
 	case cacheCreation > 0:
 		agg.coldWrite++
+		agg.inputEligible += totalInput
 	case minTokens > 0 && totalInput < minTokens:
 		agg.tooSmall++
 	default:
 		agg.otherMiss++
-		agg.inputWarm += totalInput
+		agg.inputEligible += totalInput
 	}
 }
 
 func cacheCellFromAgg(agg *cacheChannelAgg) LogCacheCell {
 	return LogCacheCell{
-		GrossRate:    logCacheHitRate(agg.cacheRead, agg.inputAll),
-		EligibleRate: logCacheHitRate(agg.cacheRead, agg.inputWarm),
-		CacheRead:    agg.cacheRead,
-		InputAll:     agg.inputAll,
-		InputWarm:    agg.inputWarm,
-		Hit:          agg.hit,
-		ColdWrite:    agg.coldWrite,
-		TooSmall:     agg.tooSmall,
-		OtherMiss:    agg.otherMiss,
+		GrossRate:     logCacheHitRate(agg.cacheRead, agg.inputAll),
+		EligibleRate:  logCacheHitRate(agg.cacheRead, agg.inputEligible),
+		CacheRead:     agg.cacheRead,
+		InputAll:      agg.inputAll,
+		InputEligible: agg.inputEligible,
+		Hit:           agg.hit,
+		ColdWrite:     agg.coldWrite,
+		TooSmall:      agg.tooSmall,
+		OtherMiss:     agg.otherMiss,
 	}
 }
 
@@ -312,7 +335,31 @@ func GetLogAnalysis(startTimestamp int64, endTimestamp int64, filters LogFilterO
 		return nil, err
 	}
 
-	channels := resolveLogAnalysisChannels(perChannel)
+	// Success-rate counts come from cheap grouped COUNTs over consume + error
+	// logs (not the capped stream), so they stay accurate regardless of the
+	// 500k scan cap. They apply only the type-agnostic core filters (field /
+	// time / request-id / customer / trace-tag), deliberately skipping the
+	// error-drill filters (status_code / error_keyword / error_signature /
+	// retry_triggered) which would otherwise zero out the consume side.
+	consumeCounts, errorCounts, retryOverrideCounts, err := countConsumeErrorByChannel(startTimestamp, endTimestamp, filters, requestId, upstreamRequestId, customerId, customerName, downstreamRequestId, downstreamTraceTag)
+	if err != nil {
+		return nil, err
+	}
+
+	// Channel columns are the union of every channel that produced a consume
+	// sample or any consume/error count, so an error-only channel still shows up
+	// in the success table (its latency/cache cells render as dashes).
+	idSet := make(map[int]bool)
+	for id := range perChannel {
+		idSet[id] = true
+	}
+	for id := range consumeCounts {
+		idSet[id] = true
+	}
+	for id := range errorCounts {
+		idSet[id] = true
+	}
+	channels := resolveLogAnalysisChannels(idSet)
 
 	result := &LogAnalysisResult{
 		Channels:         channels,
@@ -327,10 +374,16 @@ func GetLogAnalysis(startTimestamp int64, endTimestamp int64, filters LogFilterO
 	result.Latency.P90 = newLogLatencyTable(channels)
 	result.Latency.P99 = newLogLatencyTable(channels)
 	result.Cache.Channels = make([]LogCacheCell, len(channels))
+	result.Success.Channels = make([]LogSuccessCell, len(channels))
 
 	var totalAgg cacheChannelAgg
+	var consumeSum, errorSum, retryOverrideSum int64
 	for ci, ch := range channels {
 		buckets := perChannel[ch.Id]
+		if buckets == nil {
+			// Error-only channel (no consume sample) — latency cells stay empty.
+			buckets = &[logAnalysisBucketCount]logAnalysisSamples{}
+		}
 		for b := 0; b < logAnalysisBucketCount; b++ {
 			s := buckets[b]
 			latS := summarizeLogSamples(s.lat)
@@ -346,21 +399,34 @@ func GetLogAnalysis(startTimestamp int64, endTimestamp int64, filters LogFilterO
 		}
 		result.Cache.Channels[ci] = cacheCellFromAgg(agg)
 		totalAgg.inputAll += agg.inputAll
-		totalAgg.inputWarm += agg.inputWarm
+		totalAgg.inputEligible += agg.inputEligible
 		totalAgg.cacheRead += agg.cacheRead
 		totalAgg.hit += agg.hit
 		totalAgg.coldWrite += agg.coldWrite
 		totalAgg.tooSmall += agg.tooSmall
 		totalAgg.otherMiss += agg.otherMiss
+
+		consume := consumeCounts[ch.Id]
+		errs := errorCounts[ch.Id]
+		retryOverride := retryOverrideCounts[ch.Id]
+		result.Success.Channels[ci] = successCellFrom(consume, errs, retryOverride)
+		consumeSum += consume
+		errorSum += errs
+		retryOverrideSum += retryOverride
 	}
 	result.Cache.Total = cacheCellFromAgg(&totalAgg)
+	result.Success.Total = successCellFrom(consumeSum, errorSum, retryOverrideSum)
 
 	// The summary ("汇总") column pools every channel's samples per bucket, so it
 	// needs the merged distribution rather than an average of per-channel stats.
 	for b := 0; b < logAnalysisBucketCount; b++ {
 		var totalLat, totalFrt []float64
 		for _, ch := range channels {
-			s := perChannel[ch.Id][b]
+			buckets := perChannel[ch.Id]
+			if buckets == nil {
+				continue
+			}
+			s := buckets[b]
 			totalLat = append(totalLat, s.lat...)
 			totalFrt = append(totalFrt, s.frt...)
 		}
@@ -388,12 +454,12 @@ func newLogLatencyTable(channels []LogAnalysisChannel) LogLatencyTable {
 	return table
 }
 
-// resolveLogAnalysisChannels turns the scanned channel ids into sorted columns,
+// resolveLogAnalysisChannels turns a channel-id set into sorted columns,
 // resolving display names from the channel cache or a single bulk query (the
 // same source GetAllLogs uses). Channels sort by name, then id as a tiebreak.
-func resolveLogAnalysisChannels(perChannel map[int]*[logAnalysisBucketCount]logAnalysisSamples) []LogAnalysisChannel {
-	ids := make([]int, 0, len(perChannel))
-	for id := range perChannel {
+func resolveLogAnalysisChannels(idSet map[int]bool) []LogAnalysisChannel {
+	ids := make([]int, 0, len(idSet))
+	for id := range idSet {
 		ids = append(ids, id)
 	}
 
@@ -433,4 +499,95 @@ func resolveLogAnalysisChannels(perChannel map[int]*[logAnalysisBucketCount]logA
 		return channels[i].Name < channels[j].Name
 	})
 	return channels
+}
+
+// successCellFrom builds a success cell from the raw per-channel counts.
+// Total approximates unique requests as consume + error - retry-override (the
+// retried intermediate error attempts), clamped at 0; Success is the consume
+// count; Rate is success / total.
+func successCellFrom(consume, errs, retryOverride int64) LogSuccessCell {
+	total := consume + errs - retryOverride
+	if total < 0 {
+		total = 0
+	}
+	rate := 0.0
+	if total > 0 {
+		rate = float64(consume) / float64(total)
+	}
+	return LogSuccessCell{
+		Total:         total,
+		Success:       consume,
+		Error:         errs,
+		RetryOverride: retryOverride,
+		Rate:          rate,
+	}
+}
+
+// countConsumeErrorByChannel returns per-channel counts of consume logs, error
+// logs, and retry-override-triggered error logs, for the success-rate table.
+// It applies only the type-agnostic core filters (field / time / request-id /
+// customer / trace-tag) so the consume side is not zeroed out by error-only
+// drill filters.
+func countConsumeErrorByChannel(startTimestamp, endTimestamp int64, filters LogFilterOptions, requestId, upstreamRequestId, customerId, customerName, downstreamRequestId, downstreamTraceTag string) (consume, errs, retryOverride map[int]int64, err error) {
+	applyCore := func(logType int) (*gorm.DB, error) {
+		tx := LOG_DB.Where("logs.type = ?", logType)
+		var e error
+		if tx, e = applyLogFilterOptions(tx, filters, "logs."); e != nil {
+			return nil, e
+		}
+		if requestId != "" {
+			tx = tx.Where("logs.request_id = ?", requestId)
+		}
+		if upstreamRequestId != "" {
+			tx = tx.Where("logs.upstream_request_id = ?", upstreamRequestId)
+		}
+		if startTimestamp != 0 {
+			tx = tx.Where("logs.created_at >= ?", startTimestamp)
+		}
+		if endTimestamp != 0 {
+			tx = tx.Where("logs.created_at <= ?", endTimestamp)
+		}
+		return applyTraceTagFilters(tx, "logs.other", customerId, customerName, downstreamRequestId, downstreamTraceTag), nil
+	}
+
+	groupCount := func(tx *gorm.DB) (map[int]int64, error) {
+		var rows []struct {
+			ChannelId int   `gorm:"column:channel_id"`
+			Cnt       int64 `gorm:"column:cnt"`
+		}
+		if e := tx.Model(&Log{}).Select("logs.channel_id as channel_id, count(*) as cnt").Group("logs.channel_id").Scan(&rows).Error; e != nil {
+			return nil, e
+		}
+		m := make(map[int]int64, len(rows))
+		for _, r := range rows {
+			m[r.ChannelId] = r.Cnt
+		}
+		return m, nil
+	}
+
+	consumeTx, err := applyCore(LogTypeConsume)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if consume, err = groupCount(consumeTx); err != nil {
+		return nil, nil, nil, err
+	}
+
+	errorTx, err := applyCore(LogTypeError)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if errs, err = groupCount(errorTx); err != nil {
+		return nil, nil, nil, err
+	}
+
+	retryTx, err := applyCore(LogTypeError)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if retryOverride, err = groupCount(retryTx.Where("logs.retry_triggered = ?", true)); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return consume, errs, retryOverride, nil
 }

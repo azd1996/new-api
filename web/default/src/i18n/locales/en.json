@@ -1,6 +1,11 @@
 {
   "translation": {
     "Analysis": "Analysis",
+    "Success Rate": "Success Rate",
+    "Total requests": "Total requests",
+    "Success (consume)": "Success (consume)",
+    "Retry override": "Retry override",
+    "Total requests ≈ consume + error - retry-override (retried intermediate attempts); success = consume count. Success rate = success / total.": "Total requests ≈ consume + error - retry-override (retried intermediate attempts); success = consume count. Success rate = success / total.",
     "Hit": "Hit",
     "Series": "Series",
     "Cold write": "Cold write",
@@ -11,7 +16,7 @@
     "Cache minimum token thresholds (by model)": "Cache minimum token thresholds (by model)",
     "Min cacheable tokens": "Min cacheable tokens",
     "Default (other models)": "Default (other models)",
-    "Rate = cache_read / total input tokens (for Claude, prompt_tokens excludes cache, so total = prompt + cache_read + cache_creation; OpenAI already includes cached tokens in prompt). Eligible excludes too-small and cold-write requests. OpenAI cold writes cannot be detected and fall into \"other miss\".": "Rate = cache_read / total input tokens (for Claude, prompt_tokens excludes cache, so total = prompt + cache_read + cache_creation; OpenAI already includes cached tokens in prompt). Eligible excludes too-small and cold-write requests. OpenAI cold writes cannot be detected and fall into \"other miss\".",
+    "Rate = cache_read / total input tokens (for Claude, prompt_tokens excludes cache, so total = prompt + cache_read + cache_creation; OpenAI already includes cached tokens in prompt). Eligible excludes only too-small requests; cold writes count as misses. OpenAI cold writes cannot be detected and fall into \"other miss\".": "Rate = cache_read / total input tokens (for Claude, prompt_tokens excludes cache, so total = prompt + cache_read + cache_creation; OpenAI already includes cached tokens in prompt). Eligible excludes only too-small requests; cold writes count as misses. OpenAI cold writes cannot be detected and fall into \"other miss\".",
     "Log Analysis": "Log Analysis",
     "Prompt-size latency & cache-hit analysis of the filtered logs": "Prompt-size latency & cache-hit analysis of the filtered logs",
     "Failed to load analysis": "Failed to load analysis",

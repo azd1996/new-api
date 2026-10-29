@@ -50,6 +50,8 @@ import type {
   LogCacheTable,
   LogLatencyCell,
   LogLatencyTable,
+  LogSuccessCell,
+  LogSuccessTable,
 } from '../types'
 import { useLogsViewScope } from './usage-logs-provider'
 
@@ -77,6 +79,12 @@ function latencyCellText(cell: LogLatencyCell | undefined): string {
 function formatRate(rate: number, read: number, denominator: number): string {
   if (!denominator || denominator <= 0) return DASH
   return `${(rate * 100).toFixed(1)}% / ${read} / ${denominator}`
+}
+
+// formatPercent renders a 0-1 ratio as a percentage; dash when total is 0.
+function formatPercent(rate: number, total: number): string {
+  if (!total || total <= 0) return DASH
+  return `${(rate * 100).toFixed(1)}%`
 }
 
 function LatencyStatTable(props: {
@@ -248,10 +256,68 @@ function ThresholdsTable(props: {
   )
 }
 
+function SuccessStatTable(props: {
+  title: string
+  table: LogSuccessTable
+  channels: LogAnalysisChannel[]
+  summaryLabel: string
+  metricLabel: string
+  rows: { key: string; label: string; value: (cell: LogSuccessCell) => string }[]
+}) {
+  return (
+    <div className='space-y-2'>
+      <h3 className='text-sm font-medium'>{props.title}</h3>
+      <ScrollArea className='rounded-md border'>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className='whitespace-nowrap'>
+                {props.metricLabel}
+              </TableHead>
+              <TableHead className='whitespace-nowrap font-semibold'>
+                {props.summaryLabel}
+              </TableHead>
+              {props.channels.map((channel) => (
+                <TableHead
+                  key={channel.id}
+                  className='whitespace-nowrap'
+                  title={`#${channel.id}`}
+                >
+                  {channel.name}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {props.rows.map((row) => (
+              <TableRow key={row.key}>
+                <TableCell className='whitespace-nowrap font-medium'>
+                  {row.label}
+                </TableCell>
+                <TableCell className='whitespace-nowrap font-semibold'>
+                  {row.value(props.table.total)}
+                </TableCell>
+                {props.channels.map((channel, index) => {
+                  const cell = props.table.channels[index]
+                  return (
+                    <TableCell key={channel.id} className='whitespace-nowrap'>
+                      {cell ? row.value(cell) : DASH}
+                    </TableCell>
+                  )
+                })}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <ScrollBar orientation='horizontal' />
+      </ScrollArea>
+    </div>
+  )
+}
+
 // LogAnalysisDialog is the admin-only "特殊按钮" on the common log list: it runs
-// a prompt-size latency/FRT + cache-hit analysis over exactly the filtered logs
-// (same filters the list uses) and shows the four statistic tables plus the
-// cache-hit table. Renders nothing for non-admin views.
+// a prompt-size latency/FRT + cache-hit + success-rate analysis over exactly the
+// filtered logs (same filters the list uses). Renders nothing for non-admin.
 export function LogAnalysisDialog() {
   const { t } = useTranslation()
   const { isAdminView: isAdmin } = useLogsViewScope()
@@ -348,6 +414,45 @@ export function LogAnalysisDialog() {
                     summaryLabel={summaryLabel}
                     bucketLabel={t('Prompt Size')}
                   />
+                  <SuccessStatTable
+                    title={t('Success Rate')}
+                    table={result.success}
+                    channels={result.channels}
+                    summaryLabel={summaryLabel}
+                    metricLabel={t('Metric')}
+                    rows={[
+                      {
+                        key: 'rate',
+                        label: t('Success rate'),
+                        value: (cell) => formatPercent(cell.rate, cell.total),
+                      },
+                      {
+                        key: 'total',
+                        label: t('Total requests'),
+                        value: (cell) => String(cell.total),
+                      },
+                      {
+                        key: 'success',
+                        label: t('Success (consume)'),
+                        value: (cell) => String(cell.success),
+                      },
+                      {
+                        key: 'error',
+                        label: t('Error'),
+                        value: (cell) => String(cell.error),
+                      },
+                      {
+                        key: 'retry_override',
+                        label: t('Retry override'),
+                        value: (cell) => String(cell.retry_override),
+                      },
+                    ]}
+                  />
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Total requests ≈ consume + error - retry-override (retried intermediate attempts); success = consume count. Success rate = success / total.'
+                    )}
+                  </p>
                   <CacheStatTable
                     title={t('Cache Hit Rate')}
                     cache={result.cache}
@@ -372,7 +477,7 @@ export function LogAnalysisDialog() {
                           formatRate(
                             cell.eligible_rate,
                             cell.cache_read,
-                            cell.input_warm
+                            cell.input_eligible
                           ),
                       },
                       {
@@ -399,7 +504,7 @@ export function LogAnalysisDialog() {
                   />
                   <p className='text-muted-foreground text-xs'>
                     {t(
-                      'Rate = cache_read / total input tokens (for Claude, prompt_tokens excludes cache, so total = prompt + cache_read + cache_creation; OpenAI already includes cached tokens in prompt). Eligible excludes too-small and cold-write requests. OpenAI cold writes cannot be detected and fall into "other miss".'
+                      'Rate = cache_read / total input tokens (for Claude, prompt_tokens excludes cache, so total = prompt + cache_read + cache_creation; OpenAI already includes cached tokens in prompt). Eligible excludes only too-small requests; cold writes count as misses. OpenAI cold writes cannot be detected and fall into "other miss".'
                     )}
                   </p>
                   <ThresholdsTable
