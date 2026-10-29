@@ -18,13 +18,24 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useRef } from 'react'
+import { Lock, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -34,15 +45,28 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select'
 
 import { getProxyHealth } from '../api'
 import { SettingsForm } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
-import type { ProxyHealthEntry, ProxyPoolEntry } from '../types'
+import type { ProxyHealthEntry, ProxyPoolEntry, ProxyType } from '../types'
 
 const PROXY_SCHEME_REGEX = /^(https?|socks5h?):\/\//i
+
+const PROXY_TYPES: ProxyType[] = ['normal', 'tp', 'force_http']
+
+// i18n keys (English source strings) for each proxy forwarding type.
+const PROXY_TYPE_LABELS: Record<ProxyType, string> = {
+  normal: 'Normal proxy (follow target scheme)',
+  tp: 'tp proxy (scheme header)',
+  force_http: 'Force HTTP (downgrade https to http)',
+}
 
 const proxyPoolSchema = z.object({
   proxies: z
@@ -58,6 +82,9 @@ const proxyPoolSchema = z.object({
             'Must start with http://, https://, socks5:// or socks5h://'
           ),
         description: z.string(),
+        proxy_type: z.enum(['normal', 'tp', 'force_http']),
+        auth: z.string(),
+        locked: z.boolean(),
       })
     )
     .superRefine((proxies, ctx) => {
@@ -89,6 +116,8 @@ type ProxyPoolSectionProps = {
 const normalizeProxies = (proxies: ProxyPoolEntry[]): ProxyPoolEntry[] =>
   proxies.map((proxy) => {
     const description = (proxy.description ?? '').trim()
+    const auth = (proxy.auth ?? '').trim()
+    const proxyType = proxy.proxy_type ?? 'normal'
     const entry: ProxyPoolEntry = {
       alias: proxy.alias.trim(),
       url: proxy.url.trim(),
@@ -96,17 +125,29 @@ const normalizeProxies = (proxies: ProxyPoolEntry[]): ProxyPoolEntry[] =>
     if (description) {
       entry.description = description
     }
+    if (proxyType !== 'normal') {
+      entry.proxy_type = proxyType
+    }
+    if (auth) {
+      entry.auth = auth
+    }
+    if (proxy.locked) {
+      entry.locked = true
+    }
     return entry
   })
 
-// seedProxies ensures every form field is a defined string so the controlled
-// inputs never flip between controlled/uncontrolled (description may be absent
-// on entries saved before this column existed).
+// seedProxies ensures every form field has a defined value so the controlled
+// inputs never flip between controlled/uncontrolled (proxy_type/auth/locked may
+// be absent on entries saved before those columns existed).
 const seedProxies = (proxies: ProxyPoolEntry[]) =>
   proxies.map((proxy) => ({
     alias: proxy.alias ?? '',
     url: proxy.url ?? '',
     description: proxy.description ?? '',
+    proxy_type: proxy.proxy_type ?? 'normal',
+    auth: proxy.auth ?? '',
+    locked: proxy.locked ?? false,
   }))
 
 export function ProxyPoolSection(props: ProxyPoolSectionProps) {
@@ -136,6 +177,15 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
 
   const proxiesWatch = form.watch('proxies')
   const fieldArray = useFieldArray({ control: form.control, name: 'proxies' })
+
+  // lockIndex drives the irreversible-lock confirmation dialog (null = closed).
+  const [lockIndex, setLockIndex] = useState<number | null>(null)
+
+  const confirmLock = () => {
+    if (lockIndex === null) return
+    form.setValue(`proxies.${lockIndex}.locked`, true, { shouldDirty: true })
+    setLockIndex(null)
+  }
 
   useEffect(() => {
     baselineRef.current = normalizeProxies(props.defaultValues.proxies)
@@ -176,106 +226,171 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
             </div>
           ) : (
             <div className='space-y-3'>
-              {fieldArray.fields.map((field, index) => (
-                <div
-                  key={field.id}
-                  className='space-y-2 rounded-md border p-3'
-                >
-                  <div className='flex flex-col gap-2 sm:flex-row sm:items-start'>
-                    <FormField
-                      control={form.control}
-                      name={`proxies.${index}.alias`}
-                      render={({ field: aliasField }) => (
-                        <FormItem className='sm:w-48'>
-                          <FormControl>
-                            <Input
-                              placeholder={t('Alias (e.g. hk-1)')}
-                              {...aliasField}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
+              {fieldArray.fields.map((field, index) => {
+                const locked = Boolean(proxiesWatch?.[index]?.locked)
+                return (
+                  <div
+                    key={field.id}
+                    className='space-y-2 rounded-md border p-3'
+                  >
+                    <div className='flex flex-col gap-2 sm:flex-row sm:items-start'>
+                      <FormField
+                        control={form.control}
+                        name={`proxies.${index}.alias`}
+                        render={({ field: aliasField }) => (
+                          <FormItem className='sm:w-48'>
+                            <FormControl>
+                              <Input
+                                placeholder={t('Alias (e.g. hk-1)')}
+                                disabled={locked}
+                                {...aliasField}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name={`proxies.${index}.url`}
+                        render={({ field: urlField }) => (
+                          <FormItem className='flex-1'>
+                            <FormControl>
+                              <Input
+                                placeholder={t(
+                                  'http://user:pass@host:port or socks5://host:port'
+                                )}
+                                disabled={locked}
+                                {...urlField}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <div className='flex flex-col gap-0.5 text-xs sm:w-56 sm:pt-2'>
+                        {(() => {
+                          const rowAlias = proxiesWatch?.[index]?.alias?.trim()
+                          const health = rowAlias
+                            ? healthByAlias[rowAlias]
+                            : undefined
+                          const status = health?.status ?? 'unknown'
+                          return (
+                            <>
+                              {status === 'healthy' && (
+                                <span className='font-medium text-green-600'>
+                                  {t('Healthy')}
+                                </span>
+                              )}
+                              {status === 'unhealthy' && (
+                                <span className='text-destructive font-medium'>
+                                  {t('Unhealthy')}
+                                </span>
+                              )}
+                              {status === 'unknown' && (
+                                <span className='text-muted-foreground font-medium'>
+                                  {t('Unknown')}
+                                </span>
+                              )}
+                              <span className='text-muted-foreground'>
+                                {health && health.samples > 0
+                                  ? `P50/P90/P99: ${Math.round(health.p50_ms)}/${Math.round(health.p90_ms)}/${Math.round(health.p99_ms)} ms`
+                                  : t('No samples yet')}
+                              </span>
+                            </>
+                          )
+                        })()}
+                      </div>
+                      {locked ? (
+                        <Badge variant='secondary' className='gap-1'>
+                          <Lock className='h-3 w-3' aria-hidden='true' />
+                          {t('Locked')}
+                        </Badge>
+                      ) : (
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='icon'
+                          aria-label={t('Lock proxy')}
+                          onClick={() => setLockIndex(index)}
+                        >
+                          <Lock className='h-4 w-4' />
+                        </Button>
                       )}
-                    />
+                      {!locked && (
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='icon'
+                          aria-label={t('Remove proxy')}
+                          onClick={() => fieldArray.remove(index)}
+                        >
+                          <Trash2 className='h-4 w-4' />
+                        </Button>
+                      )}
+                    </div>
+                    <div className='flex flex-col gap-2 sm:flex-row sm:items-start'>
+                      <FormField
+                        control={form.control}
+                        name={`proxies.${index}.proxy_type`}
+                        render={({ field: typeField }) => (
+                          <FormItem className='sm:w-64'>
+                            <FormControl>
+                              <NativeSelect
+                                className='w-full'
+                                disabled={locked}
+                                {...typeField}
+                              >
+                                {PROXY_TYPES.map((type) => (
+                                  <NativeSelectOption key={type} value={type}>
+                                    {t(PROXY_TYPE_LABELS[type])}
+                                  </NativeSelectOption>
+                                ))}
+                              </NativeSelect>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name={`proxies.${index}.auth`}
+                        render={({ field: authField }) => (
+                          <FormItem className='flex-1'>
+                            <FormControl>
+                              <Input
+                                placeholder={t(
+                                  'Auth (X-Tp-Authorization, used by tp proxy)'
+                                )}
+                                disabled={locked}
+                                {...authField}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                     <FormField
                       control={form.control}
-                      name={`proxies.${index}.url`}
-                      render={({ field: urlField }) => (
-                        <FormItem className='flex-1'>
+                      name={`proxies.${index}.description`}
+                      render={({ field: descField }) => (
+                        <FormItem>
                           <FormControl>
                             <Input
                               placeholder={t(
-                                'http://user:pass@host:port or socks5://host:port'
+                                'Description (optional, shown only here)'
                               )}
-                              {...urlField}
+                              {...descField}
                             />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    <div className='flex flex-col gap-0.5 text-xs sm:w-56 sm:pt-2'>
-                      {(() => {
-                        const rowAlias = proxiesWatch?.[index]?.alias?.trim()
-                        const health = rowAlias
-                          ? healthByAlias[rowAlias]
-                          : undefined
-                        const status = health?.status ?? 'unknown'
-                        return (
-                          <>
-                            {status === 'healthy' && (
-                              <span className='font-medium text-green-600'>
-                                {t('Healthy')}
-                              </span>
-                            )}
-                            {status === 'unhealthy' && (
-                              <span className='text-destructive font-medium'>
-                                {t('Unhealthy')}
-                              </span>
-                            )}
-                            {status === 'unknown' && (
-                              <span className='text-muted-foreground font-medium'>
-                                {t('Unknown')}
-                              </span>
-                            )}
-                            <span className='text-muted-foreground'>
-                              {health && health.samples > 0
-                                ? `P50/P90/P99: ${Math.round(health.p50_ms)}/${Math.round(health.p90_ms)}/${Math.round(health.p99_ms)} ms`
-                                : t('No samples yet')}
-                            </span>
-                          </>
-                        )
-                      })()}
-                    </div>
-                    <Button
-                      type='button'
-                      variant='ghost'
-                      size='icon'
-                      aria-label={t('Remove proxy')}
-                      onClick={() => fieldArray.remove(index)}
-                    >
-                      <Trash2 className='h-4 w-4' />
-                    </Button>
                   </div>
-                  <FormField
-                    control={form.control}
-                    name={`proxies.${index}.description`}
-                    render={({ field: descField }) => (
-                      <FormItem>
-                        <FormControl>
-                          <Input
-                            placeholder={t(
-                              'Description (optional, shown only here)'
-                            )}
-                            {...descField}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
@@ -284,7 +399,14 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
               type='button'
               variant='outline'
               onClick={() =>
-                fieldArray.append({ alias: '', url: '', description: '' })
+                fieldArray.append({
+                  alias: '',
+                  url: '',
+                  description: '',
+                  proxy_type: 'normal',
+                  auth: '',
+                  locked: false,
+                })
               }
             >
               <Plus className='mr-2 h-4 w-4' />
@@ -293,6 +415,30 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
           </div>
         </SettingsForm>
       </Form>
+
+      <AlertDialog
+        open={lockIndex !== null}
+        onOpenChange={(open) => {
+          if (!open) setLockIndex(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('Lock this proxy?')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                'Once locked, every field except the description can no longer be edited, and the lock cannot be removed. To change a locked proxy, add a new entry. Remember to save after locking.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant='destructive' onClick={confirmLock}>
+              {t('Lock')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsSection>
   )
 }

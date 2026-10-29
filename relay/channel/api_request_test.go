@@ -217,3 +217,50 @@ func TestToWebSocketURL(t *testing.T) {
 		assert.Equal(t, want, toWebSocketURL(input), input)
 	}
 }
+
+// TestApplySchemeHeaderProxyRewrite verifies the tp-proxy request adaptation:
+// the target protocol is advertised via the `scheme` header, the host is
+// carried, X-Tp-Authorization is set when auth is present, and an https URL is
+// downgraded to http so the Go transport forwards it without a CONNECT tunnel.
+// An http target keeps its scheme.
+func TestApplySchemeHeaderProxyRewrite(t *testing.T) {
+	t.Run("https target downgrades url and advertises https", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, "https://api.example.com/v1/chat", nil)
+		require.NoError(t, err)
+
+		applySchemeHeaderProxyRewrite(req, "tp-secret")
+
+		assert.Equal(t, "http", req.URL.Scheme, "url scheme downgraded to http for forward proxying")
+		assert.Equal(t, "https", req.Header.Get("scheme"), "original scheme advertised to the tp proxy")
+		assert.Equal(t, "api.example.com", req.Header.Get("host"))
+		assert.Equal(t, "tp-secret", req.Header.Get("X-Tp-Authorization"))
+	})
+
+	t.Run("http target keeps scheme; empty auth omits header", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, "http://api.example.com/v1/chat", nil)
+		require.NoError(t, err)
+
+		applySchemeHeaderProxyRewrite(req, "")
+
+		assert.Equal(t, "http", req.URL.Scheme)
+		assert.Equal(t, "http", req.Header.Get("scheme"))
+		assert.Equal(t, "api.example.com", req.Header.Get("host"))
+		assert.Empty(t, req.Header.Get("X-Tp-Authorization"), "no auth header when auth is empty")
+	})
+}
+
+// TestForceHTTPProxyScheme verifies the force_http type only downgrades an https
+// target URL to http and adds no tp headers; http targets are untouched.
+func TestForceHTTPProxyScheme(t *testing.T) {
+	httpsReq, err := http.NewRequest(http.MethodPost, "https://api.example.com/v1/chat", nil)
+	require.NoError(t, err)
+	forceHTTPProxyScheme(httpsReq)
+	assert.Equal(t, "http", httpsReq.URL.Scheme)
+	assert.Empty(t, httpsReq.Header.Get("scheme"), "force_http adds no scheme header")
+	assert.Empty(t, httpsReq.Header.Get("X-Tp-Authorization"))
+
+	httpReq, err := http.NewRequest(http.MethodPost, "http://api.example.com/v1/chat", nil)
+	require.NoError(t, err)
+	forceHTTPProxyScheme(httpReq)
+	assert.Equal(t, "http", httpReq.URL.Scheme)
+}
