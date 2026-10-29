@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/base64"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -109,6 +110,11 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other.SetPublic("model_price", modelPrice)
 	other.SetPublic("user_group_ratio", userGroupRatio)
 	other.SetPublic("frt", float64(relayInfo.FirstResponseTime.UnixMilli()-relayInfo.StartTime.UnixMilli()))
+	// Precise total latency in milliseconds (same StartTime basis as frt). The
+	// use_time column only has whole-second resolution, which makes the
+	// first-token-adjusted generation window unreliable for short requests; the
+	// frontend falls back to this value when the integer-second math underflows.
+	other.SetPublic("lat", float64(time.Now().UnixMilli()-relayInfo.StartTime.UnixMilli()))
 	if sid := common.GetContextKeyString(ctx, constant.ContextKeySessionID); sid != "" {
 		other.SetPublic("session_id", sid)
 		if src := common.GetContextKeyString(ctx, constant.ContextKeySessionIDSource); src != "" {

@@ -39,6 +39,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { getEnabledModels } from '@/features/channels/api'
 import { getGroups } from '@/features/users/api'
 import { useMediaQuery } from '@/hooks'
 import { getUserGroups } from '@/lib/api'
@@ -210,6 +211,21 @@ export function CommonLogsFilterBar<TData>(
       .filter((group) => group !== 'auto')
       .map((group) => ({ label: group, value: group }))
   }, [isAdmin, adminGroups, userGroups])
+
+  // Site-wide model candidates sourced from enabled channel abilities (only
+  // models actually configured/usable, not the full built-in catalog). The
+  // endpoint is admin-only, so the query only runs for the admin view; everyone
+  // else still gets a free-text MultiSelect via allowCreate.
+  const { data: enabledModels } = useQuery({
+    queryKey: ['log-filter-models'],
+    queryFn: async () => requireServerSuccess(await getEnabledModels()),
+    enabled: isAdmin,
+    staleTime: 5 * 60 * 1000,
+  })
+  const modelOptions = useMemo(
+    () => (enabledModels?.data ?? []).map((model) => ({ label: model, value: model })),
+    [enabledModels]
+  )
 
   const searchState = useMemo<CommonLogDraft>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -446,7 +462,7 @@ export function CommonLogsFilterBar<TData>(
     <LogsFilterField>
       <div className='flex min-w-0 gap-1'>
         <MultiSelect
-          options={[]}
+          options={modelOptions}
           selected={getFilterValues(filters.model)}
           onChange={(values) =>
             handleChange('model', serializeFilterValues(values))
