@@ -557,6 +557,91 @@ export interface FetchLogsConfig {
 }
 
 // ============================================================================
+// Log Analysis Types (prompt-size latency/FRT + cache-hit + success popup)
+// ============================================================================
+
+export interface LogAnalysisChannel {
+  id: number
+  name: string
+}
+
+// One latency/FRT cell: aggregated latency and first-response-time in ms.
+export interface LogLatencyCell {
+  lat: number
+  frt: number
+  cnt: number
+}
+
+export interface LogLatencyBucketRow {
+  bucket: string
+  total: LogLatencyCell
+  channels: LogLatencyCell[]
+}
+
+export interface LogLatencyTable {
+  buckets: LogLatencyBucketRow[]
+}
+
+export interface LogCacheCell {
+  gross_rate: number
+  eligible_rate: number
+  cache_read: number
+  input_all: number
+  input_eligible: number
+  hit: number
+  cold_write: number
+  too_small: number
+  other_miss: number
+}
+
+export interface LogCacheTable {
+  total: LogCacheCell
+  channels: LogCacheCell[]
+}
+
+export interface LogSuccessCell {
+  total: number
+  success: number
+  error: number
+  retry_override: number
+  rate: number
+}
+
+export interface LogSuccessTable {
+  total: LogSuccessCell
+  channels: LogSuccessCell[]
+}
+
+export interface CacheMinTokenRule {
+  label: string
+  series: string
+  min_tokens: number
+}
+
+export interface LogAnalysisResult {
+  channels: LogAnalysisChannel[]
+  bucket_labels: string[]
+  latency: {
+    mean: LogLatencyTable
+    p50: LogLatencyTable
+    p90: LogLatencyTable
+    p99: LogLatencyTable
+  }
+  cache: LogCacheTable
+  success: LogSuccessTable
+  thresholds: CacheMinTokenRule[]
+  threshold_default: number
+  scanned: number
+  truncated: boolean
+}
+
+export interface LogAnalysisResponse {
+  success: boolean
+  message?: string
+  data?: LogAnalysisResult
+}
+
+// ============================================================================
 // User Info Types
 // ============================================================================
 

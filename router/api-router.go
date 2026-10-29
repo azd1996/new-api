@@ -364,6 +364,7 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.POST("/error-signature-aliases", middleware.AdminAuth(), controller.UpsertErrorSignatureAlias)
 		logRoute.DELETE("/error-signature-aliases/:hash", middleware.AdminAuth(), controller.DeleteErrorSignatureAlias)
 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
+		logRoute.GET("/analysis", middleware.AdminAuth(), controller.GetLogsAnalysis)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)

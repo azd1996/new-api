@@ -129,6 +129,19 @@ func GetAllLogs(c *gin.Context) {
 	return
 }
 
+// GetLogsAnalysis aggregates the admin log list (same filter set as GetAllLogs,
+// scoped to consume logs) into the prompt-size latency/FRT tables, the cache-hit
+// table, and the per-channel success-rate table shown in the log-analysis
+// popup. Admin only.
+func GetLogsAnalysis(c *gin.Context) {
+	result, err := model.GetLogAnalysis(logFilterFromQuery(c, true))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
 func GetUserLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	filter := logFilterFromQuery(c, false)

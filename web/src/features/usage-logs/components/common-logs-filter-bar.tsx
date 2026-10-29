@@ -57,6 +57,7 @@ import {
   LogsFilterInput,
   LogsFilterToolbar,
 } from './logs-filter-toolbar'
+import { LogAnalysisDialog } from './log-analysis-dialog'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
@@ -719,7 +720,12 @@ export function CommonLogsFilterBar<TData>(
       table={props.table}
       compactMobile
       stats={props.showStats === false ? undefined : statsBar}
-      actionStart={sensitiveToggle}
+      actionStart={
+        <>
+          <LogAnalysisDialog />
+          {sensitiveToggle}
+        </>
+      }
       actionEnd={<ExportLogsDialog />}
       primaryFilters={
         <>

@@ -29,6 +29,7 @@ import type {
   GetLogStatsResponse,
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
+  LogAnalysisResponse,
   TaskArtifactsResponse,
   UserInfo,
 } from './types'
@@ -87,6 +88,19 @@ export const getLogStats = (params: GetLogStatsParams = {}) =>
 export const getUserLogStats = (
   params: Omit<GetLogStatsParams, 'username' | 'channel'> = {}
 ) => fetchLogStats('/api/log', params, false)
+
+// getLogsAnalysis aggregates the same filtered consume logs the list shows into
+// the prompt-size latency/FRT tables, the cache-hit table and the success-rate
+// table. Admin only.
+export async function getLogsAnalysis(
+  params: GetLogsParams = {}
+): Promise<LogAnalysisResponse> {
+  const queryParams = buildQueryParams(
+    params as unknown as Record<string, unknown>
+  )
+  const res = await api.get(`/api/log/analysis?${queryParams}`)
+  return res.data
+}
 
 /**
  * Stream the logs matching params, newest first. The server sends one JSON
