@@ -67,7 +67,7 @@ phase1/2/3 条件统一走 `relay/common` 求值器（`EvaluateConditions`，包
 
 - **soft-pin 原语**（`service/channel_pin.go`）区别于会直接关闭重试的 `specific_channel_id`。选原渠道而非从头重排的理由：兜底常因高优渠道满负荷才切下来，重排大概率又打回满负荷渠道；问题只在请求形态，原渠道改写后即可通过。
 - **一次性语义拆分**：`retry_same_channel` 一次性（`RetryFallbackDone` 保证整请求最多触发一次，防同渠道死循环）；`fallback_next_channel` **不受一次性限制**，可连续多跳直到最后一个渠道，由 `RetryTimes` 预算与渠道用尽收敛（要跳完所有渠道，`RetryTimes` 须 ≥ 可用渠道数 − 1）。
-- **第三种动作 `return_error`**：命中即终止——不钉渠道、不重置预算、不改写请求体；把失败响应的 `apiErr` 重写为配置的 `status_code`（缺省 429）与可选 `status_msg`，主循环直接 `break`，由顶层 deferred 把该错误返回给调用方。审计日志额外记 `return_status`/`return_message`，`status_code` 仍记原始上游状态码（触发原因）。
+- **第三种动作 `return_error`**：命中即终止——不钉渠道、不重置预算、不改写请求体。`maybeApplyRetryRuleFallback` **不就地改 `apiErr`**，而是返回一个 terminate 指令（目标 `status_code`，缺省/越界→429，及可选 `status_msg`）；主循环先调 `processChannelError` 写**原始**上游状态码/报错串（错误日志、明细错误统计因此保留上游真相，并标记 `retry_triggered=true`），**之后**再把 `apiErr` 改写为配置值并 `break`，由顶层 deferred 把改写后的错误返回给**调用方**。即「日志记原始、客户端收改写」。审计明细（错误日志 `other.admin_info.retry_override` 及独立审计日志）里 `status_code`/`error_message`=原始、`return_status`/`return_message`=改写值，两者都可见。
 - **动作裁决（首条命中生效）**：规则按数组顺序优先级排列，取**首条**phase1&2 均命中的规则，由它的 phase4 动作与 phase3 改写全权决定，命中即停、不再看后续规则；无规则命中则不触发（默认 `retry_same_channel` 语义）。（历史行为是「任一命中为 fallback 则整体 fallback、phase3 跨规则叠加」，现已改为首条命中。）
 
 ## 6. 200 响应体错误检测
@@ -98,8 +98,8 @@ phase1/2/3 条件统一走 `relay/common` 求值器（`EvaluateConditions`，包
 **错误路径数据流**：
 1. 上游返回错误 → 主循环命中 `controller/retry_fallback.go` 的 `maybeApplyRetryRuleFallback` → 构造 reqCtx（`BuildParamOverrideContext` + relay_format）与 respCtx（注入 model）。
 2. `retryrule.CollectRewrites(rules, reqCtx, respCtx)` 返回 `Decision{Matched, Rewrites, Action, ReturnStatus, ReturnMessage, MatchedIndex}`：phase1 用 reqCtx、phase2 用 respCtx；取首条命中规则，用其 phase3 改写与 phase4 动作。
-3. 命中后按动作分流：`same` → 暂存 `PendingRetryRewrite`、标记 `RetryFallbackDone`、pin + reset，`return (retry=true, terminate=false)`，主循环 `continue`；`fallback` → 暂存改写、直接放行，`continue`；`return_error` → 重写 `apiErr` 状态码/消息，`return (retry=false, terminate=true)`，主循环 `break`。
-4. 下一次迭代由 relay handler 在公共入口应用改写后发出（terminate 不进入下一次迭代）。
+3. 命中后按动作分流：`same` → 暂存 `PendingRetryRewrite`、标记 `RetryFallbackDone`、pin + reset，`return (retry=true, terminate=nil)`，主循环 `continue`；`fallback` → 暂存改写、直接放行，`continue`；`return_error` → `return (retry=false, terminate=&{status,msg})`，主循环先 `processChannelError` 记原始错误日志、再把 `apiErr` 改写为 terminate 值、`break`。
+4. 下一次迭代由 relay handler 在公共入口应用改写后发出（terminate 不进入下一次迭代，仅改写发给调用方的响应）。
 
 **成功路径（200 检测）**：`relay/channel/openai/retry_body_guard.go` 的 `precommitGuard`——无 `retry_override` 规则时初始即 committed（零开销透传）；有规则则按 §6 缓冲 + 扫描 + 提交。
 

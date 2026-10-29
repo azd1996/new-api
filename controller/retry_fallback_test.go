@@ -49,7 +49,7 @@ func TestRetryOverrideErrorAttemptAudit(t *testing.T) {
 			apiErr := types.NewErrorWithStatusCode(errors.New("thinking unsupported"), types.ErrorCodeBadResponse, 400)
 			triggered, terminated, detail := maybeApplyRetryRuleFallback(c, info, channel, apiErr, types.RelayFormatOpenAI, &service.RetryParam{})
 			require.True(t, triggered)
-			require.False(t, terminated)
+			require.Nil(t, terminated)
 			require.NotNil(t, detail)
 			processChannelError(c, types.ChannelError{ChannelId: 17}, apiErr, types.RelayFormatOpenAI, detail)
 
@@ -59,7 +59,7 @@ func TestRetryOverrideErrorAttemptAudit(t *testing.T) {
 			}
 			triggered, terminated, detail = maybeApplyRetryRuleFallback(c, info, channel, apiErr, types.RelayFormatOpenAI, &service.RetryParam{})
 			assert.False(t, triggered)
-			assert.False(t, terminated)
+			assert.Nil(t, terminated)
 			assert.Nil(t, detail)
 			processChannelError(c, types.ChannelError{ChannelId: 17}, apiErr, types.RelayFormatOpenAI, detail)
 			// Ordinary retry/error writers do not receive override metadata.
@@ -117,16 +117,38 @@ func TestRetryOverrideReturnErrorTerminates(t *testing.T) {
 	info := &relaycommon.RelayInfo{UserId: 1}
 	apiErr := types.NewErrorWithStatusCode(errors.New("upstream rejected"), types.ErrorCodeBadResponse, 400)
 
-	triggered, terminated, detail := maybeApplyRetryRuleFallback(c, info, channel, apiErr, types.RelayFormatOpenAI, &service.RetryParam{})
+	triggered, terminate, detail := maybeApplyRetryRuleFallback(c, info, channel, apiErr, types.RelayFormatOpenAI, &service.RetryParam{})
 	assert.False(t, triggered, "terminate must not request a retry")
-	assert.True(t, terminated, "return_error terminates the relay loop")
+	require.NotNil(t, terminate, "return_error signals terminate")
+	assert.Equal(t, 451, terminate.StatusCode)
+	assert.Equal(t, "blocked by policy", terminate.Message)
 	require.NotNil(t, detail)
-	// apiErr is rewritten to the configured status + message returned to the caller.
-	assert.Equal(t, 451, apiErr.StatusCode)
-	assert.Equal(t, "blocked by policy", apiErr.Error())
 	assert.False(t, info.RetryFallbackDone, "terminate neither pins nor consumes the one-shot retry")
+	// apiErr is NOT mutated by the hook: the error log must record the original.
+	assert.Equal(t, 400, apiErr.StatusCode)
+	assert.Equal(t, "upstream rejected", apiErr.Error())
 	assert.Equal(t, retryrule.ActionReturnError, detail["action"])
 	assert.Equal(t, 451, detail["return_status"])
+
+	// The relay loop writes the error log BEFORE applying the override, so the
+	// log keeps the original status/message while marking the retry-override hit.
+	processChannelError(c, types.ChannelError{ChannelId: 21}, apiErr, types.RelayFormatOpenAI, detail)
+	var logs []model.Log
+	require.NoError(t, db.Order("id").Find(&logs).Error)
+	require.Len(t, logs, 2) // standalone retry-override audit + this error log
+	errLog := logs[1]
+	assert.True(t, errLog.RetryTriggered, "error log is flagged as a retry-override hit")
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(errLog.Other, &other))
+	assert.Equal(t, float64(400), other["status_code"], "error log keeps the original upstream status code")
+	ov := other["admin_info"].(map[string]interface{})["retry_override"].(map[string]interface{})
+	assert.Equal(t, float64(451), ov["return_status"], "override status recorded in the audit detail")
+
+	// Only after logging does the loop apply the override to what the caller sees.
+	apiErr.StatusCode = terminate.StatusCode
+	apiErr.SetMessage(terminate.Message)
+	assert.Equal(t, 451, apiErr.StatusCode)
+	assert.Equal(t, "blocked by policy", apiErr.Error())
 }
 
 func TestParseAdminRetryTriggered(t *testing.T) {

@@ -245,11 +245,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		// Error-triggered fallback (e.g. thinking-family 400): rewrite the request
 		// once and retry it on the same channel, bypassing the normal retry gate.
-		// A return_error rule instead terminates with a configured status code.
+		// A return_error rule instead terminates: the error log below records the
+		// original upstream status/message, then we rewrite the response error to
+		// the configured status code so only the caller sees the override.
 		retryTriggered, retryTerminate, retryDetail := maybeApplyRetryRuleFallback(c, relayInfo, channel, newAPIError, relayFormat, retryParam)
 		// Pass this attempt's decision directly, without retaining request state.
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayFormat, retryDetail)
-		if retryTerminate {
+		if retryTerminate != nil {
+			newAPIError.StatusCode = retryTerminate.StatusCode
+			if retryTerminate.Message != "" {
+				newAPIError.SetMessage(retryTerminate.Message)
+			}
 			break
 		}
 		if retryTriggered {
