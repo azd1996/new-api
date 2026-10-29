@@ -21,8 +21,12 @@ import { dataScheme as vchartDefaultDataScheme } from '@visactor/vchart/esm/them
 import { MAX_CHART_TREND_POINTS } from '@/features/dashboard/constants'
 import type {
   ConsumptionAmountCaliber,
+  CustomerAmountMetric,
+  CustomerGroupBy,
+  CustomerQuotaDataItem,
   QuotaDataItem,
   ProcessedChartData,
+  ProcessedCustomerChartData,
   ProcessedUserChartData,
 } from '@/features/dashboard/types'
 import { getCurrencyDisplay } from '@/lib/currency'
@@ -713,13 +717,23 @@ export function processUserChartData(
   timeGranularity: TimeGranularity = 'day',
   t?: TFunction,
   limit = 10,
-  quotaField: 'quota' | 'customer_stat_quota' = 'quota'
+  quotaField: 'quota' | 'customer_stat_quota' = 'quota',
+  titles: { rankKey: string; trendKey: string } = {
+    rankKey: 'User Consumption Ranking',
+    trendKey: 'User Consumption Trend',
+  },
+  options?: {
+    formatValue?: (value: number) => string
+    totalValue?: number
+    ratio?: boolean
+  }
 ): ProcessedUserChartData {
   const tt: TFunction = t ?? ((x) => x)
   const { config } = getCurrencyDisplay()
   const quotaPerUnit = config.quotaPerUnit
 
-  const formatVal = (raw: number) => renderQuotaCompat(raw, 2)
+  const formatVal =
+    options?.formatValue ?? ((raw: number) => renderQuotaCompat(raw, 2))
 
   const emptyResult: ProcessedUserChartData = {
     spec_user_rank: {
@@ -731,7 +745,7 @@ export function processUserChartData(
       direction: 'horizontal',
       title: {
         visible: true,
-        text: tt('User Consumption Ranking'),
+        text: tt(titles.rankKey),
         subtext: tt('No data available'),
       },
       legends: { visible: false },
@@ -746,7 +760,7 @@ export function processUserChartData(
       seriesField: 'User',
       title: {
         visible: true,
-        text: tt('User Consumption Trend'),
+        text: tt(titles.trendKey),
         subtext: tt('No data available'),
       },
       legends: { visible: true, selectMode: 'single' },
@@ -759,16 +773,42 @@ export function processUserChartData(
   if (!data || data.length === 0) return emptyResult
 
   const userQuotaTotal = new Map<string, number>()
+  const userRatioTotals = new Map<
+    string,
+    { numerator: number; denominator: number }
+  >()
   data.forEach((item) => {
     const username = item.username || 'unknown'
+    const numerator = Number(item[quotaField]) || 0
+    if (options?.ratio) {
+      const previous = userRatioTotals.get(username) ?? {
+        numerator: 0,
+        denominator: 0,
+      }
+      userRatioTotals.set(username, {
+        numerator: previous.numerator + numerator,
+        denominator:
+          previous.denominator + (Number(item.metric_denominator) || 0),
+      })
+      return
+    }
     const prev = userQuotaTotal.get(username) || 0
-    userQuotaTotal.set(username, prev + (Number(item[quotaField]) || 0))
+    userQuotaTotal.set(username, prev + numerator)
   })
+  if (options?.ratio) {
+    for (const [username, totals] of userRatioTotals) {
+      userQuotaTotal.set(
+        username,
+        totals.denominator > 0 ? totals.numerator / totals.denominator : 0
+      )
+    }
+  }
 
   const sorted = [...userQuotaTotal.entries()].sort((a, b) => b[1] - a[1])
   const topUsers = sorted.slice(0, limit).map(([u]) => u)
   const topUserSet = new Set(topUsers)
-  const totalQuota = sorted.slice(0, limit).reduce((s, [, q]) => s + q, 0)
+  const totalQuota =
+    options?.totalValue ?? sorted.slice(0, limit).reduce((s, [, q]) => s + q, 0)
 
   const rankValues = sorted.slice(0, limit).map(([username, quota]) => ({
     User: username,
@@ -784,7 +824,10 @@ export function processUserChartData(
     {}
   )
 
-  const timeUserMap = new Map<string, Map<string, number>>()
+  const timeUserMap = new Map<
+    string,
+    Map<string, number | { numerator: number; denominator: number }>
+  >()
   const timeTimestamps = new Map<string, number>()
 
   data.forEach((item) => {
@@ -798,7 +841,22 @@ export function processUserChartData(
       map = new Map()
       timeUserMap.set(timeKey, map)
     }
-    map.set(user, (map.get(user) || 0) + (Number(item[quotaField]) || 0))
+    const numerator = Number(item[quotaField]) || 0
+    if (options?.ratio) {
+      const previous = map.get(user)
+      const totals =
+        typeof previous === 'object' && previous !== null
+          ? previous
+          : { numerator: 0, denominator: 0 }
+      map.set(user, {
+        numerator: totals.numerator + numerator,
+        denominator:
+          totals.denominator + (Number(item.metric_denominator) || 0),
+      })
+    } else {
+      const previous = map.get(user)
+      map.set(user, (typeof previous === 'number' ? previous : 0) + numerator)
+    }
   })
 
   const sortedTimePoints = [...timeTimestamps]
@@ -813,7 +871,16 @@ export function processUserChartData(
 
   sortedTimePoints.forEach((time) => {
     topUsers.forEach((user) => {
-      const q = timeUserMap.get(time)?.get(user) || 0
+      const rawValue = timeUserMap.get(time)?.get(user)
+      let q = 0
+      if (typeof rawValue === 'object' && rawValue !== null) {
+        q =
+          rawValue.denominator > 0
+            ? rawValue.numerator / rawValue.denominator
+            : 0
+      } else {
+        q = rawValue || 0
+      }
       trendValues.push({
         Time: time,
         User: user,
@@ -833,7 +900,7 @@ export function processUserChartData(
       direction: 'horizontal',
       title: {
         visible: true,
-        text: tt('User Consumption Ranking'),
+        text: tt(titles.rankKey),
         subtext: `${tt('Total:')} ${formatVal(totalQuota)}`,
       },
       legends: { visible: false },
@@ -889,7 +956,7 @@ export function processUserChartData(
       stack: false,
       title: {
         visible: true,
-        text: tt('User Consumption Trend'),
+        text: tt(titles.trendKey),
         subtext: `${tt('Total:')} ${formatVal(totalQuota)}`,
       },
       legends: { visible: true, selectMode: 'single' },
@@ -961,5 +1028,136 @@ export function processUserChartData(
       background: { fill: 'transparent' },
       animation: true,
     },
+  }
+}
+
+// processCustomerChartData builds the customer-statistics rank/trend specs. It
+// reuses the user-chart renderer: each customer row is flattened to a labelled
+// amount, where the "customer discounted amount" is the per-customer discounted
+// stat amount for configured customers, and falls back to the channel-discounted
+// amount for customers without a configured discount (those are also tagged so
+// the fallback is visible). groupBy selects the customer name or raw id label.
+export function processCustomerChartData(
+  data: CustomerQuotaDataItem[],
+  timeGranularity: TimeGranularity = 'day',
+  t?: TFunction,
+  limit = 10,
+  groupBy: CustomerGroupBy = 'name',
+  amountMetric: CustomerAmountMetric = 'customer_stat_quota'
+): ProcessedCustomerChartData {
+  const tt: TFunction = t ?? ((x) => x)
+  const fallbackSuffix = ` ${tt('(channel discount fallback)')}`
+
+  const getCustomerAmounts = (item: CustomerQuotaDataItem) => {
+    const customerAmount = item.customer_configured
+      ? Number(item.customer_stat_quota) || 0
+      : Number(item.channel_stat_quota) || 0
+    const channelAmount = Number(item.channel_stat_quota) || 0
+    const profit = customerAmount - channelAmount
+    return { customerAmount, channelAmount, profit }
+  }
+
+  const getCustomerAmount = (item: CustomerQuotaDataItem) => {
+    const amounts = getCustomerAmounts(item)
+    if (amountMetric === 'channel_stat_quota') return amounts.channelAmount
+    if (amountMetric === 'profit_quota') return amounts.profit
+    if (amountMetric === 'profit_rate') {
+      return amounts.channelAmount > 0
+        ? amounts.profit / amounts.channelAmount
+        : 0
+    }
+    return amounts.customerAmount
+  }
+  // CUSTOMER_APPEND_1
+  const mapped: QuotaDataItem[] = (data ?? []).map((item) => {
+    const base = groupBy === 'id' ? item.customer_id : item.customer_name
+    const label = item.customer_configured ? base : `${base}${fallbackSuffix}`
+    const amounts = getCustomerAmounts(item)
+    return {
+      username: label,
+      created_at: item.created_at,
+      quota:
+        amountMetric === 'profit_rate'
+          ? amounts.profit
+          : getCustomerAmount(item),
+      metric_denominator:
+        amountMetric === 'profit_rate' ? amounts.channelAmount : undefined,
+    }
+  })
+
+  const customerTotals = new Map<string, number>()
+  if (amountMetric === 'profit_rate') {
+    const ratioTotals = new Map<string, { profit: number; channel: number }>()
+    for (const item of mapped) {
+      const label = item.username ?? 'unknown'
+      const previous = ratioTotals.get(label) ?? { profit: 0, channel: 0 }
+      ratioTotals.set(label, {
+        profit: previous.profit + (Number(item.quota) || 0),
+        channel: previous.channel + (Number(item.metric_denominator) || 0),
+      })
+    }
+    for (const [label, totals] of ratioTotals) {
+      customerTotals.set(
+        label,
+        totals.channel > 0 ? totals.profit / totals.channel : 0
+      )
+    }
+  } else {
+    for (const item of mapped) {
+      const label = item.username ?? 'unknown'
+      customerTotals.set(
+        label,
+        (customerTotals.get(label) ?? 0) + (Number(item.quota) || 0)
+      )
+    }
+  }
+  // CUSTOMER_APPEND_2
+  const sortedLabels = [...customerTotals]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([label]) => label)
+  const topLabels = new Set(sortedLabels)
+  const topRows = (data ?? []).filter((item) => {
+    const base = groupBy === 'id' ? item.customer_id : item.customer_name
+    const label = item.customer_configured ? base : `${base}${fallbackSuffix}`
+    return topLabels.has(label)
+  })
+  const totalValue =
+    amountMetric === 'profit_rate'
+      ? (() => {
+          let profit = 0
+          let channel = 0
+          for (const item of topRows) {
+            const amounts = getCustomerAmounts(item)
+            profit += amounts.profit
+            channel += amounts.channelAmount
+          }
+          return channel > 0 ? profit / channel : 0
+        })()
+      : topRows.reduce((sum, item) => sum + getCustomerAmount(item), 0)
+  const formatValue =
+    amountMetric === 'profit_rate'
+      ? (value: number) => `${(value * 100).toFixed(2)}%`
+      : (value: number) => renderQuotaCompat(value, 2)
+
+  const result = processUserChartData(
+    mapped,
+    timeGranularity,
+    t,
+    limit,
+    'quota',
+    {
+      rankKey: 'Customer Consumption Ranking',
+      trendKey: 'Customer Consumption Trend',
+    },
+    {
+      formatValue,
+      totalValue,
+      ratio: amountMetric === 'profit_rate',
+    }
+  )
+  return {
+    spec_customer_rank: result.spec_user_rank,
+    spec_customer_trend: result.spec_user_trend,
   }
 }

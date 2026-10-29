@@ -52,6 +52,7 @@ import {
   DASHBOARD_SECTION_IDS,
 } from './section-registry'
 import type {
+  CustomerChartsFilters,
   DashboardChartPreferences,
   DashboardFilters,
   QuotaDataItem,
@@ -118,6 +119,12 @@ const LazyUserCharts = lazy(() =>
 const LazyFlowCharts = lazy(() =>
   import('./components/flow/flow-charts').then((m) => ({
     default: m.FlowCharts,
+  }))
+)
+
+const LazyCustomerCharts = lazy(() =>
+  import('./components/customers/customer-charts').then((m) => ({
+    default: m.CustomerCharts,
   }))
 )
 
@@ -200,6 +207,9 @@ const SECTION_META: Record<DashboardSectionId, { titleKey: string }> = {
   users: {
     titleKey: 'User Analytics',
   },
+  customers: {
+    titleKey: 'Customer Analytics',
+  },
 }
 
 export function Dashboard() {
@@ -227,6 +237,17 @@ export function Dashboard() {
       }
     }
   )
+  const [customerChartsFilters, setCustomerChartsFilters] =
+    useState<CustomerChartsFilters>(() => {
+      const granularity = getSavedGranularity()
+      return {
+        timeGranularity: granularity,
+        selectedRange: getDefaultDays(granularity),
+        topCustomerLimit: 10,
+        groupBy: 'name',
+        amountMetric: 'customer_stat_quota',
+      }
+    })
   const [flowSensitiveVisible, setFlowSensitiveVisible] = useState(true)
 
   const handleFilterChange = useCallback((filters: DashboardFilters) => {
@@ -259,7 +280,10 @@ export function Dashboard() {
   const visibleSections = useMemo(
     () =>
       DASHBOARD_SECTION_IDS.filter(
-        (section) => section !== 'overview' && (section !== 'users' || isAdmin)
+        (section) =>
+          section !== 'overview' &&
+          (section !== 'users' || isAdmin) &&
+          (section !== 'customers' || isAdmin)
       ),
     [isAdmin]
   )
@@ -429,6 +453,16 @@ export function Dashboard() {
                 <LazyFlowCharts
                   filters={modelFilters}
                   sensitiveVisible={flowSensitiveVisible}
+                />
+              </Suspense>
+            </FadeIn>
+          )}
+          {activeSection === 'customers' && (
+            <FadeIn>
+              <Suspense fallback={<ModelChartsFallback />}>
+                <LazyCustomerCharts
+                  filters={customerChartsFilters}
+                  onFiltersChange={setCustomerChartsFilters}
                 />
               </Suspense>
             </FadeIn>

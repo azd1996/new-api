@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 
 import type {
+  CustomerQuotaDataItem,
   FlowQuotaDataItem,
   QuotaDataItem,
   UptimeGroupResult,
@@ -61,6 +62,19 @@ export async function getUserQuotaDataByUsers(params: {
 }) {
   const res = await api.get<{ success: boolean; data: QuotaDataItem[] }>(
     '/api/data/users',
+    { params }
+  )
+  return res.data
+}
+
+// Get per-customer quota data within a time range (admin only). Each row carries
+// the resolved customer name and whether the customer is configured.
+export async function getCustomerQuotaData(params: {
+  start_timestamp: number
+  end_timestamp: number
+}) {
+  const res = await api.get<{ success: boolean; data: CustomerQuotaDataItem[] }>(
+    '/api/data/customers',
     { params }
   )
   return res.data
