@@ -33,6 +33,11 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 
+	// retry-override: treat a matching 200 body as a retryable error before write.
+	if guardErr := retryBodyGuardError(info, resp.StatusCode, body); guardErr != nil {
+		return nil, guardErr
+	}
+
 	if err := common.Unmarshal(body, &responsesResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -263,7 +268,16 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		}
 	}
 
-	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	// retry-override: hold leading chunks in a pre-commit buffer so a matching
+	// rule (e.g. a 200-body rate-limit that arrives right after response.created)
+	// can fall back with nothing forwarded to the client. No rules → no buffering.
+	guard := newPrecommitGuard(info, resp.StatusCode)
+	var curSR *helper.StreamResult
+	// process is the normal per-event work. It runs directly for pass-through
+	// events and is replayed for buffered events on commit, possibly after the
+	// scan loop ended (guard.finish), hence curSR.
+	process := func(data string) {
+		sr := curSR
 		if streamErr != nil {
 			stopStream(sr, streamErr)
 			return
@@ -306,7 +320,21 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				return
 			}
 		}
+	}
+
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		curSR = sr
+		if guard.feed(data, isResponsesStreamCommit(data), process) {
+			sr.Stop(nil)
+		}
 	})
+
+	if guard.matched != nil {
+		// A rule matched in the pre-commit window: client received nothing, the
+		// abandoned attempt's tokens are not billed, the relay loop falls back.
+		return nil, guard.matched
+	}
+	guard.finish(process)
 
 	if streamErr != nil {
 		if !upstreamFailed || state.UsageText() == "" {

@@ -163,3 +163,21 @@ func isChatStreamCommit(data string) bool {
 	}
 	return !isChatRolePreamble(&probe)
 }
+
+// isResponsesStreamCommit reports whether a Responses stream chunk is past the
+// lifecycle preamble (response.created / in_progress / queued). The first such
+// chunk is the pre-commit buffer's commit point: rate-limit / quota errors are
+// emitted as an error/response.failed event before any real output, so holding
+// only the preamble catches them while adding negligible latency.
+func isResponsesStreamCommit(data string) bool {
+	var probe dto.ResponsesStreamResponse
+	if err := common.UnmarshalJsonStr(data, &probe); err != nil {
+		return true // unknown/garbled → commit rather than keep buffering
+	}
+	switch probe.Type {
+	case "", "response.created", "response.in_progress", "response.queued":
+		return false
+	default:
+		return true
+	}
+}

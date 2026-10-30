@@ -28,6 +28,10 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
+	// retry-override: treat a matching 200 body as a retryable error before write.
+	if guardErr := retryBodyGuardError(info, resp.StatusCode, responseBody); guardErr != nil {
+		return nil, guardErr
+	}
 	err = common.Unmarshal(responseBody, &responsesResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -78,8 +82,16 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	accumulator := service.NewResponsesUsageAccumulator(info)
 
-	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-
+	// retry-override: hold leading chunks in a pre-commit buffer so a matching
+	// rule (e.g. a 200-body rate-limit that arrives right after response.created)
+	// can fall back with nothing forwarded to the client. No rules → no buffering.
+	guard := newPrecommitGuard(info, resp.StatusCode)
+	var curSR *helper.StreamResult
+	// process is the normal per-chunk work (parse, usage accounting, forward). It
+	// runs directly for pass-through chunks and is replayed for buffered chunks on
+	// commit, possibly after the scan loop ended (guard.finish), hence curSR.
+	process := func(data string) {
+		sr := curSR
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
@@ -105,7 +117,21 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			streamResponse.Response != nil && info.StreamStatus.ResponseOutcome() == string(relaycommon.ResponseOutcomeCompleted) {
 			sr.Done()
 		}
+	}
+
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		curSR = sr
+		if guard.feed(data, isResponsesStreamCommit(data), process) {
+			sr.Stop(nil)
+		}
 	})
+
+	if guard.matched != nil {
+		// A rule matched in the pre-commit window: client received nothing, the
+		// abandoned attempt's tokens are not billed, the relay loop falls back.
+		return nil, guard.matched
+	}
+	guard.finish(process)
 
 	common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, info.StreamStatus)
 	info.StreamStatus.RequireTerminal()
