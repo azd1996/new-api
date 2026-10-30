@@ -27,10 +27,13 @@ import {
 
 const logTypeValues = ['0', '1', '2', '3', '4', '5', '6', '7'] as const
 const logTypeSearchSchema = z
-  .preprocess((value) => {
-    if (value == null || value === '') return undefined
-    return Array.isArray(value) ? value : [value]
-  }, z.array(z.enum(logTypeValues)).optional())
+  .preprocess(
+    (value) => {
+      if (value == null || value === '') return undefined
+      return Array.isArray(value) ? value : [value]
+    },
+    z.array(z.enum(logTypeValues)).optional()
+  )
   .catch([])
 
 const usageLogsSearchSchema = z.object({
@@ -55,6 +58,9 @@ const usageLogsSearchSchema = z.object({
   // id, upstream HTTP status code, and an error-content keyword.
   sessionId: z.string().optional().catch(''),
   downstreamRequestId: z.string().optional().catch(''),
+  downstreamTraceTag: z.string().optional().catch(''),
+  customerName: z.string().optional().catch(''),
+  retryTriggered: z.enum(['true', 'false']).optional().catch(undefined),
   statusCode: z.string().optional().catch(''),
   errorKeyword: z.string().optional().catch(''),
   // Drill-down params carried by the detailed-error-stats page (module K).

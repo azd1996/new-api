@@ -65,6 +65,10 @@ export interface CommonLogFilters extends CommonFilters {
   // Extra server-side log filters (backend LogFilter supports these columns).
   sessionId?: string
   downstreamRequestId?: string
+  downstreamTraceTag?: string
+  customerName?: string
+  // Error logs only: 'true' / 'false'; undefined means no filter.
+  retryTriggered?: 'true' | 'false'
   statusCode?: string
   errorKeyword?: string
   // Detailed-error-stats drill-down (module K). errorSignatureHash is the
@@ -163,6 +167,38 @@ export interface LogOtherData {
     // Reject / intercept reason (admin only)
     reject_reason?: string
     task_plugin?: TaskPluginInfo
+    // Set when a process shutdown force-cancelled this request.
+    process_shutdown?: {
+      instance: string
+      batch_id: string
+      /** Unix timestamp in seconds. */
+      at: number
+      reason: 'shutdown_timeout' | string
+    }
+    // Proxy actually used for the upstream request (url may carry credentials).
+    proxy?: {
+      alias?: string
+      url?: string
+    }
+    // Error logs: whether this failed attempt fired an error-triggered retry.
+    retry_triggered?: boolean
+    // Retry-override audit (type=8) and the matching rule on error logs.
+    retry_override?: {
+      action?: string
+      rule_ids?: number[]
+      rule_descriptions?: string[]
+      status_code?: number
+      relay_format?: string
+      error_message?: string
+      rewrites_count?: number
+      rewrites?: string[]
+    }
+    // Decoded from the downstream gateway x-bce-aigw-trace-tag header. The raw
+    // value is kept whenever the header was sent; ids need a valid key.
+    downstream_trace_tag?: string
+    downstream_request_id?: string
+    customer_id?: string
+    customer_name?: string
   }
   root_info?: {
     task_plugin?: TaskPluginRuntimeInfo
@@ -469,6 +505,9 @@ export interface GetLogsParams {
   upstream_request_id?: string
   session_id?: string
   downstream_request_id?: string
+  downstream_trace_tag?: string
+  customer_name?: string
+  retry_triggered?: 'true' | 'false'
   status_code?: number
   error_keyword?: string
   error_signature_hash?: string
@@ -503,6 +542,9 @@ export interface GetLogStatsParams {
   upstream_request_id?: string
   session_id?: string
   downstream_request_id?: string
+  downstream_trace_tag?: string
+  customer_name?: string
+  retry_triggered?: 'true' | 'false'
   status_code?: number
   error_keyword?: string
   error_signature_hash?: string

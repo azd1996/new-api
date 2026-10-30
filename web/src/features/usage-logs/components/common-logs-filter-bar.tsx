@@ -23,9 +23,9 @@ import { Eye, EyeOff } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { MultiSelect } from '@/components/multi-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { MultiSelect } from '@/components/multi-select'
 import {
   Select,
   SelectContent,
@@ -52,15 +52,17 @@ import type { CommonLogFilters, LogFilterOperator } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
 import { ExportLogsDialog } from './dialogs/export-logs-dialog'
+import { LogAnalysisDialog } from './log-analysis-dialog'
 import {
   LogsFilterField,
   LogsFilterInput,
   LogsFilterToolbar,
 } from './logs-filter-toolbar'
-import { LogAnalysisDialog } from './log-analysis-dialog'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
+
+const RETRY_TRIGGERED_ALL = 'all'
 
 type LogTypeValue = (typeof LOG_TYPE_FILTERS)[number]['value']
 const logTypeValueSet = new Set<string>(
@@ -146,6 +148,9 @@ function buildSearchSourceKey(values: {
   upstreamRequestId?: unknown
   sessionId?: unknown
   downstreamRequestId?: unknown
+  downstreamTraceTag?: unknown
+  customerName?: unknown
+  retryTriggered?: unknown
   statusCode?: unknown
   errorKeyword?: unknown
   errorSignatureHash?: unknown
@@ -169,6 +174,9 @@ function buildSearchSourceKey(values: {
     values.upstreamRequestId,
     values.sessionId,
     values.downstreamRequestId,
+    values.downstreamTraceTag,
+    values.customerName,
+    values.retryTriggered,
     values.statusCode,
     values.errorKeyword,
     values.errorSignatureHash,
@@ -225,7 +233,11 @@ export function CommonLogsFilterBar<TData>(
     staleTime: 5 * 60 * 1000,
   })
   const modelOptions = useMemo(
-    () => (enabledModels?.data ?? []).map((model) => ({ label: model, value: model })),
+    () =>
+      (enabledModels?.data ?? []).map((model) => ({
+        label: model,
+        value: model,
+      })),
     [enabledModels]
   )
 
@@ -248,6 +260,9 @@ export function CommonLogsFilterBar<TData>(
       upstreamRequestId: searchParams.upstreamRequestId,
       sessionId: searchParams.sessionId,
       downstreamRequestId: searchParams.downstreamRequestId,
+      downstreamTraceTag: searchParams.downstreamTraceTag,
+      customerName: searchParams.customerName,
+      retryTriggered: searchParams.retryTriggered,
       statusCode: searchParams.statusCode,
       errorKeyword: searchParams.errorKeyword,
       errorSignatureHash: searchParams.errorSignatureHash,
@@ -273,6 +288,9 @@ export function CommonLogsFilterBar<TData>(
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
       sessionId: searchParams.sessionId || undefined,
       downstreamRequestId: searchParams.downstreamRequestId || undefined,
+      downstreamTraceTag: searchParams.downstreamTraceTag || undefined,
+      customerName: searchParams.customerName || undefined,
+      retryTriggered: searchParams.retryTriggered,
       statusCode: searchParams.statusCode || undefined,
       errorKeyword: searchParams.errorKeyword || undefined,
       errorSignatureHash: searchParams.errorSignatureHash || undefined,
@@ -300,6 +318,9 @@ export function CommonLogsFilterBar<TData>(
     searchParams.upstreamRequestId,
     searchParams.sessionId,
     searchParams.downstreamRequestId,
+    searchParams.downstreamTraceTag,
+    searchParams.customerName,
+    searchParams.retryTriggered,
     searchParams.statusCode,
     searchParams.errorKeyword,
     searchParams.errorSignatureHash,
@@ -389,6 +410,9 @@ export function CommonLogsFilterBar<TData>(
     !!filters.upstreamRequestId ||
     !!filters.sessionId ||
     !!filters.downstreamRequestId ||
+    !!filters.downstreamTraceTag ||
+    !!filters.customerName ||
+    !!filters.retryTriggered ||
     !!filters.statusCode ||
     !!filters.errorKeyword ||
     !!filters.errorSignatureHash
@@ -405,6 +429,9 @@ export function CommonLogsFilterBar<TData>(
     filters.upstreamRequestId,
     filters.sessionId,
     isAdmin ? filters.downstreamRequestId : undefined,
+    isAdmin ? filters.downstreamTraceTag : undefined,
+    isAdmin ? filters.customerName : undefined,
+    isAdmin ? filters.retryTriggered : undefined,
     filters.statusCode,
     filters.errorKeyword,
     isAdmin ? filters.errorSignatureHash : undefined,
@@ -419,6 +446,14 @@ export function CommonLogsFilterBar<TData>(
     [t]
   )
   const selectedLogType = logTypeItems.find((type) => type.value === logType)
+  const retryTriggeredItems = useMemo(
+    () => [
+      { value: RETRY_TRIGGERED_ALL, label: t('Retry triggered: All') },
+      { value: 'true', label: t('Retry triggered: Yes') },
+      { value: 'false', label: t('Retry triggered: No') },
+    ],
+    [t]
+  )
   const deprecatedTypeDescription = t(
     'Only used to find historical logs. New records are available in Audit Logs.'
   )
@@ -684,6 +719,53 @@ export function CommonLogsFilterBar<TData>(
             }
             onKeyDown={handleKeyDown}
           />
+        </LogsFilterField>
+      )}
+      {isAdmin && (
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Downstream Trace Tag')}
+            value={filters.downstreamTraceTag || ''}
+            onChange={(e) => handleChange('downstreamTraceTag', e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </LogsFilterField>
+      )}
+      {isAdmin && (
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Customer Name')}
+            value={filters.customerName || ''}
+            onChange={(e) => handleChange('customerName', e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </LogsFilterField>
+      )}
+      {isAdmin && (
+        <LogsFilterField>
+          <Select
+            items={retryTriggeredItems}
+            value={filters.retryTriggered ?? RETRY_TRIGGERED_ALL}
+            onValueChange={(value) =>
+              handleChange(
+                'retryTriggered',
+                value === 'true' || value === 'false' ? value : undefined
+              )
+            }
+          >
+            <SelectTrigger aria-label={t('Retry triggered')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {retryTriggeredItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </LogsFilterField>
       )}
       <LogsFilterField>

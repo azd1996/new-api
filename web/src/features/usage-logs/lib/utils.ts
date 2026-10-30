@@ -243,6 +243,17 @@ export function buildApiParams(config: {
     ...(isAdmin && searchParams.downstreamRequestId
       ? { downstream_request_id: String(searchParams.downstreamRequestId) }
       : {}),
+    ...(isAdmin && searchParams.downstreamTraceTag
+      ? { downstream_trace_tag: String(searchParams.downstreamTraceTag) }
+      : {}),
+    ...(isAdmin && searchParams.customerName
+      ? { customer_name: String(searchParams.customerName) }
+      : {}),
+    ...(isAdmin &&
+    (searchParams.retryTriggered === 'true' ||
+      searchParams.retryTriggered === 'false')
+      ? { retry_triggered: searchParams.retryTriggered }
+      : {}),
     ...(isAdmin && searchParams.errorSignatureHash
       ? { error_signature_hash: String(searchParams.errorSignatureHash) }
       : {}),

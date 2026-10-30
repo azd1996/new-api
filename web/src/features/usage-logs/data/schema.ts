@@ -47,6 +47,9 @@ export const usageLogSchema = z.object({
   upstream_request_id: z.string().default(''),
   session_id: z.string().optional(),
   downstream_request_id: z.string().optional(),
+  customer_id: z.string().optional(),
+  // Error logs: whether this failed attempt fired an error-triggered retry.
+  retry_triggered: z.boolean().optional(),
   // Amount calibers (top-level log columns). raw_quota is the undiscounted
   // amount, stat_quota applies the channel/stat group ratio, and
   // customer_stat_quota applies the customer discount on top. Optional because

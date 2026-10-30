@@ -89,6 +89,15 @@ export function buildSearchParams(
         ...(commonFilters.downstreamRequestId && {
           downstreamRequestId: commonFilters.downstreamRequestId,
         }),
+        ...(commonFilters.downstreamTraceTag && {
+          downstreamTraceTag: commonFilters.downstreamTraceTag,
+        }),
+        ...(commonFilters.customerName && {
+          customerName: commonFilters.customerName,
+        }),
+        ...(commonFilters.retryTriggered && {
+          retryTriggered: commonFilters.retryTriggered,
+        }),
         ...(commonFilters.statusCode && {
           statusCode: commonFilters.statusCode,
         }),

@@ -128,6 +128,20 @@ function buildDetailSegments(
   if (isAdmin && other?.admin_info?.quota_saturation) {
     adminSegments.push({ text: t('Quota clamped'), danger: true })
   }
+  const retryOverride = other?.admin_info?.retry_override
+  if (isAdmin && log.type === 5 && retryOverride) {
+    segments.push({ text: t('Retry override matched'), danger: true })
+    if (retryOverride.rule_ids?.length) {
+      segments.push({
+        text: `${t('Rule')} #${retryOverride.rule_ids.join(', #')}`,
+      })
+    }
+    if (retryOverride.rule_descriptions?.some(Boolean)) {
+      segments.push({
+        text: retryOverride.rule_descriptions.filter(Boolean).join('; '),
+      })
+    }
+  }
   return [...adminSegments, ...segments]
 }
 
@@ -146,6 +160,28 @@ function buildTypeDetailSegments(
 
   if (log.type === 6) {
     return [{ text: t('Async task refund') }]
+  }
+
+  // Retry-override audit (type=8): a rule fully matched and triggered a
+  // retry/fallback. Detail lives under admin_info (admin-only).
+  if (log.type === 8) {
+    const ro = other?.admin_info?.retry_override
+    const segments: DetailSegment[] = [
+      { text: t('Retry override matched'), danger: true },
+    ]
+    if (ro?.rule_ids?.length) {
+      segments.push({ text: `${t('Rule')} #${ro.rule_ids.join(',')}` })
+    }
+    if (ro?.action) segments.push({ text: ro.action, muted: true })
+    if (ro?.status_code != null) {
+      segments.push({ text: `HTTP ${ro.status_code}`, muted: true })
+    }
+    if (ro?.rewrites?.length) {
+      segments.push({ text: ro.rewrites.join(', '), muted: true })
+    } else if (ro?.error_message) {
+      segments.push({ text: ro.error_message, muted: true })
+    }
+    return segments
   }
 
   if (log.type !== 2) return []

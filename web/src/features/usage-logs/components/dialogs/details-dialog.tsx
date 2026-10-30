@@ -63,7 +63,12 @@ import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
 import { PolicyDecisionRecord } from '@/features/system-settings/request-policies/decision-record'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import {
+  formatLogQuota,
+  formatTimestampToDate,
+  formatTokens,
+  formatUseTime,
+} from '@/lib/format'
 import { translateServerText } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -585,6 +590,23 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
+  const processShutdown =
+    props.isAdmin && (isConsume || props.log.type === 5)
+      ? adminInfo?.process_shutdown
+      : undefined
+  // Proxy actually used (admin-only). Show "alias (url)" or just the url.
+  const usedProxy = props.isAdmin && !isTopup ? adminInfo?.proxy : undefined
+  let usedProxyLabel: string | undefined
+  if (usedProxy?.url) {
+    usedProxyLabel = usedProxy.alias
+      ? `${usedProxy.alias} (${usedProxy.url})`
+      : usedProxy.url
+  }
+  // Retry-override detail: the audit log (type 8) and the triggering error.
+  const retryOverride =
+    props.isAdmin && (props.log.type === 8 || props.log.type === 5)
+      ? adminInfo?.retry_override
+      : undefined
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
       ? ([
@@ -777,6 +799,31 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
 
+          {props.isAdmin && adminInfo?.customer_name && (
+            <DetailRow
+              label={t('Customer Name')}
+              value={adminInfo.customer_name}
+              mono
+            />
+          )}
+
+          {props.isAdmin &&
+            (props.log.customer_id || adminInfo?.customer_id) && (
+              <DetailRow
+                label={t('Customer ID')}
+                value={props.log.customer_id || adminInfo?.customer_id || ''}
+                mono
+              />
+            )}
+
+          {props.isAdmin && adminInfo?.downstream_trace_tag && (
+            <DetailRow
+              label={t('Downstream Trace Tag')}
+              value={adminInfo.downstream_trace_tag}
+              mono
+            />
+          )}
+
           {props.isAdmin && props.log.channel > 0 && (
             <DetailRow
               label={t('Channel')}
@@ -800,7 +847,15 @@ export function DetailsDialog(props: DetailsDialogProps) {
           )}
 
           {props.isAdmin && !isTopup && adminInfo?.node_name && (
-            <DetailRow label={t('Node Name')} value={adminInfo.node_name} mono />
+            <DetailRow
+              label={t('Node Name')}
+              value={adminInfo.node_name}
+              mono
+            />
+          )}
+
+          {usedProxyLabel && (
+            <DetailRow label={t('Proxy Used')} value={usedProxyLabel} mono />
           )}
 
           {props.log.token_name && (
@@ -918,6 +973,37 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <PolicyDecisionRecord events={adminInfo.request_policy} />
           </DetailSection>
         ) : null}
+        {processShutdown && (
+          <DetailSection
+            label={t('Process Shutdown')}
+            icon={<AlertTriangle className='size-3' aria-hidden='true' />}
+            variant='danger'
+          >
+            <DetailRow
+              label={t('Interruption Reason')}
+              value={
+                processShutdown.reason === 'shutdown_timeout'
+                  ? t('Process exit / shutdown timeout')
+                  : processShutdown.reason || '-'
+              }
+            />
+            <DetailRow
+              label={t('Instance')}
+              value={processShutdown.instance || '-'}
+              mono
+            />
+            <DetailRow
+              label={t('Shutdown Batch')}
+              value={processShutdown.batch_id || '-'}
+              mono
+            />
+            <DetailRow
+              label={t('Shutdown Time')}
+              value={formatTimestampToDate(processShutdown.at, 'seconds')}
+              mono
+            />
+          </DetailSection>
+        )}
         {props.isAdmin && other?.admin_info?.quota_saturation && (
           <DetailSection
             icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
@@ -960,6 +1046,66 @@ export function DetailsDialog(props: DetailsDialogProps) {
             variant='danger'
           >
             <p className='text-xs wrap-break-word'>{adminInfo.reject_reason}</p>
+          </DetailSection>
+        )}
+
+        {props.isAdmin &&
+          props.log.type === 5 &&
+          typeof adminInfo?.retry_triggered === 'boolean' && (
+            <DetailSection label={t('Retry triggered')}>
+              <DetailRow
+                label={t('Retry triggered')}
+                value={adminInfo.retry_triggered ? t('Yes') : t('No')}
+              />
+            </DetailSection>
+          )}
+
+        {/* Retry-override details for audits and the triggering error */}
+        {retryOverride && (
+          <DetailSection label={t('Retry Override')}>
+            {retryOverride.rule_ids &&
+              retryOverride.rule_ids.length > 0 &&
+              (retryOverride.rule_descriptions?.some((d) => d) ? (
+                retryOverride.rule_ids.map((id, i) => (
+                  <DetailRow
+                    key={id}
+                    label={`${t('Rule')} #${id}`}
+                    value={retryOverride.rule_descriptions?.[i] || '—'}
+                  />
+                ))
+              ) : (
+                <DetailRow
+                  label={t('Rule')}
+                  value={`#${retryOverride.rule_ids.join(', #')}`}
+                  mono
+                />
+              ))}
+            {retryOverride.action && (
+              <DetailRow
+                label={t('Action')}
+                value={retryOverride.action}
+                mono
+              />
+            )}
+            {retryOverride.status_code != null && (
+              <DetailRow
+                label={t('Status Code')}
+                value={String(retryOverride.status_code)}
+                mono
+              />
+            )}
+            {retryOverride.rewrites && retryOverride.rewrites.length > 0 && (
+              <DetailRow
+                label={t('Rewrites')}
+                value={retryOverride.rewrites.join(', ')}
+              />
+            )}
+            {retryOverride.error_message && (
+              <DetailRow
+                label={t('Error')}
+                value={retryOverride.error_message}
+              />
+            )}
           </DetailSection>
         )}
 
