@@ -312,8 +312,14 @@
                     "path": "model",
                     "mode": "prefix",
                     "value": "claude-"
+                },
+                {
+                    "path": "tools.#(strict)#|#",
+                    "mode": "gt",
+                    "value": 0
                 }
-            ]
+            ],
+            "logic": "AND"
         },
         {
             "description": "claude-: 工具里的defer_loading(tool-search-tool beta字段)不被Bedrock支持。Bedrock报错路径tools.N.custom.defer_loading里的custom是判别联合的变体标签(type=custom)而非真实键，真实JSON字段在工具顶层，故按tools.*.defer_loading逐个剥掉；工具定义本身保留，对客户端无感",
@@ -324,8 +330,14 @@
                     "path": "model",
                     "mode": "prefix",
                     "value": "claude-"
+                },
+                {
+                    "path": "tools.#(defer_loading)#|#",
+                    "mode": "gt",
+                    "value": 0
                 }
-            ]
+            ],
+            "logic": "AND"
         },
         {
             "description": "claude-opus-5-5/claude-sonnet-5-5: 不支持强制tool_choice(any/tool)，仅auto/none；tool_choice存在且type既非auto也非none时统一改成auto(保留想用工具的意图，而非用none禁用)，避免400 does not support forced tool_choice",
@@ -565,7 +577,7 @@
             "logic": "AND"
         },
         {
-            "description": "claude-: Bedrock不接受messages里的developer角色(400 Unexpected role \"developer\"，只允许user/assistant/system)，把role精确等于developer的逐条改写成user，保留该条内容；用^developer$锚定，不误伤其它角色",
+            "description": "claude-: Bedrock不接受messages里的developer角色(400 Unexpected role \"developer\"，只允许user/assistant/system)，把role精确等于developer的逐条改写成user，保留该条内容；用^developer$锚定，不误伤其它角色。性能gate：第2个条件用gjson查询messages.#(role==\"developer\")探测请求里是否真有developer角色，没有则整条跳过(不展开messages.*.role通配、不逐条sjson重写)，developer角色极罕见故绝大多数请求零成本",
             "mode": "regex_replace",
             "path": "messages.*.role",
             "from": "^developer$",
@@ -575,8 +587,14 @@
                     "path": "model",
                     "mode": "prefix",
                     "value": "claude-"
+                },
+                {
+                    "path": "messages.#(role==\"developer\").role",
+                    "mode": "full",
+                    "value": "developer"
                 }
-            ]
+            ],
+            "logic": "AND"
         },
         {
             "description": "claude-: thinking内容块里的endpoint_signature不被Bedrock支持(报错路径...content.M.thinking.endpoint_signature里thinking是判别联合变体标签type=thinking，真实字段在块顶层messages.N.content.M.endpoint_signature)，逐个删除；signature本体保留，不影响thinking多轮验签",
@@ -587,8 +605,14 @@
                     "path": "model",
                     "mode": "prefix",
                     "value": "claude-"
+                },
+                {
+                    "path": "messages.#.content|@flatten|#(endpoint_signature)#|#",
+                    "mode": "gt",
+                    "value": 0
                 }
-            ]
+            ],
+            "logic": "AND"
         },
         {
             "description": "删除messages里的system角色",

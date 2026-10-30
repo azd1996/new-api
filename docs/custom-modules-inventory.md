@@ -13,20 +13,49 @@
 
 ## 当前总进度（2026-10-29 全量收口）
 
-- rebase 工作区：`/Users/aizhendong/Desktop/Projects/work/ai/ai-gateway/new-api-rebase`，分支 `rebase/v1.0.0-rc.47-20261025`（工作树干净，全部已提交；共 67 个定制 commit）。
-- **后端 A–N 可搬部分已全部落地**；**前端 web/src 重落也已全部完成**（N/I/K/H+F/L/J+L/M+D+E+F/system-info/A 各有提交）；**feature 分支快照后的增量 eda601c(debug-scope)/558a4f1(前端 perf) 也已补搬**。`bunx tsc -b` 全绿 + `bun run build` 成功 + 改动文件 oxlint 0 error。
-- **代码类定制已全部搬完**。剩余的只有「有意不搬/因后端未搬而延后」的项（下方"仍未搬清单"）、未经真实库验证的 DB 迁移、以及待补的非英文译文。
+- rebase 工作区：`/Users/aizhendong/Desktop/Projects/work/ai/ai-gateway/new-api-rebase`，分支 `rebase/v1.0.0-rc.47-20261025`（工作树干净，全部已提交；共 78 个定制 commit）。
+- **后端 A–N 可搬部分已全部落地**；**前端 web/src 重落也已全部完成**（N/I/K/H+F/L/J+L/M+D+E+F/system-info/A 各有提交）；**feature 分支两批增量也已补搬**（见下）。`bunx tsc -b` 全绿 + `bun run build` 成功 + 改动文件 oxlint 0 error + `go build ./...` 过。
+- **feature 分支代码类定制已全部搬完（含 HEAD f36d5301f 之前的全部提交）**。两批增量：①`353e200a6`(eda601c debug-scope)、`15e7738ef`(558a4f1 perf)；②`c9bddbbbc`(F retry return_error+first-match)、`de1902817`(H 代理 tp/force_http+可锁定)、`4297397cd`(J/L 日志分析弹窗 /api/log/analysis)、`310be4805`(usage-stats mock 原型)、`b48416e26`(维护页 changelog)、`e6340c552`(csl_hourly 月度汇总)、`a812707d5`(日志多值/include-exclude)。剩余只有「有意不搬」项（下方"仍未搬清单"）、未经真实库验证的 DB 迁移、运行时未实测。
 - ⚠️ **未经真实库验证的 DB 迁移**（待 owner 在含 ClickHouse 环境跑）：L 的 logs 5 金额列 + quota_data 2 列；J/K 的 session_id/trace-tag/customer_id/downstream_request_id/error_signature_hash 列；M 的 retry_triggered 列。SQLite 已验，MySQL/PG/ClickHouse 待验。
-- ⚠️ **前端运行时未实测**（本地未起服务，仅验编译/构建/lint）；**非英文译文统一待补**（英文源串天然可用；仅 N 调度已带简中 `efbe8bccb`）。
+- ⚠️ **前端运行时未实测**（本地未起服务，仅验编译/构建/lint）；**简体中文(zh)译文已补齐**（`38707d707`，37 key，走 i18n-translate skill 脚本；zh 仅剩 Doubao/SGLang/Responses WebSocket 等品牌词未译）；**fr/ja/ru/vi/zh-TW 按 owner 要求只补 zh、其余语言待补**（运行时回退英文）。
 - ⚠️ **rebase 既有红测（非本次搬运引入）**：`TestOaiResponsesStreamHandlerCompletionLifecycle`（relay/channel/openai）在干净 HEAD 即 FAIL，待单独排查。
+
+## 2026-10-30 逐 commit 搬运缺口审计 + 补搬（主库 MySQL 5.6，灰度前排查）
+
+> 逐 commit 复核 feature(110 commit) 最终态 vs rebase，发现「最终态对齐」静默丢掉了 **3 处夹在 `feat(xxx)` 命名 commit 里的跨领域/基建改动**（不在模块映射里，最易漏）。均已补搬，`gofmt` + `go build`(root model/relay/service) + relaykit `GOWORK=off build` + 相关单测通过；**⚠️ 三库真实迁移仍待 owner 验**。line 18「代码类定制已全部搬完」据此修正。
+
+1. **MySQL 5.6 适配（最关键，曾致 5.6 主库 AutoMigrate 必失败）** — `ec408d863`/`62216ad81`（藏在 `feat(retry)`）：5.6 无原生 `json` 列 → 探测版本后降级 `longtext`。rebase 整段漏搬。**已补**：新建 `model/gorm_json_type.go`（`detectMySQLJSONSupport`/`jsonColumnType` + `ChannelInfo`/`Properties`/`TaskPrivateData`/`JSONValue` 挂 `GormDBDataType`）、去掉 channel/task/prefill 的 `gorm:"type:json"` 标签、`Task.Data`(json.RawMessage 不能挂方法)去标签走方言默认 bytes（**刻意不写 `type:longtext`——PG 无此类型**）、main.go 加 `autoMigrateSession()`(pre-5.7.8 给 CREATE TABLE 加 `ROW_FORMAT=DYNAMIC` 避 767B 索引限制) + 在 InitDB 的 MySQL 分支接 `detectMySQLJSONSupport(DB)`、补 3 个纯函数单测。
+2. **`ErrorSignatureAlias` 表漏进 `migrateDB` AutoMigrate**（K；feature 有，rebase 列表只有 Customer+3 张 x_schedule）。`SyncErrorAliasCache` 轮询 + 别名 CRUD 依赖它；对 owner 现有 5.6 库=潜在（表早已建），全新部署会「表不存在」。**已补**：加回 `&ErrorSignatureAlias{}`。
+3. **`38b2ea51f` 按渠道指定 upstream-request-id 头**（J）。`ChannelSettings.UpstreamRequestIdHeader`(relaykit/dto) + api_request 读取覆盖 + http.go `ShouldCopyUpstreamHeader` 的 `== ""` 守卫整组漏搬（行为缺失，非启动崩溃）。**已补**。
+
+> 已核对**已落地**（无需补）：Log 全部定制列（session_id/downstream_request_id/customer_id/error_signature_hash/retry_triggered/raw_quota/stat_quota/stat_group_ratio/customer_stat_quota/customer_discount）结构体 + ClickHouse ALTER 清单齐；QuotaData 的 customer_id/channel_stat_quota/customer_stat_quota；Customer 表 + SyncCustomerCache；3 张 x_schedule；Channel 的 Param/HeaderOverride；db10e18+f36d530 日志分析弹窗全套。
+
+### 第二轮（符号级比对）缺口补搬 — 2026-10-30
+
+上面 3 处的 rebase 提交：MySQL 5.6 `78ecd34fa`、reqid 头 `f7faeac9c`（ErrorSignatureAlias 并入 78ecd34fa）。符号级比对另发现的缺口按序补搬：
+
+- response_filter `bd24a7bdf` · Responses 200-body 守卫 `a127752a6` · retry-override 审计日志(type 8, admin-only) `3ca95eab8` · param-override 审计折叠 `c64669191` · 独立 debug 日志文件 `d44f3d8b1` · admin_info.proxy(used proxy) `f7b26b3d5` · Prometheus TTFT/error/stat-amount `87dc28ab6` · override 模板保存校验 `4350b8dce` · 日志 customer_name/downstream_trace_tag 过滤 `ebb32422f` · AWS 渠道拒绝 TP 代理 `0cc1aca76`（feature 侧对应改动仍未提交）。
+- 前端：渠道抽屉模板引用/response_filter/reqid 头/统计倍率 `00fd8472f`（**修复此前 rebase UI 保存渠道会丢这些设置**）；禁用确认 + 列表 Stat Ratio `c6fc77f3f`；日志 type 8 + 详情(customer/trace tag/proxy/shutdown/retry) + 3 个 admin 过滤 `ccd77f670`；i18n 7 语言补 265 key（复用 feature 译文，zh-TW 等新译）+ static-keys `d73cdfbc8`。
+- feature 新提交 `5329e6af1`（统计分析浮窗导出图片/Markdown + AWS 拒 TP 代理）：导出部分 → `dace16e49`（新增依赖 `html-to-image`，按钮放在共享 Dialog 正文顶部，3 个 key 补齐 7 语言）；AWS 部分此前已由 `0cc1aca76` 搬过。
+- 有意跳过：MonitorOverloadSamples 可配（上游已对齐）；`retry_override_stream_precommit_chunks` 按设计不在 UI 暴露（`.comate/specs/retry-override-stream-precommit-buffer/summary.md:43`），后端默认 3，owner 已接受「UI 保存渠道会清掉手工设的非默认值」的现状。
+- 验证：go build/gofmt/相关 go test；前端 `bunx -p typescript@5.9 tsc -b` 0 error、改动文件 oxlint 0 error、usage-logs/channels vitest 新增用例通过（usage-logs 有 17 个既有失败，HEAD 上同样失败）。**三库真跑、运行时 UI 均未验**。
+
+### 第三轮三项审计修复 — 2026-10-30（未提交）
+
+- 实际统计：源 `a63364d1..HEAD` 为 **111 个非 merge commit**（`git rev-list --count --no-merges a63364d1..HEAD`）；目标 `upstream/main..HEAD` 为 **ahead 95**，HEAD 仍为 `dace16e495377a2476ef0c248a0f6758c7d404f6`。以上为本轮核实的当前值，前述 101/110、78 为历史阶段记录；本轮没有新增提交。
+- **retry-only 改写漏执行**：目标 11 个 relay 实现文件、13 个调用入口补齐 `len(info.ParamOverride) > 0 || len(info.PendingRetryRewrite) > 0`，覆盖 chat→Responses 两入口、Responses HTTP/WebSocket 共用准备函数、Claude、Gemini 两处、Images、Embedding、Rerank、compatible、DeepSeek tools、Alpha search；保留 `!paramOverrideApplied && (...)`，沿 controller retry fallback → 暂存改写 → override 应用并清空调用链复核。
+- **成功率分析筛选丢失**：`coreFilterForSuccess` 保留 `CustomerName` / `DownstreamTraceTag`，补单字段与组合筛选的真实计数回归，继续剥离错误下钻条件。
+- **Claude session 来源与记录时机**：严格参照源 handler 最终态，注入前保存 `clientHadClaudeUserID`，param/retry override 后读取最终 metadata，来源恢复为 `metadata.user_id` / `content-fallback`。覆盖客户端值、注入值、retry-only 改写、param 改写和无可解析 session；扣费逻辑未改。
+- **实际验证**：目标全部 14 个修改的 Go 文件已 `gofmt`；`git diff --check`、根模块 `go build ./...`、relaykit 内 `GOWORK=off go build ./...` 均成功。`go test ./relay ./relay/common ./relay/retryrule ./model -run 'TestClaude|TestFillClaude|TestRecordRequestSessionID|TestResponses|TestPrepareResponses|TestTextRequestViaResponses|TestSuccessCounts|TestLogFilter|TestApplyParamOverride|TestRetry' -count=1` 四包均通过。回归扩展现有 3 个测试文件，使用 require/assert；最初测试常量名和 param fixture 配置错误已修正并重跑通过，未宣称全量测试通过。
+- **验证边界与权限**：数据库行为变更适用目标 AGENTS 的真实三库门禁；本轮仅跑隔离内存 SQLite fixture，未运行应用启动或真实库迁移，MySQL/PostgreSQL/ClickHouse 未验证，不能视为三库兼容验证完成。本地 Docker 可用，现有 MySQL/ClickHouse 属运行中的应用环境，未对其运行测试或迁移；未见运行中的 PostgreSQL fixture。目标补丁工具写入成功；目标 gofmt 通过工具 `require_escalated` 权限机制执行成功，无遗留权限阻塞。源已有规则文件和本清单历史内容保留。
 
 ## 仍未搬清单（有意跳过 / 依赖未搬后端而延后）
 
 - **H 客户批量模型映射**（`5a9e5e046`）：按 owner 要求跳过（涉及 price.go 计费）。
-- **L 客户统计看板**（`989ef4369` customer amount metrics、`4abfc63d3` Customer Statistics）：后端未搬 → 前端 customer-charts 一并延后（依赖 quota_data.customer_id 聚合 + `/api/data/customers`）。
-- **J 日志剩余**：include/exclude、多值过滤、月度消耗汇总、net 生成速度（后端）、usage-statistics 原型 → 后端读单标量/无端点，前端一并延后。
-- **M 维护页 changelog/版本**（`55830f6be`）+ Docker 打包 CHANGELOG（`5b87e192b`）：延后（无端点/孤儿）。
-- **M System Behavior 跨实例即时 pub/sub**（`12b3ea827` 的 pub/sub 增量）：配置区已搬，pub/sub 实时同步按上游 wsmanager 范式重做为可选延后项。
+- ~~**L 客户统计看板**~~ ✅ **已补搬完成（2026-10-29）**：后端 `8256a3e2c`（quota_data 加 `customer_id` 维度列 + 写链路 LogQuotaData/缓存键/SaveQuotaDataCache·increaseQuotaData WHERE 带 customer_id；`GetQuotaDataGroupByCustomer`；`GET /api/data/customers` AdminAuth + `controller.GetQuotaDatesByCustomer`，用 I 的 `CustomerName`/`CustomerConfigured` 富化；customer_id 源头取 `common.TraceTagFromContext(c)`——与 J 写 `Log.CustomerId` 同源，非计费、Quota 写路径未碰；quota_data 仅主库 AutoMigrate 加列，ClickHouse 只存 logs 无需动）。前端 `18a95c83c`（dashboard 新增 admin-only「Customer Analytics」section + customer-charts，金额=客户折后[未配置回退渠道折后，display-only]+ profit/占比，section-registry 注册、无新路由）。tsc -b + build + charts vitest 过。⚠️ customer_id 列迁移仅 SQLite 验，MySQL/PG 待真库；历史 quota_data 行 customer_id 为空，客户统计只反映部署后数据。
+- **J 日志剩余** — ✅ **已全部补搬（2026-10-29）**：include/exclude + 多值过滤（后端 LogFilter 多值/IN·NOT IN + 前端 operator 切换+多选chips，`a812707d5`）；net 生成速度后端 `other.lat` 补齐喂前端 fallback + 过滤器站点级模型候选（`44b65c107`）；月度消耗汇总 + 60d span（csl_hourly `GET /api/log/monthly`，`e6340c552`）；usage-statistics 原型（`310be4805`，common 日志页 List/Statistics 切换，**mock 数据、无真实后端**，view 搜索参；未接真实端点）。
+- **M 维护页 changelog/版本**（`55830f6be` + Docker 打包 `5b87e192b`）：✅ **已搬（2026-10-29，`b48416e26`）**。rebase 根加 `CHANGELOG.md`（取自 fork，196行，构建期 `?raw` 导入源）；`changelog-dialog.tsx`（导入深度 5 个 `../`，因 rebase 是 `web/` 非 `web/default/`）接进 maintenance `update-checker-section`（版本卡旁 View changelog 按钮）；`web/rsbuild.config.ts` 加 `resourceQuery:/raw/→asset/source` 规则；`web/src/env.d.ts` 加 `*?raw` 模块声明让 tsc 过；Dockerfile `COPY ./CHANGELOG.md /build/CHANGELOG.md`（在 `/build/web` 构建前，深度对齐）+ `.dockerignore` `!CHANGELOG.md`。tsc -b 净 + oxlint 净 + `bun run build` 成功（证明 `?raw` 解析）。⚠️ Docker 镜像构建未实测（本地无 docker），但本地 build 已证机制可用。
+- **M System Behavior 跨实例缓存同步**（`12b3ea827`）：✅ **已搬，且本就不是 pub/sub（订正）**。该 commit 的机制是**按 SYNC_FREQUENCY 定时轮询**重建内存缓存（`SyncCustomerCache`/`SyncErrorAliasCache`，仿上游 SyncChannelCache/SyncOptions），无任何 publish/subscribe。之前写的"pub/sub 实时同步重做"是**我提的可选升级设想，并非 fork 实际代码**，已订正。三块内容 rebase 均已在：System Behavior 前端（随 `ccb429d37`+`eda601c`）、`SyncCustomerCache`+main.go 注册（随 I，`customer_cache.go:47`/`main.go:122`）、`SyncErrorAliasCache`+main.go 注册（随 K，`error_signature_alias.go:163`/`main.go:123`）。无遗留。
 - **routing-reliability-section（前端）**：**非 fork 定制，无需搬**。该文件在 merge-base `a63364d1` 即已存在（上游原有，最后改动者 CaIon 2026-07-11，fork 从未提交过改动）；上游后来把它重构成 `request-policies` feature（系统设置→请求策略：Request checks / Sessions and retries / Channel health 三子页）。属上游演进，rebase 用上游新版即可。
 - **558a4f1 后端合并 stat 扫描**：rebase 该 stat 路径无 fork 要合并的第二个扫描，无可合并、强搬会动语义，跳过（前端 perf 已搬）。
 - **docs/\*.md 与 `.my-rules/*.json`**（含 `05e49d3`）：按既定政策不搬（聚焦代码、避免 docs 膨胀）。
@@ -375,7 +404,6 @@ VM(PromQL) 指标驱动的自动调度配置 + 预览，phase 1 未接真实调�
 3. 侵入模块（🔴）一律改写为"独立文件 + 上游文件插一行 hook"，每搬完一个模块 `gofmt && go test`。
 4. 前端（E/F/H/I/J/K/L/M/N 的 UI 部分）需在上游新的 `web/src/` 结构重落，无法平移 `web/default/`。
 5. L（金额口径）与上游 `cc/cc1h/cc12h` 表达式引擎冲突最大，建议最后搬并单独评估。
-
 
 
 
