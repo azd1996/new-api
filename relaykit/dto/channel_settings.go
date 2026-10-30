@@ -27,6 +27,10 @@ type ChannelSettings struct {
 	ResponsesWebSocketEnabled bool     `json:"responses_websocket_enabled,omitempty"`
 	SystemPrompt              string   `json:"system_prompt,omitempty"`
 	SystemPromptOverride      bool     `json:"system_prompt_override,omitempty"`
+	// UpstreamRequestIdHeader is the upstream response header to read as the
+	// upstream request ID for logging. Empty falls back to common.RequestIdKey
+	// (X-Oneapi-Request-Id). Matched case-insensitively via http.Header.Get.
+	UpstreamRequestIdHeader string `json:"upstream_request_id_header,omitempty"`
 	// TaskExtendPluginKeys lists the task plugins a New API channel (type 60)
 	// is extended with. The upstream gateway may host many plugins, so the
 	// channel serves every listed plugin's models while the request still pins
