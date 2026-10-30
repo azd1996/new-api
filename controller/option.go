@@ -182,6 +182,39 @@ func writePasskeyDomainSettingsError(c *gin.Context, err error) {
 	common.ApiError(c, err)
 }
 
+// validateOverrideTemplatesJSON validates an override-template library blob
+// (override_template_setting.param_templates / .retry_templates) before it is
+// persisted: it must be a JSON array of entries, each with a non-empty unique
+// name and a content field. The content's semantic validity (operations /
+// retry-rule shape) is enforced leniently at request time, where a bad entry is
+// skipped rather than failing the whole channel.
+func validateOverrideTemplatesJSON(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || trimmed == "[]" {
+		return nil
+	}
+	var items []map[string]any
+	if err := common.UnmarshalJsonStr(trimmed, &items); err != nil {
+		return common.NewMessage("Override templates must be a valid JSON array")
+	}
+	seen := make(map[string]bool, len(items))
+	for i, item := range items {
+		name, _ := item["name"].(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return common.NewMessage("Override template #{{index}} is missing a name", map[string]any{"index": i + 1})
+		}
+		if seen[name] {
+			return common.NewMessage("Duplicate override template name: {{name}}", map[string]any{"name": name})
+		}
+		seen[name] = true
+		if _, ok := item["content"]; !ok {
+			return common.NewMessage("Override template {{name}} is missing content", map[string]any{"name": name})
+		}
+	}
+	return nil
+}
+
 func UpdateOption(c *gin.Context) {
 	var option OptionUpdateRequest
 	err := common.DecodeJson(c.Request.Body, &option)
@@ -265,6 +298,11 @@ func UpdateOption(c *gin.Context) {
 	case "theme.frontend":
 		if option.Value != "default" {
 			common.ApiErrorT(c, "The Classic frontend has been removed. The theme can only be set to default")
+			return
+		}
+	case "override_template_setting.param_templates", "override_template_setting.retry_templates":
+		if err = validateOverrideTemplatesJSON(option.Value.(string)); err != nil {
+			common.ApiError(c, err)
 			return
 		}
 	case "GroupRatio":
