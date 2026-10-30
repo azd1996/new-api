@@ -280,6 +280,15 @@ export const channelFormSchema = z
     // Retry override (stored in setting JSON as an array of four-phase rules).
     // Kept as a pretty-printed JSON string in the form, edited as multiline text.
     retry_override: z.string().optional(),
+    // Header name carrying the upstream request id into logs (setting JSON).
+    upstream_request_id_header: z.string().optional(),
+    // Response filter rules, one per line in the form (string[] in setting).
+    response_filter: z.string().optional(),
+    // Reporting-only stat ratio; string in the form, number in setting JSON.
+    stat_group_ratio: z.string().optional(),
+    // Named param/retry override templates referenced by name.
+    param_override_template_refs: z.array(z.string()).optional(),
+    retry_override_template_refs: z.array(z.string()).optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -476,6 +485,11 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   system_prompt_override: false,
   proxy_aliases: [],
   retry_override: '',
+  upstream_request_id_header: '',
+  response_filter: '',
+  stat_group_ratio: '',
+  param_override_template_refs: [],
+  retry_override_template_refs: [],
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -525,6 +539,11 @@ export function transformChannelToFormDefaults(
     system_prompt_override: false,
     proxy_aliases: [] as string[],
     retry_override: '',
+    upstream_request_id_header: '',
+    response_filter: '',
+    stat_group_ratio: '',
+    param_override_template_refs: [] as string[],
+    retry_override_template_refs: [] as string[],
   }
 
   if (channel.setting) {
@@ -556,6 +575,18 @@ export function transformChannelToFormDefaults(
         retry_override: Array.isArray(parsed.retry_override)
           ? JSON.stringify(parsed.retry_override, null, 2)
           : '',
+        upstream_request_id_header: parsed.upstream_request_id_header || '',
+        response_filter: readStringArray(parsed.response_filter).join('\n'),
+        stat_group_ratio:
+          typeof parsed.stat_group_ratio === 'number'
+            ? String(parsed.stat_group_ratio)
+            : '',
+        param_override_template_refs: readStringArray(
+          parsed.param_override_template_refs
+        ),
+        retry_override_template_refs: readStringArray(
+          parsed.retry_override_template_refs
+        ),
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -712,9 +743,7 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     settingObj.tls_insecure_skip_verify = true
   }
 
-  const proxyAliases = (formData.proxy_aliases || [])
-    .map((alias) => alias.trim())
-    .filter((alias) => alias.length > 0)
+  const proxyAliases = trimNonEmpty(formData.proxy_aliases)
   if (proxyAliases.length > 0) {
     settingObj.proxy_aliases = proxyAliases
   }
@@ -730,7 +759,47 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     }
   }
 
+  const upstreamRequestIdHeader = formData.upstream_request_id_header?.trim()
+  if (upstreamRequestIdHeader) {
+    settingObj.upstream_request_id_header = upstreamRequestIdHeader
+  }
+  const responseFilter = trimNonEmpty(
+    (formData.response_filter || '').split('\n')
+  )
+  if (responseFilter.length > 0) {
+    settingObj.response_filter = responseFilter
+  }
+  const statGroupRatio = Number(formData.stat_group_ratio)
+  if (
+    formData.stat_group_ratio?.trim() &&
+    Number.isFinite(statGroupRatio) &&
+    statGroupRatio > 0
+  ) {
+    settingObj.stat_group_ratio = statGroupRatio
+  }
+  const paramTemplateRefs = trimNonEmpty(formData.param_override_template_refs)
+  if (paramTemplateRefs.length > 0) {
+    settingObj.param_override_template_refs = paramTemplateRefs
+  }
+  const retryTemplateRefs = trimNonEmpty(formData.retry_override_template_refs)
+  if (retryTemplateRefs.length > 0) {
+    settingObj.retry_override_template_refs = retryTemplateRefs
+  }
+
   return JSON.stringify(settingObj)
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item: unknown): item is string => typeof item === 'string'
+  )
+}
+
+function trimNonEmpty(values: string[] | undefined): string[] {
+  return (values || [])
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
 }
 
 /**

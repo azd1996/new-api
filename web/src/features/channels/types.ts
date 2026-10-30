@@ -96,6 +96,12 @@ export interface ChannelSettings {
   retry_override?: Array<Record<string, unknown>>
   // Named proxy-pool aliases consulted in order before the proxy address.
   proxy_aliases?: string[]
+  upstream_request_id_header?: string
+  response_filter?: string[]
+  // Reporting-only ratio for the stat amount of free pass-through channels.
+  stat_group_ratio?: number
+  param_override_template_refs?: string[]
+  retry_override_template_refs?: string[]
   http_protocol?: 'auto' | 'http1' | string
   http2_connection_shards?: number
   tls_insecure_skip_verify?: boolean

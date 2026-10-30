@@ -52,7 +52,14 @@ const CONFIGURATION_BLOCKS = {
   },
   overrideRules: {
     section: 'request',
-    fields: ['status_code_mapping', 'param_override', 'header_override'],
+    fields: [
+      'status_code_mapping',
+      'param_override',
+      'header_override',
+      'param_override_template_refs',
+      'retry_override_template_refs',
+      'response_filter',
+    ],
   },
   requestProcessing: {
     section: 'request',
@@ -86,6 +93,8 @@ const CONFIGURATION_BLOCKS = {
       'http2_connection_shards',
       'tls_insecure_skip_verify',
       'disable_task_polling_sleep',
+      'upstream_request_id_header',
+      'stat_group_ratio',
     ],
   },
   upstreamModelDetection: {
@@ -149,7 +158,10 @@ export function getChannelConfigurationState(
     overrideRules:
       hasConfiguredJson(values.status_code_mapping) ||
       hasConfiguredJson(values.param_override) ||
-      hasConfiguredJson(values.header_override),
+      hasConfiguredJson(values.header_override) ||
+      Boolean(values.param_override_template_refs?.length) ||
+      Boolean(values.retry_override_template_refs?.length) ||
+      Boolean(values.response_filter?.trim()),
     requestProcessing: Boolean(
       (values.type === 1 && values.force_format) ||
       values.thinking_to_content ||
@@ -177,7 +189,9 @@ export function getChannelConfigurationState(
       (values.http_protocol && values.http_protocol !== 'auto') ||
       (values.http2_connection_shards ?? 1) > 1 ||
       values.tls_insecure_skip_verify ||
-      values.disable_task_polling_sleep
+      values.disable_task_polling_sleep ||
+      values.upstream_request_id_header?.trim() ||
+      values.stat_group_ratio?.trim()
     ),
     upstreamModelDetection:
       MODEL_FETCHABLE_TYPES.has(values.type) &&

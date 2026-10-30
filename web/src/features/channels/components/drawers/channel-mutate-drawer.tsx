@@ -133,9 +133,11 @@ import {
   getChannelDefaultBaseURLs,
   getGroups,
   getPrefillGroups,
+  getOverrideTemplates,
   getProxyHealth,
   getTaskPluginOptions,
   refreshCodexCredential,
+  type OverrideTemplateOption,
 } from '../../api'
 import {
   ADD_MODE_OPTIONS,
@@ -156,7 +158,6 @@ import {
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../../constants'
 import { useChannelKeyDisclosure } from '../../hooks/use-channel-key-disclosure'
-import { RetryRulesSection } from '../retry-rules-section'
 import {
   useChannelModelDiscovery,
   type ChannelModelDiscoveryRequest,
@@ -235,6 +236,7 @@ import {
 } from '../model-mapping-editor'
 import { ModelRedirectPanel } from '../model-redirect-panel'
 import { ResponsesWebSocketSetting } from '../responses-websocket-setting'
+import { RetryRulesSection } from '../retry-rules-section'
 import { UpstreamModelSelection } from '../upstream-model-selection'
 import {
   ChannelConfiguration,
@@ -562,6 +564,26 @@ export function ChannelMutateDrawer({
     queryFn: async () => requireServerSuccess(await getPrefillGroups('model')),
     enabled: open && !showProviderPicker,
   })
+
+  // Named param/retry override templates offered to the template-ref selects.
+  const { data: overrideTemplatesData } = useQuery({
+    queryKey: ['channel_override_templates'],
+    queryFn: async () => requireServerSuccess(await getOverrideTemplates()),
+    enabled: open && !showProviderPicker,
+  })
+  const toTemplateOptions = (
+    items: OverrideTemplateOption[] | undefined
+  ): { value: string; label: string }[] =>
+    (items || []).map((tpl) => ({
+      value: tpl.name,
+      label: tpl.description ? `${tpl.name} — ${tpl.description}` : tpl.name,
+    }))
+  const paramTemplateOptions = toTemplateOptions(
+    overrideTemplatesData?.data?.param
+  )
+  const retryTemplateOptions = toTemplateOptions(
+    overrideTemplatesData?.data?.retry
+  )
 
   const { copyToClipboard } = useCopyToClipboard()
 
@@ -1865,6 +1887,59 @@ export function ChannelMutateDrawer({
     />
   )
 
+  const upstreamRequestIdHeaderFields = (
+    <FormField
+      control={form.control}
+      name='upstream_request_id_header'
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{t('Upstream Request ID Header')}</FormLabel>
+          <FormControl>
+            <Input
+              placeholder='X-Oneapi-Request-Id'
+              {...field}
+              value={field.value || ''}
+            />
+          </FormControl>
+          <FormDescription>
+            {t(
+              'Upstream response header to record as the upstream request ID in logs. Leave empty to use the default.'
+            )}
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+
+  const statGroupRatioFields = (
+    <FormField
+      control={form.control}
+      name='stat_group_ratio'
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{t('Statistics Group Ratio')}</FormLabel>
+          <FormControl>
+            <Input
+              {...field}
+              value={field.value || ''}
+              type='number'
+              step='any'
+              min={0}
+              placeholder='1'
+            />
+          </FormControl>
+          <FormDescription>
+            {t(
+              'Reporting-only ratio for the discounted amount in statistics. Does not affect billing. Leave empty to use 1 (discounted equals original).'
+            )}
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+
   const systemPromptFields = (
     <FormField
       control={form.control}
@@ -2838,6 +2913,92 @@ export function ChannelMutateDrawer({
         />
 
         <RetryRulesSection form={form} disabled={sensitiveLocked} />
+
+        <FormField
+          control={form.control}
+          name='param_override_template_refs'
+          render={({ field }) => (
+            <FormItem className='space-y-3 border-t pt-4'>
+              <div className='space-y-1'>
+                <FormLabel>{t('Parameter Override Templates')}</FormLabel>
+                <FormDescription>
+                  {t(
+                    'Reference reusable parameter override templates by name.'
+                  )}
+                </FormDescription>
+              </div>
+              <FormControl>
+                <MultiSelect
+                  options={paramTemplateOptions}
+                  selected={field.value || []}
+                  onChange={field.onChange}
+                  disabled={sensitiveLocked}
+                  allowCreate
+                  createLabel='Add template "{{value}}"'
+                  placeholder={t('Select parameter override templates')}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name='retry_override_template_refs'
+          render={({ field }) => (
+            <FormItem className='space-y-3 border-t pt-4'>
+              <div className='space-y-1'>
+                <FormLabel>{t('Retry Override Templates')}</FormLabel>
+                <FormDescription>
+                  {t('Reference reusable retry override templates by name.')}
+                </FormDescription>
+              </div>
+              <FormControl>
+                <MultiSelect
+                  options={retryTemplateOptions}
+                  selected={field.value || []}
+                  onChange={field.onChange}
+                  disabled={sensitiveLocked}
+                  allowCreate
+                  createLabel='Add template "{{value}}"'
+                  placeholder={t('Select retry override templates')}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name='response_filter'
+          render={({ field }) => (
+            <FormItem className='space-y-3 border-t pt-4'>
+              <div className='space-y-1'>
+                <FormLabel>{t('Response Filter Rules')}</FormLabel>
+                <FormDescription>
+                  {t(
+                    'Remove fields from the upstream response before returning to the client. One rule per line: a bare key name is removed at every nesting level, a path containing "." or "#" is treated as an exact gjson path. Example: content_filter_results'
+                  )}
+                </FormDescription>
+              </div>
+              <FormControl>
+                <Textarea
+                  {...field}
+                  value={field.value || ''}
+                  rows={4}
+                  disabled={sensitiveLocked}
+                  placeholder={
+                    'content_filter_results\nprompt_filter_results\ncontent_filters'
+                  }
+                  className='font-mono text-xs'
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
         <FormField
           control={form.control}
@@ -4520,45 +4681,43 @@ export function ChannelMutateDrawer({
                                   ? t(
                                       'Showing a masked key. Reveal to view the full key.'
                                     )
-                                  : t(
-                                      'Showing a masked key for verification.'
-                                    )}
+                                  : t('Showing a masked key for verification.')}
                               </p>
                             </div>
                             {canRevealChannelKey && (
-                            <div className='flex items-center gap-2'>
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                onClick={handleRevealKey}
-                                disabled={
-                                  isChannelKeyLoading || verification.isActive
-                                }
-                              >
-                                {isChannelKeyLoading ||
-                                verification.isActive ? (
-                                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-                                ) : (
-                                  <Eye className='mr-2 h-4 w-4' />
-                                )}
-                                {t('Reveal key')}
-                              </Button>
-                              <Button
-                                type='button'
-                                variant='ghost'
-                                size='sm'
-                                onClick={async () => {
-                                  if (channelKey) {
-                                    await copyToClipboard(channelKey)
+                              <div className='flex items-center gap-2'>
+                                <Button
+                                  type='button'
+                                  variant='outline'
+                                  size='sm'
+                                  onClick={handleRevealKey}
+                                  disabled={
+                                    isChannelKeyLoading || verification.isActive
                                   }
-                                }}
-                                disabled={!channelKey}
-                              >
-                                <Copy className='mr-2 h-4 w-4' />
-                                {t('Copy')}
-                              </Button>
-                            </div>
+                                >
+                                  {isChannelKeyLoading ||
+                                  verification.isActive ? (
+                                    <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                                  ) : (
+                                    <Eye className='mr-2 h-4 w-4' />
+                                  )}
+                                  {t('Reveal key')}
+                                </Button>
+                                <Button
+                                  type='button'
+                                  variant='ghost'
+                                  size='sm'
+                                  onClick={async () => {
+                                    if (channelKey) {
+                                      await copyToClipboard(channelKey)
+                                    }
+                                  }}
+                                  disabled={!channelKey}
+                                >
+                                  <Copy className='mr-2 h-4 w-4' />
+                                  {t('Copy')}
+                                </Button>
+                              </div>
                             )}
                           </div>
                           <Input
@@ -4846,6 +5005,8 @@ export function ChannelMutateDrawer({
                 {httpProtocolFields}
                 {httpShardsFields}
                 {tlsInsecureSkipVerifyFields}
+                {upstreamRequestIdHeaderFields}
+                {statGroupRatioFields}
               </fieldset>
             </div>
             {upstreamModelDetectionFields}
