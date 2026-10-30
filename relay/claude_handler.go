@@ -124,6 +124,10 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 		claudeModel := gjson.GetBytes(jsonData, "model").String()
 
+		// Remember whether the client supplied its own metadata.user_id, so the
+		// session-id source can be labelled client vs synthesized.
+		clientHadClaudeUserID := strings.TrimSpace(gjson.GetBytes(jsonData, "metadata.user_id").String()) != ""
+
 		// Metadata.user_id synthesis defaults ON for every (group, model); it is
 		// skipped only for (group, model) pairs listed in
 		// metadata_injection_disable_setting. Synthesizes a Claude Code-style
@@ -143,10 +147,6 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
-		// Record the request session id (from the final metadata.user_id blob,
-		// client-provided or injected) for the consume/error log.
-		recordRequestSessionID(c, claudeSessionID(jsonData), "claude_metadata")
-
 		// For configured (group, model) rules, force the 1-hour prompt-cache TTL:
 		// rewrite every existing cache_control breakpoint to ttl=1h and append the
 		// extended cache TTL beta header. Only list models that support 1h, else
@@ -160,12 +160,23 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 
 		// apply param override
-		if len(info.ParamOverride) > 0 {
+		if len(info.ParamOverride) > 0 || len(info.PendingRetryRewrite) > 0 {
 			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 			if err != nil {
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+
+		// Record the final outbound session after param and retry overrides.
+		claudeSID := claudeSessionID(jsonData)
+		claudeSource := ""
+		if claudeSID != "" {
+			claudeSource = "metadata.user_id"
+			if !clientHadClaudeUserID {
+				claudeSource = "content-fallback"
+			}
+		}
+		recordRequestSessionID(c, claudeSID, claudeSource)
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)

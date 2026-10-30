@@ -176,3 +176,39 @@ func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	assert.Equal(t, []int{2}, findIDs(LogFilter{DownstreamTraceTag: "tag-b"}))
 	assert.Empty(t, findIDs(LogFilter{CustomerName: "Acme", DownstreamTraceTag: "tag-b"}))
 }
+
+func TestSuccessCountsRetainCustomerAndTraceFilters(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	oldDB, oldType := LOG_DB, common.LogDatabaseType()
+	t.Cleanup(func() { LOG_DB = oldDB; common.SetLogDatabaseType(oldType) })
+	LOG_DB = db
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+	require.NoError(t, db.Create([]Log{
+		{ChannelId: 1, Type: LogTypeConsume, Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"a"}}`},
+		{ChannelId: 1, Type: LogTypeError, Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"b"}}`},
+		{ChannelId: 2, Type: LogTypeConsume, Other: `{"admin_info":{"customer_name":"Other","downstream_trace_tag":"b"}}`},
+	}).Error)
+	for _, tc := range []struct {
+		name, customer, trace string
+		consume, errors       map[int]int64
+	}{
+		{"customer", "Acme", "", map[int]int64{1: 1}, map[int]int64{1: 1}},
+		{"trace", "", "b", map[int]int64{2: 1}, map[int]int64{1: 1}},
+		{"combined", "Acme", "a", map[int]int64{1: 1}, map[int]int64{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			consume, errs, _, err := countConsumeErrorByChannel(coreFilterForSuccess(LogFilter{
+				CustomerName: tc.customer, DownstreamTraceTag: tc.trace,
+				Type: LogTypeError, ErrorKeyword: "does-not-match",
+			}))
+			require.NoError(t, err)
+			assert.Equal(t, tc.consume, consume)
+			assert.Equal(t, tc.errors, errs)
+		})
+	}
+}

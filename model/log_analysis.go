@@ -542,6 +542,8 @@ func coreFilterForSuccess(filter LogFilter) LogFilter {
 		SessionId:           filter.SessionId,
 		DownstreamRequestId: filter.DownstreamRequestId,
 		CustomerId:          filter.CustomerId,
+		CustomerName:        filter.CustomerName,
+		DownstreamTraceTag:  filter.DownstreamTraceTag,
 	}
 }
 

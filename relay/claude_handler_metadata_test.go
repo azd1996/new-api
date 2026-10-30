@@ -1,9 +1,18 @@
 package relay
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -15,6 +24,61 @@ const (
 	testAPIKey    = "abcdef0123456789XYZ789" // last 6 chars = XYZ789
 	seedSep       = "\x1f"
 )
+
+func TestClaudeHelperRecordsFinalSession(t *testing.T) {
+	for _, tc := range []struct {
+		name, metadata, rewrite, wantSession, wantSource string
+		param                                            bool
+	}{
+		{name: "client", metadata: `,"metadata":{"user_id":"{\"session_id\":\"client\"}"}`, wantSession: "client", wantSource: "metadata.user_id"},
+		{name: "injected", wantSource: "content-fallback"},
+		{name: "retry only", rewrite: `{"session_id":"retry"}`, wantSession: "retry", wantSource: "content-fallback"},
+		{name: "param overrides client", metadata: `,"metadata":{"user_id":"{\"session_id\":\"client\"}"}`, rewrite: `{"session_id":"param"}`, param: true, wantSession: "param", wantSource: "metadata.user_id"},
+		{name: "retry removes session", rewrite: `{}`, wantSession: sessionIDNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var outbound []byte
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				outbound, _ = io.ReadAll(r.Body)
+				// Stop before settlement; this fixture never accesses a database.
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"test rejection"}}`))
+			}))
+			defer server.Close()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			common.SetContextKey(c, constant.ContextKeyOriginalModel, "claude-sonnet-4")
+			common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeAnthropic)
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
+			common.SetContextKey(c, constant.ContextKeyChannelKey, "upstream-test")
+			common.SetContextKey(c, constant.ContextKeyTokenKey, testAPIKey)
+			var request dto.ClaudeRequest
+			require.NoError(t, common.UnmarshalJsonStr(`{"model":"claude-sonnet-4","max_tokens":16,"messages":[{"role":"user","content":"hi"}]`+tc.metadata+`}`, &request))
+			info := &relaycommon.RelayInfo{Request: &request, RelayFormat: types.RelayFormatClaude, OriginModelName: request.Model, RequestURLPath: "/v1/messages"}
+			if tc.rewrite != "" {
+				if tc.param {
+					common.SetContextKey(c, constant.ContextKeyChannelParamOverride, map[string]any{
+						"operations": []map[string]any{{"mode": "set", "path": "metadata.user_id", "value": tc.rewrite}},
+					})
+				} else {
+					info.PendingRetryRewrite = []map[string]any{{"mode": "set", "path": "metadata.user_id", "value": tc.rewrite}}
+				}
+			}
+			apiErr := ClaudeHelper(c, info)
+			require.NotNil(t, apiErr)
+			require.NotEmpty(t, outbound, "request must reach the upstream fixture")
+			wantSession := tc.wantSession
+			if wantSession == "" {
+				wantSession = claudeSessionID(outbound)
+				require.NotEmpty(t, wantSession)
+			}
+			assert.Equal(t, wantSession, common.GetContextKeyString(c, constant.ContextKeySessionID))
+			assert.Equal(t, tc.wantSource, common.GetContextKeyString(c, constant.ContextKeySessionIDSource))
+			assert.Empty(t, info.PendingRetryRewrite)
+		})
+	}
+}
 
 func TestFillClaudeMetadataUserID(t *testing.T) {
 	cases := []struct {

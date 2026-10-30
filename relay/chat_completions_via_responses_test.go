@@ -54,6 +54,7 @@ func TestPrepareResponsesRequestRetainsConvertedAdaptor(t *testing.T) {
 	})
 	request := &dto.OpenAIResponsesRequest{Model: "gpt-4o", Input: []byte(`"hello"`)}
 	info := relaycommon.GenRelayInfoResponses(c, request)
+	info.PendingRetryRewrite = []map[string]any{{"mode": "set", "path": "messages.0.content", "value": "rewritten"}}
 	adaptor, body, closer, apiErr := PrepareResponsesRequest(c, info, request)
 	require.Nil(t, apiErr)
 	defer closer.Close()
@@ -71,7 +72,8 @@ func TestPrepareResponsesRequestRetainsConvertedAdaptor(t *testing.T) {
 	var upstreamRequest dto.GeneralOpenAIRequest
 	require.NoError(t, common.Unmarshal(upstream.body, &upstreamRequest))
 	require.Len(t, upstreamRequest.Messages, 1)
-	assert.Equal(t, "hello", upstreamRequest.Messages[0].StringContent())
+	assert.Equal(t, "rewritten", upstreamRequest.Messages[0].StringContent())
+	assert.Empty(t, info.PendingRetryRewrite)
 	assert.Equal(t, []relaytypes.RelayFormat{relaytypes.RelayFormatOpenAIResponses, relaytypes.RelayFormatOpenAI}, info.RequestConversionChain)
 }
 
@@ -90,6 +92,49 @@ func TestIsResponsesEventStreamContentType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, isResponsesEventStreamContentType(tt.contentType))
+		})
+	}
+}
+
+func TestResponsesRetryRewriteConversionAndAppliedGuard(t *testing.T) {
+	for _, applied := range []bool{false, true} {
+		t.Run(map[bool]string{false: "chat rewrite before conversion", true: "already applied skips pending rewrite"}[applied], func(t *testing.T) {
+			var outbound []byte
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				outbound, _ = io.ReadAll(r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"message":"test rejection"}}`))
+			}))
+			defer server.Close()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			info := &relaycommon.RelayInfo{
+				RelayMode:       relayconstant.RelayModeChatCompletions,
+				RelayFormat:     relaytypes.RelayFormatOpenAI,
+				OriginModelName: "gpt-4o",
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType: constant.ChannelTypeOpenAI, ChannelBaseUrl: server.URL,
+					ApiKey: "test-key", UpstreamModelName: "gpt-4o",
+				},
+				PendingRetryRewrite: []map[string]any{{"mode": "set", "path": "messages.0.content", "value": "rewritten"}},
+			}
+			adaptor := &openaichannel.Adaptor{}
+			adaptor.Init(info)
+			if applied {
+				_, apiErr := relayResponsesRequest(c, info, adaptor, &dto.OpenAIResponsesRequest{Model: "gpt-4o", Input: []byte(`"hello"`)}, true)
+				require.NotNil(t, apiErr)
+				assert.Len(t, info.PendingRetryRewrite, 1)
+				assert.NotContains(t, string(outbound), "rewritten")
+			} else {
+				_, apiErr := textRequestViaResponses(c, info, adaptor, &dto.GeneralOpenAIRequest{
+					Model: "gpt-4o", Messages: []dto.Message{{Role: "user", Content: "hello"}},
+				})
+				require.NotNil(t, apiErr)
+				assert.Empty(t, info.PendingRetryRewrite)
+				assert.Contains(t, string(outbound), "rewritten")
+			}
+			require.NotEmpty(t, outbound)
 		})
 	}
 }
@@ -180,6 +225,7 @@ func TestTextRequestViaResponsesConvertsClaudeDirectly(t *testing.T) {
 	}
 	adaptor := &openaichannel.Adaptor{}
 	adaptor.Init(info)
+	info.PendingRetryRewrite = []map[string]any{{"mode": "set", "path": "instructions", "value": "retry instruction"}}
 	request := &dto.ClaudeRequest{
 		Model:    "gpt-5.6-sol",
 		Thinking: &dto.Thinking{Type: "adaptive", Display: "summarized"},
@@ -198,6 +244,8 @@ func TestTextRequestViaResponsesConvertsClaudeDirectly(t *testing.T) {
 	var upstreamBody map[string]any
 	require.NoError(t, common.Unmarshal(upstream.body, &upstreamBody))
 	assert.NotContains(t, upstreamBody, "messages")
+	assert.Equal(t, "retry instruction", upstreamBody["instructions"])
+	assert.Empty(t, info.PendingRetryRewrite)
 	reasoning, ok := upstreamBody["reasoning"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "high", reasoning["effort"])
