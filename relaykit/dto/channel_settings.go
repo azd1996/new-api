@@ -64,6 +64,16 @@ type ChannelSettings struct {
 	// non-positive, Inf or NaN falls back to 1, so StatQuota equals the
 	// undiscounted RawQuota. Stored in the channel setting JSON; zero migration.
 	StatGroupRatio *float64 `json:"stat_group_ratio,omitempty"`
+	// ResponseFilter removes configured fields from the upstream success response
+	// body before it is returned to the client (streaming and non-streaming).
+	// Each entry is one rule: a rule containing "." or "#" is treated as an exact
+	// gjson/sjson path and deleted via sjson; a bare key name is deleted
+	// recursively wherever it appears at any nesting level. Empty = disabled; a
+	// non-JSON body (e.g. the stream [DONE] sentinel) is left untouched. Only
+	// applied by the OpenAI adaptor handlers (covers Azure/OpenAI chat and
+	// responses). Example for Azure content-filter leakage: content_filter_results,
+	// prompt_filter_results, content_filters.
+	ResponseFilter []string `json:"response_filter,omitempty"`
 }
 
 // RetryRulePhaseCondition is a phase's condition block. Conditions are raw JSON

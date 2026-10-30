@@ -40,6 +40,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	responseBody = rewriteSGLangResponsesCreatedAt(info, responseBody, "created_at", responsesResponse.CreatedAt)
 
 	// 写入新的 response body
+	responseBody = relaycommon.FilterResponseJSON(responseBody, info.ResponseFilterRules())
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	// compute usage
@@ -90,6 +91,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			data = string(rewriteSGLangResponsesCreatedAt(info, []byte(data), "response.created_at", streamResponse.Response.CreatedAt))
 		}
 		accumulator.Observe(&streamResponse, common.StringToByteSlice(data))
+		// Strip configured fields (e.g. Azure content_filters) from the chunk
+		// before forwarding. The event type comes from streamResponse (already
+		// parsed), so usage accounting above is unaffected.
+		if rules := info.ResponseFilterRules(); len(rules) > 0 {
+			data = string(relaycommon.FilterResponseJSON([]byte(data), rules))
+		}
 		if err := helper.ResponseChunkData(c, streamResponse, data); err != nil {
 			sr.Stop(err)
 			return

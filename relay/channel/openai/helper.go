@@ -21,6 +21,13 @@ import (
 
 // 辅助函数
 func HandleStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
+	// Strip configured fields (e.g. Azure content_filter_results) from the
+	// upstream chunk before it is forwarded or format-converted. Each SSE chunk is
+	// a self-contained JSON object, so filtering is per-chunk with no buffering.
+	if rules := info.ResponseFilterRules(); len(rules) > 0 {
+		data = string(relaycommon.FilterResponseJSON([]byte(data), rules))
+	}
+
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
 		info.SendResponseCount++
