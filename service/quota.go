@@ -405,7 +405,8 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	relayInfo.PerformanceOutputTokens = int64(usage.CompletionTokens)
 	// Prometheus relay settlement sample (success). No-op when metrics disabled.
 	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
-		usage.PromptTokens, usage.CompletionTokens, float64(useTimeSeconds), quota)
+		usage.PromptTokens, usage.CompletionTokens, float64(useTimeSeconds), quota,
+		relayInfo.FirstResponseSeconds())
 }
 
 func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {

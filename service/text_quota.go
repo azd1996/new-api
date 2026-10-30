@@ -678,5 +678,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	relayInfo.PerformanceOutputTokens = int64(summary.CompletionTokens)
 	// Prometheus relay settlement sample (success). No-op when metrics disabled.
 	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
-		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota)
+		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota,
+		relayInfo.FirstResponseSeconds())
+	// Reporting-only amounts (never affect billing): channel-discounted,
+	// customer-discounted and profit, mirroring the per-log stat fields.
+	prommetrics.RecordStatAmounts(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId),
+		summary.HasCustomer, summary.StatQuota, summary.CustomerStatQuota)
 }

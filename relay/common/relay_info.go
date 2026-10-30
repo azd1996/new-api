@@ -1020,6 +1020,16 @@ func (info *RelayInfo) HasSendResponse() bool {
 	return info.FirstResponseTime.After(info.StartTime)
 }
 
+// FirstResponseSeconds returns the time-to-first-token (TTFT) in seconds for a
+// streaming response, or 0 when the request was non-streaming or no streamed
+// response was ever observed.
+func (info *RelayInfo) FirstResponseSeconds() float64 {
+	if !info.IsStream || !info.HasSendResponse() {
+		return 0
+	}
+	return info.FirstResponseTime.Sub(info.StartTime).Seconds()
+}
+
 type OriginTaskRef struct {
 	TaskID         string
 	UpstreamTaskID string

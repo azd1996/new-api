@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	prommetrics "github.com/QuantumNous/new-api/pkg/prom_metrics"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -56,9 +57,9 @@ func SystemPerformanceCheck() gin.HandlerFunc {
 				"authenticated":    false,
 			})
 			model.RecordErrorLog(c, 0, 0, "", "", err.ErrorWithStatusCode(), 0, 0, false, "", other)
-			// NOTE: the error-stats Prometheus metric (prommetrics.RecordError) is
-			// deferred — it belongs to the K error-stats port and does not exist in
-			// pkg/prom_metrics yet.
+			signatureHash := service.ErrorSignatureHash(signature)
+			prommetrics.RecordError(model.ResolveErrorShortName(signatureHash),
+				model.ResolveErrorAttribution(signatureHash), "", "", "503", "", "false", "")
 		}
 		if strings.HasPrefix(c.Request.URL.Path, "/v1/messages") {
 			c.JSON(err.StatusCode, gin.H{

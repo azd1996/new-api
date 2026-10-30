@@ -1,12 +1,14 @@
 package service
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	prommetrics "github.com/QuantumNous/new-api/pkg/prom_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -109,5 +111,27 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
 		model.RecordErrorLog(c, userId, channelError.ChannelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(upstreamURLs...), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+
+		// Export one error metric sample labeled by the admin-configured short
+		// name (bounded) plus request dimensions, for Prometheus/VM dashboards.
+		if prommetrics.Enabled() {
+			signatureHash := ErrorSignatureHash(signature)
+			stream := "false"
+			if common.GetContextKeyBool(c, constant.ContextKeyIsStream) {
+				stream = "true"
+			}
+			protocol := ""
+			if relayInfo != nil {
+				protocol = string(relayInfo.RelayFormat)
+			}
+			// Prefer the decoded downstream customer id (also recorded on the
+			// log); fall back to the gateway username when none is identified.
+			customerLabel := c.GetString("username")
+			if _, _, customerID, decoded := common.TraceTagFromContext(c); decoded && customerID != "" {
+				customerLabel = customerID
+			}
+			prommetrics.RecordError(model.ResolveErrorShortName(signatureHash), model.ResolveErrorAttribution(signatureHash),
+				modelName, channelError.ChannelName, strconv.Itoa(err.StatusCode), protocol, stream, customerLabel)
+		}
 	}
 }

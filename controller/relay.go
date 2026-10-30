@@ -164,7 +164,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				channelLabel = strconv.Itoa(relayInfo.ChannelId)
 			}
 			prommetrics.RecordRelay(relayInfo.OriginModelName, relayInfo.UsingGroup,
-				channelLabel, "failure", 0, 0, 0, 0)
+				channelLabel, "failure", 0, 0, 0, 0, relayInfo.FirstResponseSeconds())
 		}
 		if recovered != nil {
 			panic(recovered)

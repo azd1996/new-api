@@ -185,6 +185,10 @@ func main() {
 	if metricsEnabled {
 		prommetrics.Init()
 		prommetrics.SetQuotaPerUnit(common.QuotaPerUnit)
+		// High-cardinality error labels (model, customer) are on by default; set
+		// ERROR_METRIC_HIGH_CARD_LABELS=false to blank them if the model/customer
+		// space is large enough to risk a Prometheus series blow-up.
+		prommetrics.SetErrorHighCardLabels(common.GetEnvOrDefaultBool("ERROR_METRIC_HIGH_CARD_LABELS", true))
 		metricsPort := os.Getenv("METRICS_PORT")
 		if metricsPort == "" {
 			metricsPort = "9090"
