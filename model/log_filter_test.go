@@ -148,3 +148,31 @@ func TestRetryOverrideLogIsAdminOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, userLogs)
 }
+
+// TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag pins the admin filters
+// on customer_name / downstream_trace_tag, which live only in the Other JSON.
+func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	oldType := common.LogDatabaseType()
+	t.Cleanup(func() { common.SetLogDatabaseType(oldType) })
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+
+	require.NoError(t, db.Create([]Log{
+		{Id: 1, Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"tag-a"}}`},
+		{Id: 2, Other: `{"admin_info":{"customer_name":"Other","downstream_trace_tag":"tag-b"}}`},
+	}).Error)
+
+	findIDs := func(filter LogFilter) []int {
+		query, applyErr := filter.apply(db.Model(&Log{}))
+		require.NoError(t, applyErr)
+		var ids []int
+		require.NoError(t, query.Order("id").Pluck("id", &ids).Error)
+		return ids
+	}
+
+	assert.Equal(t, []int{1}, findIDs(LogFilter{CustomerName: "Acme"}))
+	assert.Equal(t, []int{2}, findIDs(LogFilter{DownstreamTraceTag: "tag-b"}))
+	assert.Empty(t, findIDs(LogFilter{CustomerName: "Acme", DownstreamTraceTag: "tag-b"}))
+}

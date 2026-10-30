@@ -554,6 +554,9 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 			downstreamRequestID, customerID = reqID, custID
 			other.SetAdmin("downstream_request_id", reqID)
 			other.SetAdmin("customer_id", custID)
+			if name := CustomerName(custID); name != "" {
+				other.SetAdmin("customer_name", name)
+			}
 		}
 	}
 	attachProcessShutdownOther(c, other)
@@ -648,6 +651,9 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			downstreamRequestID, customerID = reqID, custID
 			other.SetAdmin("downstream_request_id", reqID)
 			other.SetAdmin("customer_id", custID)
+			if name := CustomerName(custID); name != "" {
+				other.SetAdmin("customer_name", name)
+			}
 		}
 	}
 	attachProcessShutdownOther(c, other)
@@ -820,9 +826,13 @@ type LogFilter struct {
 	SessionId           string
 	DownstreamRequestId string
 	CustomerId          string
-	StatusCode          int
-	ErrorKeyword        string
-	ErrorSignatureHash  string
+	// CustomerName and DownstreamTraceTag match the admin-only trace-tag
+	// fields recorded in Other (unindexed; pair with a time range).
+	CustomerName       string
+	DownstreamTraceTag string
+	StatusCode         int
+	ErrorKeyword       string
+	ErrorSignatureHash string
 	// RetryTriggered, when set, restricts to error logs whose attempt did (true)
 	// or did not (false) fire an error-triggered retry-override. Admin-only.
 	RetryTriggered *bool
@@ -856,6 +866,14 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	}
 	if f.CustomerId != "" {
 		tx = tx.Where("logs.customer_id = ?", f.CustomerId)
+	}
+	if f.CustomerName != "" {
+		cond, pat := otherFieldLikeCondition("logs.other", "customer_name", f.CustomerName)
+		tx = tx.Where(cond, pat)
+	}
+	if f.DownstreamTraceTag != "" {
+		cond, pat := otherFieldLikeCondition("logs.other", "downstream_trace_tag", f.DownstreamTraceTag)
+		tx = tx.Where(cond, pat)
 	}
 	if f.StatusCode != 0 {
 		cond, args := statusCodeOtherCondition("logs.other", f.StatusCode)
