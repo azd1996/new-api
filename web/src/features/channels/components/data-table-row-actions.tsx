@@ -84,6 +84,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((s) => s.auth.user)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [disableConfirmOpen, setDisableConfirmOpen] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
 
@@ -232,7 +233,15 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             <Button
               variant='ghost'
               size='icon-sm'
-              onClick={handleToggleStatus}
+              onClick={(e) => {
+                // Disabling takes a live channel out of rotation; confirm first.
+                if (isEnabled) {
+                  e.stopPropagation()
+                  setDisableConfirmOpen(true)
+                  return
+                }
+                void handleToggleStatus(e)
+              }}
               disabled={isTogglingStatus}
               aria-label={isEnabled ? t('Disable') : t('Enable')}
               className={
@@ -380,6 +389,22 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           if (!canEditSensitive) return
           handleDeleteChannel(channel.id, queryClient)
           setDeleteConfirmOpen(false)
+        }}
+      />
+
+      <ConfirmDialog
+        open={disableConfirmOpen}
+        onOpenChange={setDisableConfirmOpen}
+        title={t('Disable Channel')}
+        desc={t('Are you sure you want to disable channel "{{name}}"?', {
+          name: channel.name,
+        })}
+        confirmText={t('Disable')}
+        destructive
+        isLoading={isTogglingStatus}
+        handleConfirm={async () => {
+          await handleToggleStatus()
+          setDisableConfirmOpen(false)
         }}
       />
     </div>
