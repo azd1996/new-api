@@ -527,6 +527,17 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		}
 	}
 
+	// AWS Bedrock signs requests with SigV4 and does not go through the tp
+	// scheme-header rewrite; a tp (reverse) proxy would break it. Reject before
+	// any DB write so a misconfigured binding never persists.
+	if channel.Type == constant.ChannelTypeAws {
+		for _, alias := range channel.GetSetting().ProxyAliases {
+			if service.IsTpProxyAlias(alias) {
+				return fmt.Errorf("AWS Bedrock 渠道不支持 TP（反向）代理，请从代理池别名中移除：%s", alias)
+			}
+		}
+	}
+
 	return nil
 }
 

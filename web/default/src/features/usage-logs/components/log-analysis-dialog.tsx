@@ -18,9 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import { BarChart3, Loader2 } from 'lucide-react'
+import { toPng } from 'html-to-image'
+import { BarChart3, FileDown, ImageDown, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -46,6 +48,7 @@ import { buildApiParams } from '../lib/utils'
 import type {
   CacheMinTokenRule,
   LogAnalysisChannel,
+  LogAnalysisResult,
   LogCacheCell,
   LogCacheTable,
   LogLatencyCell,
@@ -85,6 +88,166 @@ function formatRate(rate: number, read: number, denominator: number): string {
 function formatPercent(rate: number, total: number): string {
   if (!total || total <= 0) return DASH
   return `${(rate * 100).toFixed(1)}%`
+}
+
+// ExportSection is one titled table flattened to plain strings, shared by both
+// the Markdown and image exporters so cell formatting has a single source.
+interface ExportSection {
+  title: string
+  headers: string[]
+  rows: string[][]
+}
+
+function buildAnalysisSections(
+  result: LogAnalysisResult,
+  t: (key: string) => string,
+  summaryLabel: string
+): ExportSection[] {
+  const channelNames = result.channels.map((c) => c.name)
+  const latencyHeaders = [t('Prompt Size'), summaryLabel, ...channelNames]
+  const latencySection = (
+    title: string,
+    table: LogLatencyTable
+  ): ExportSection => ({
+    title,
+    headers: latencyHeaders,
+    rows: table.buckets.map((row) => [
+      row.bucket,
+      latencyCellText(row.total),
+      ...row.channels.map((c) => latencyCellText(c)),
+    ]),
+  })
+
+  const metricHeaders = [t('Metric'), summaryLabel, ...channelNames]
+  const successRow = (
+    label: string,
+    accessor: (cell: LogSuccessCell) => string
+  ): string[] => [
+    label,
+    accessor(result.success.total),
+    ...result.success.channels.map(accessor),
+  ]
+  const cacheRow = (
+    label: string,
+    accessor: (cell: LogCacheCell) => string
+  ): string[] => [
+    label,
+    accessor(result.cache.total),
+    ...result.cache.channels.map(accessor),
+  ]
+
+  return [
+    latencySection(t('Mean'), result.latency.mean),
+    latencySection(t('P50 (median)'), result.latency.p50),
+    latencySection(t('P90'), result.latency.p90),
+    latencySection(t('P99'), result.latency.p99),
+    {
+      title: t('Success Rate'),
+      headers: metricHeaders,
+      rows: [
+        successRow(t('Success rate'), (c) => formatPercent(c.rate, c.total)),
+        successRow(t('Total requests'), (c) => String(c.total)),
+        successRow(t('Success (consume)'), (c) => String(c.success)),
+        successRow(t('Error'), (c) => String(c.error)),
+        successRow(t('Retry override'), (c) => String(c.retry_override)),
+      ],
+    },
+    {
+      title: t('Cache Hit Rate'),
+      headers: metricHeaders,
+      rows: [
+        cacheRow(t('Gross hit rate'), (c) =>
+          formatRate(c.gross_rate, c.cache_read, c.input_all)
+        ),
+        cacheRow(t('Eligible hit rate'), (c) =>
+          formatRate(c.eligible_rate, c.cache_read, c.input_eligible)
+        ),
+        cacheRow(t('Hit'), (c) => String(c.hit)),
+        cacheRow(t('Cold write'), (c) => String(c.cold_write)),
+        cacheRow(t('Too small to cache'), (c) => String(c.too_small)),
+        cacheRow(t('Other miss'), (c) => String(c.other_miss)),
+      ],
+    },
+    {
+      title: t('Cache minimum token thresholds (by model)'),
+      headers: [t('Model'), t('Series'), t('Min cacheable tokens')],
+      rows: [
+        ...result.thresholds.map((r) => [
+          r.label,
+          r.series,
+          String(r.min_tokens),
+        ]),
+        [
+          t('Default (other models)'),
+          DASH,
+          result.threshold_default ? String(result.threshold_default) : DASH,
+        ],
+      ],
+    },
+  ]
+}
+
+function escapeMarkdownCell(value: string): string {
+  return value.replaceAll('|', '\\|')
+}
+
+function sectionsToMarkdown(title: string, sections: ExportSection[]): string {
+  const blocks = sections.map((s) => {
+    const head = `| ${s.headers.map(escapeMarkdownCell).join(' | ')} |`
+    const sep = `| ${s.headers.map(() => '---').join(' | ')} |`
+    const body = s.rows
+      .map((r) => `| ${r.map(escapeMarkdownCell).join(' | ')} |`)
+      .join('\n')
+    return `### ${s.title}\n\n${head}\n${sep}\n${body}`
+  })
+  return `# ${title}\n\n${blocks.join('\n\n')}\n`
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
+function sectionsToHtml(title: string, sections: ExportSection[]): string {
+  const cellBorder = 'border:1px solid #d1d5db;padding:6px 10px;white-space:nowrap;'
+  const renderTable = (s: ExportSection): string => {
+    const head = s.headers
+      .map(
+        (h) =>
+          `<th style="${cellBorder}background:#f3f4f6;text-align:left;font-weight:600;">${escapeHtml(h)}</th>`
+      )
+      .join('')
+    const bodyRows = s.rows
+      .map((r) => {
+        const tds = r
+          .map(
+            (c, i) =>
+              `<td style="${cellBorder}${i === 0 ? 'font-weight:500;' : ''}">${escapeHtml(c)}</td>`
+          )
+          .join('')
+        return `<tr>${tds}</tr>`
+      })
+      .join('')
+    return `<h3 style="margin:16px 0 6px;font-size:14px;">${escapeHtml(s.title)}</h3><table style="border-collapse:collapse;font-size:12px;color:#111827;"><thead><tr>${head}</tr></thead><tbody>${bodyRows}</tbody></table>`
+  }
+  return `<div style="padding:20px;background:#ffffff;color:#111827;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;width:fit-content;"><h2 style="margin:0 0 4px;font-size:16px;">${escapeHtml(title)}</h2>${sections.map(renderTable).join('')}</div>`
+}
+
+function exportStamp(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+}
+
+function triggerDownload(href: string, filename: string): void {
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 
 function LatencyStatTable(props: {
@@ -323,6 +486,7 @@ export function LogAnalysisDialog() {
   const { isAdminView: isAdmin } = useLogsViewScope()
   const searchParams = route.useSearch()
   const [open, setOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const query = useQuery({
     queryKey: ['usage-logs-analysis', searchParams],
@@ -338,6 +502,45 @@ export function LogAnalysisDialog() {
 
   const result = query.data?.data
   const summaryLabel = t('Summary')
+  const canExport = !!result && result.scanned > 0
+
+  const handleExportMarkdown = () => {
+    if (!result) return
+    const sections = buildAnalysisSections(result, t, summaryLabel)
+    const md = sectionsToMarkdown(t('Log Analysis'), sections)
+    const url = URL.createObjectURL(
+      new Blob([md], { type: 'text/markdown;charset=utf-8' })
+    )
+    triggerDownload(url, `log-analysis-${exportStamp()}.md`)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportImage = async () => {
+    if (!result || exporting) return
+    setExporting(true)
+    const container = document.createElement('div')
+    container.style.position = 'fixed'
+    container.style.left = '-99999px'
+    container.style.top = '0'
+    container.innerHTML = sectionsToHtml(
+      t('Log Analysis'),
+      buildAnalysisSections(result, t, summaryLabel)
+    )
+    document.body.appendChild(container)
+    try {
+      const target = container.firstElementChild as HTMLElement
+      const dataUrl = await toPng(target, {
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+      })
+      triggerDownload(dataUrl, `log-analysis-${exportStamp()}.png`)
+    } catch {
+      toast.error(t('Export failed'))
+    } finally {
+      document.body.removeChild(container)
+      setExporting(false)
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -355,6 +558,34 @@ export function LogAnalysisDialog() {
           <DialogDescription>
             {t('Prompt-size latency & cache-hit analysis of the filtered logs')}
           </DialogDescription>
+          <div className='flex flex-wrap gap-2 pt-1'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='gap-1.5'
+              disabled={!canExport || exporting}
+              onClick={handleExportImage}
+            >
+              {exporting ? (
+                <Loader2 className='size-4 animate-spin' />
+              ) : (
+                <ImageDown className='size-4' />
+              )}
+              {t('Export image')}
+            </Button>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='gap-1.5'
+              disabled={!canExport}
+              onClick={handleExportMarkdown}
+            >
+              <FileDown className='size-4' />
+              {t('Export Markdown')}
+            </Button>
+          </div>
         </DialogHeader>
 
         <div className='min-h-0 flex-1 space-y-5 overflow-y-auto pr-1'>

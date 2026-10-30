@@ -1,6 +1,9 @@
 {
   "translation": {
     "Analysis": "统计分析",
+    "Export image": "导出图片",
+    "Export Markdown": "导出 Markdown",
+    "Export failed": "导出失败",
     "Success Rate": "成功率",
     "Total requests": "总请求数",
     "Success (consume)": "成功（消耗）",

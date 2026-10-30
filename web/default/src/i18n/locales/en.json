@@ -1,6 +1,9 @@
 {
   "translation": {
     "Analysis": "Analysis",
+    "Export image": "Export image",
+    "Export Markdown": "Export Markdown",
+    "Export failed": "Export failed",
     "Success Rate": "Success Rate",
     "Total requests": "Total requests",
     "Success (consume)": "Success (consume)",
