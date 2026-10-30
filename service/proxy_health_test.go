@@ -113,4 +113,9 @@ func TestProxyBehaviorForAlias(t *testing.T) {
 
 	pt, _ = ProxyBehaviorForAlias("")
 	require.Equal(t, system_setting.ProxyTypeNormal, pt, "empty alias defaults to normal")
+
+	// IsTpProxyAlias gates AWS Bedrock bindings: only an explicit tp entry counts.
+	require.True(t, IsTpProxyAlias("tp-1"))
+	require.False(t, IsTpProxyAlias("fh-1"))
+	require.False(t, IsTpProxyAlias("missing"))
 }

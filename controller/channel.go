@@ -611,6 +611,16 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel.Type == constant.ChannelTypeSGLang && strings.TrimSpace(channel.GetBaseURL()) == "" {
 		return fmt.Errorf("SGLang channel base URL cannot be empty")
 	}
+	// AWS Bedrock signs requests with SigV4 and does not go through the tp
+	// scheme-header rewrite; a tp (reverse) proxy would break it. Reject before
+	// any DB write so a misconfigured binding never persists.
+	if channel.Type == constant.ChannelTypeAws {
+		for _, alias := range setting.ProxyAliases {
+			if service.IsTpProxyAlias(alias) {
+				return common.NewMessage("AWS Bedrock channels do not support TP (reverse) proxies; remove proxy alias {{alias}}", map[string]any{"alias": alias})
+			}
+		}
+	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {

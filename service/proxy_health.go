@@ -266,6 +266,14 @@ func ProxyBehaviorForAlias(alias string) (proxyType string, auth string) {
 	return system_setting.ProxyTypeNormal, ""
 }
 
+// IsTpProxyAlias reports whether the named proxy is a "tp" (reverse) proxy.
+// Used to reject incompatible channel bindings (e.g. AWS Bedrock, which signs
+// requests with SigV4 and cannot go through the tp scheme-header rewrite).
+func IsTpProxyAlias(alias string) bool {
+	proxyType, _ := ProxyBehaviorForAlias(alias)
+	return proxyType == system_setting.ProxyTypeTp
+}
+
 func proxyAliasURLMap() map[string]string {
 	proxies := system_setting.GetProxySetting().Proxies
 	m := make(map[string]string, len(proxies))
