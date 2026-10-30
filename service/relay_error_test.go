@@ -277,4 +277,13 @@ func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {
 	other := model.NewLogOther()
 	AppendRelayLogAdminInfo(untouched, nil, other)
 	assert.NotContains(t, other.Snapshot()["admin_info"], "request_policy", "requests without decisions do not carry an empty record")
+	assert.NotContains(t, other.Snapshot()["admin_info"], "proxy", "direct requests do not carry a proxy record")
+
+	proxied, _ := gin.CreateTestContext(httptest.NewRecorder())
+	proxied.Set("used_proxy_url", "http://10.0.0.1:3128")
+	proxied.Set("used_proxy_alias", "hk-1")
+	withProxy := model.NewLogOther()
+	AppendRelayLogAdminInfo(proxied, nil, withProxy)
+	assert.Equal(t, map[string]any{"url": "http://10.0.0.1:3128", "alias": "hk-1"},
+		withProxy.Snapshot()["admin_info"].(map[string]any)["proxy"], "the proxy-pool entry that carried the request is recorded for admins")
 }

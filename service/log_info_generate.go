@@ -93,6 +93,15 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	}
 
 	AppendChannelAffinityAdminInfo(ctx, other)
+	// Record the proxy-pool entry that actually carried the upstream request
+	// (set by the relay request builder) on both consume and error logs.
+	if usedProxyURL := ctx.GetString("used_proxy_url"); usedProxyURL != "" {
+		proxyInfo := map[string]any{"url": usedProxyURL}
+		if alias := ctx.GetString("used_proxy_alias"); alias != "" {
+			proxyInfo["alias"] = alias
+		}
+		other.SetAdmin("proxy", proxyInfo)
+	}
 	if events := RequestPolicy(ctx).Events(); len(events) > 0 {
 		other.SetAdmin("request_policy", events)
 	}
