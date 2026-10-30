@@ -105,3 +105,46 @@ func TestLogLikeConditionDialectCompatibility(t *testing.T) {
 	assert.Equal(t, "model_name LIKE ? ESCAPE '!'", condition)
 	assert.Equal(t, `gpt\!_%`, pattern)
 }
+
+// TestRetryOverrideLogIsAdminOnly pins the visibility contract of the
+// retry-override audit log: admins see it with its admin_info detail, while
+// the owning user's log list never returns that log type.
+func TestRetryOverrideLogIsAdminOnly(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&Log{}, &User{}, &Channel{}))
+
+	oldDB, oldLogDB := DB, LOG_DB
+	oldMainType, oldLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	t.Cleanup(func() {
+		DB, LOG_DB = oldDB, oldLogDB
+		common.SetDatabaseTypes(oldMainType, oldLogType)
+	})
+	DB, LOG_DB = db, db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+
+	const userId = 7
+	require.NoError(t, db.Create(&Log{UserId: userId, Type: LogTypeConsume, Content: "consume"}).Error)
+	RecordRetryOverrideLog(OverrideAuditLogParams{UserId: userId, ChannelId: 3, RequestId: "req-1"},
+		"retry override matched", map[string]any{"action": "fallback_next_channel"})
+
+	adminLogs, _, err := GetAllLogs(LogFilter{Type: LogTypeRetryOverride}, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, adminLogs, 1)
+	assert.Equal(t, 3, adminLogs[0].ChannelId)
+	assert.Contains(t, adminLogs[0].Other, "fallback_next_channel")
+
+	userLogs, total, err := GetUserLogs(userId, LogFilter{}, 0, 10)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, userLogs, 1)
+	assert.Equal(t, LogTypeConsume, userLogs[0].Type)
+
+	userLogs, _, err = GetUserLogs(userId, LogFilter{Type: LogTypeRetryOverride}, 0, 10)
+	require.NoError(t, err)
+	assert.Empty(t, userLogs)
+}

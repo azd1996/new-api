@@ -242,7 +242,15 @@ const (
 	LogTypeError   = 5
 	LogTypeRefund  = 6
 	LogTypeLogin   = 7
+	// LogTypeRetryOverride records how the channel's retry-override rules
+	// processed a request. Admin-only: details live under Other.admin_info and
+	// this type is filtered out of non-admin (user) log queries.
+	LogTypeRetryOverride = 8
 )
+
+// adminOnlyLogTypes lists log types that must never appear in non-admin (user)
+// log queries; their detail lives under Other.admin_info.
+var adminOnlyLogTypes = []int{LogTypeRetryOverride}
 
 func ensureLogRequestId(log *Log) {
 	if log != nil && log.RequestId == "" {
@@ -338,7 +346,7 @@ func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		order = clickHouseLogOrder("")
 	}
-	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
+	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Where("type NOT IN ?", adminOnlyLogTypes).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
 	formatUserLogs(logs, 0)
 	return logs, err
 }
@@ -402,6 +410,51 @@ func RecordLogWithAdminInfo(userId int, logType int, content string, adminInfo *
 	}
 	if err := createLog(log); err != nil {
 		common.SysLog(common.LogText("failed to record log: %s", err.Error()))
+	}
+}
+
+// OverrideAuditLogParams carries the request identity for a retry-override audit
+// log. The processing detail is nested under Other.admin_info.retry_override, so
+// it is admin-only; the log type is additionally filtered out of user log
+// queries. These logs never carry quota/token counts.
+type OverrideAuditLogParams struct {
+	UserId            int
+	ChannelId         int
+	ModelName         string
+	TokenName         string
+	TokenId           int
+	Group             string
+	RequestId         string
+	UpstreamRequestId string
+	IsStream          bool
+}
+
+// RecordRetryOverrideLog records a retry-override trigger (LogTypeRetryOverride).
+// detail is nested under Other.admin_info.retry_override.
+func RecordRetryOverrideLog(params OverrideAuditLogParams, content string, detail map[string]any) {
+	username, _ := GetUsernameById(params.UserId, false)
+	other := NewLogOther()
+	if len(detail) > 0 {
+		other.SetAdmin("retry_override", detail)
+	}
+	log := &Log{
+		UserId:            params.UserId,
+		Username:          username,
+		CreatedAt:         common.GetTimestamp(),
+		Type:              LogTypeRetryOverride,
+		Content:           content,
+		ModelName:         params.ModelName,
+		TokenName:         params.TokenName,
+		TokenId:           params.TokenId,
+		ChannelId:         params.ChannelId,
+		Group:             params.Group,
+		IsStream:          params.IsStream,
+		RequestId:         params.RequestId,
+		UpstreamRequestId: params.UpstreamRequestId,
+		Other:             other.JSONString(),
+	}
+	if err := createLog(log); err != nil {
+		common.SysLog(common.LogText("failed to record retry override log: %s", err.Error()))
 	}
 }
 
@@ -898,7 +951,7 @@ func GetAllLogs(filter LogFilter, startIdx int, num int) (logs []*Log, total int
 const logSearchCountLimit = 10000
 
 func GetUserLogs(userId int, filter LogFilter, startIdx int, num int) (logs []*Log, total int64, err error) {
-	tx, err := filter.apply(LOG_DB.Where("logs.user_id = ?", userId))
+	tx, err := filter.apply(LOG_DB.Where("logs.user_id = ?", userId).Where("logs.type NOT IN ?", adminOnlyLogTypes))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -953,7 +1006,7 @@ func StreamAllLogs(ctx context.Context, filter LogFilter, role int, fn func(*Log
 // StreamUserLogs is StreamAllLogs for one user's own logs, shaped like the
 // user log list.
 func StreamUserLogs(ctx context.Context, userId int, filter LogFilter, fn func(*Log) error) error {
-	tx, err := filter.apply(LOG_DB.WithContext(ctx).Where("logs.user_id = ?", userId))
+	tx, err := filter.apply(LOG_DB.WithContext(ctx).Where("logs.user_id = ?", userId).Where("logs.type NOT IN ?", adminOnlyLogTypes))
 	if err != nil {
 		return err
 	}

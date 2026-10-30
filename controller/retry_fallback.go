@@ -120,8 +120,9 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 	}
 }
 
-// recordRetryOverrideAudit builds an admin-only retry-override audit detail
-// (LogTypeRetryOverride) when a rule matched and drove a retry/fallback/terminate.
+// recordRetryOverrideAudit writes an admin-only retry-override audit log
+// (LogTypeRetryOverride) when a rule matched and drove a retry/fallback/terminate,
+// and returns the detail so the error log can carry it too.
 // descriptions holds the matched rule's description (aligned by position with the
 // single-element rule_ids written to the log).
 func recordRetryOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, channelId int, apiErr *types.NewAPIError, relayFormat types.RelayFormat, decision retryrule.Decision, descriptions []string) map[string]interface{} {
@@ -147,8 +148,21 @@ func recordRetryOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, chann
 	if summaries := summarizeRewriteOps(decision.Rewrites); len(summaries) > 0 {
 		detail["rewrites"] = summaries
 	}
-	// NOTE: admin audit-log write (model.RecordRetryOverrideLog) is deferred to the
-	// logging (J) migration; retry/fallback behavior is unaffected.
+	group := info.UsingGroup
+	if group == "" {
+		group = info.UserGroup
+	}
+	model.RecordRetryOverrideLog(model.OverrideAuditLogParams{
+		UserId:            info.UserId,
+		ChannelId:         channelId,
+		ModelName:         info.OriginModelName,
+		TokenName:         c.GetString("token_name"),
+		TokenId:           info.TokenId,
+		Group:             group,
+		RequestId:         info.RequestId,
+		UpstreamRequestId: c.GetString(common.UpstreamRequestIdKey),
+		IsStream:          info.IsStream,
+	}, "retry override matched", detail)
 	return detail
 }
 
