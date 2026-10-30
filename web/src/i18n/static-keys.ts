@@ -906,4 +906,13 @@ export const STATIC_I18N_KEYS = [
   'Channel priorities changed. Refresh and try again.',
   'Invalid channel priority move',
   'Channel priority is outside the sortable range',
+  // Override template option validation and channel proxy validation errors.
+  'Override templates must be a valid JSON array',
+  'Override template #{{index}} is missing a name',
+  'Duplicate override template name: {{name}}',
+  'Override template {{name}} is missing content',
+  'AWS Bedrock channels do not support TP (reverse) proxies; remove proxy alias {{alias}}',
+  // MultiSelect createLabel strings, translated inside the component.
+  'Add alias "{{value}}"',
+  'Add template "{{value}}"',
 ] as const
