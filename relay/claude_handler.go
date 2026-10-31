@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -89,11 +90,26 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return nil
 	}
 
+	// The prompt-cache skeleton of this attempt's final outbound body is
+	// recorded once the attempt ends, success or not.
+	var cacheSkeleton *model.CacheSkeleton
+	var cacheSkeletonUsage *dto.Usage
+	defer func() {
+		if cacheSkeleton != nil {
+			finishClaudeCacheSkeleton(c, info, cacheSkeleton, cacheSkeletonUsage, newAPIError)
+		}
+	}()
+
 	var requestBody io.Reader
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+		if model.CacheSkeletonEnabled() {
+			if raw, err := storage.Bytes(); err == nil {
+				cacheSkeleton = buildClaudeCacheSkeleton(raw)
+			}
 		}
 		requestBody = common.NewReplayableBodyReader(storage)
 	} else {
@@ -177,6 +193,9 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 		recordRequestSessionID(c, claudeSID, claudeSource)
+		if model.CacheSkeletonEnabled() {
+			cacheSkeleton = buildClaudeCacheSkeleton(jsonData)
+		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
@@ -213,6 +232,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return newAPIError
 	}
 
+	cacheSkeletonUsage, _ = usage.(*dto.Usage)
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
 	return nil
 }

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -374,4 +375,66 @@ func GetLogsSelfStat(c *gin.Context) {
 		},
 	})
 	return
+}
+
+// cacheSkeletonView is a skeleton row with block hashes as fixed-width hex:
+// uint64 values do not survive a JavaScript number.
+type cacheSkeletonView struct {
+	*model.CacheSkeleton
+	BlkHash []string `json:"blk_hash"`
+}
+
+// GetCacheSkeleton returns the prompt-cache skeleton of every attempt of one
+// request (admin only). enabled=false means this deployment records none.
+func GetCacheSkeleton(c *gin.Context) {
+	requestId := strings.TrimSpace(c.Query("request_id"))
+	if requestId == "" || len(requestId) > 128 {
+		common.ApiErrorT(c, "Invalid request ID")
+		return
+	}
+	if !model.CacheSkeletonEnabled() {
+		common.ApiSuccess(c, gin.H{"enabled": false, "items": []cacheSkeletonView{}})
+		return
+	}
+	rows, err := model.GetCacheSkeletons(requestId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	items := make([]cacheSkeletonView, 0, len(rows))
+	for _, row := range rows {
+		hashes := make([]string, len(row.BlkHash))
+		for i, h := range row.BlkHash {
+			hashes[i] = fmt.Sprintf("%016x", h)
+		}
+		items = append(items, cacheSkeletonView{CacheSkeleton: row, BlkHash: hashes})
+	}
+	common.ApiSuccess(c, gin.H{"enabled": true, "items": items})
+}
+
+// GetCacheSkeletonSession replays a session's skeletons through the cache
+// simulation: actual hit tokens versus the ceiling with the client's
+// breakpoints, with the gateway adjustment, and with the adjustment plus a
+// 1h TTL (admin only).
+func GetCacheSkeletonSession(c *gin.Context) {
+	sessionId := strings.TrimSpace(c.Query("session_id"))
+	if sessionId == "" || len(sessionId) > 128 {
+		common.ApiErrorT(c, "Invalid session ID")
+		return
+	}
+	if !model.CacheSkeletonEnabled() {
+		common.ApiSuccess(c, gin.H{"enabled": false})
+		return
+	}
+	analysis, err := model.GetSessionCacheAnalysis(sessionId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"enabled":   true,
+		"lanes":     analysis.Lanes,
+		"summary":   analysis.Summary,
+		"truncated": analysis.Truncated,
+	})
 }

@@ -5,6 +5,12 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-11-01]
+
+### 新增 Added
+- **Claude 请求骨架记录与查看（Cache Skeleton）**：用于回应客户对 prompt 缓存命中率的质疑。每次原生 Claude Messages 尝试（成功或失败、含重试）结束时记录一份「请求骨架」：按缓存前缀顺序 tools → system → messages 列出每个块的 xxHash64（带 `cache_control` 的块先去掉该字段再哈希）、块类型、名称（工具名 / tool_use 名）、字节数、每条消息的起始块、断点位置与 TTL，外加参数指纹 `param_fp`（模型 + tool_choice + thinking + effort）、`lane`（模型 + tools + 首个 system 块，区分主会话与 subagent）、渠道/key、会话 ID 与本次 usage。**不保存任何正文或预览**。骨架只写入 ClickHouse 日志库的新表 `cache_skeletons`（`MigrateCacheSkeletons` 挂在 `migrateClickHouseLogDB`，按天分区，`CACHE_SKELETON_TTL_DAYS` 默认 14 天整分区过期，可选 `CACHE_SKELETON_STORAGE_POLICY`）；日志库不是 ClickHouse 时功能自动关闭，也可用 `CACHE_SKELETON_ENABLED=false` 关闭。写入走有界队列（4096）+ 后台批量（每 500 行或 2 秒），队列满时丢弃，不阻塞转发。接口 `GET /api/log/cache-skeleton?request_id=`（AdminAuth）；管理员日志详情（Claude 的消耗/错误日志）新增「请求骨架 · 查看」，弹窗按 tools / system / 每条消息分组展示块哈希前 8 位、大小、累计字节与断点，断点打在末尾 mid-conversation system 消息（如 `<total_tokens>` 提醒）上时标 ⚠。实现见 `model/cache_skeleton.go`、`relay/cache_skeleton.go`、`relay/claude_handler.go`。
+- **会话缓存诊断（Session Cache Diagnosis）**：使用日志「会话」视图展开某个会话时，管理员可在顶部看到缓存诊断。后端按 lane 回放该会话的骨架做缓存模拟（前缀哈希为键；写入请求结束后才可读，按 TTL 过期、读取续期；断点回看 20 块；低于模型缓存下限的断点不写缓存；token 按字节占比由本轮真实输入总量分摊估算），给出四档命中率——**实际 / 客户端断点上限 / 网关断点调整后 / 调整 + 1h TTL**，以及上游损失、断点位置不当、TTL 过期三段损失 token。「展开轮次」后逐轮显示时间、间隔、前缀条（灰=与上轮相同、红=变化、绿=新增、竖线=断点）、实际/预期命中率与归因（首轮、低于缓存下限、无断点、参数变化、工具或系统提示变化、与上一轮并发、TTL 过期、断点位置不当、渠道或密钥切换、上游未命中、符合预期），并可直接打开该轮骨架。接口 `GET /api/log/cache-skeleton/session?session_id=`（AdminAuth，单会话最多分析 2000 次尝试）。实现见 `model/cache_skeleton_analysis.go`、`web/src/features/usage-logs/components/session-cache-diagnosis.tsx`。注意：**只有升级后进来的请求才有骨架**，此前的日志与会话不显示；网关断点调整本身尚未实现，「调整后」两档为模拟值；模拟结果目前只用单测数据验证过。
+
 ## v0.0.9（基于上游 QuantumNous/new-api v1.0.0-rc.47 re-baseline 开发）
 
 > 本版本把既有自定义功能 re-baseline 迁移到上游 `v1.0.0-rc.47` 之上。下方仅记录本轮**真正新增或此前未记录**的变更；纯粹的端口恢复（从旧 `feature/custom-query-api` 分支迁移时丢失、现仅做还原，且已在下方历史条目中记录过的改动，如性能监控与过载保护解耦、成功率健康色阈值、客户名/ID 筛选下拉还原、少量硬编码英文补 i18n、零值金额行展示门控还原）不再重复列出。

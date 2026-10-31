@@ -915,4 +915,16 @@ export const STATIC_I18N_KEYS = [
   // MultiSelect createLabel strings, translated inside the component.
   'Add alias "{{value}}"',
   'Add template "{{value}}"',
+  // Session cache diagnosis reasons (SKELETON_REASON_LABELS) and API errors.
+  'Failed request',
+  'First turn',
+  'Below cache minimum',
+  'No breakpoint',
+  'Parameters changed',
+  'Tools or system changed',
+  'Concurrent with previous turn',
+  'Channel or key switched',
+  'Upstream miss',
+  'Hit as expected',
+  'Invalid session ID',
 ] as const

@@ -23,6 +23,7 @@ import type { UsageLog } from './data/schema'
 import { buildQueryParams } from './lib/query-params'
 import { parseTaskArtifactsResponse } from './lib/task-artifacts'
 import type {
+  CacheSkeletonResponse,
   GetLogsParams,
   GetLogSessionsResponse,
   GetLogsResponse,
@@ -31,6 +32,7 @@ import type {
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
   LogAnalysisResponse,
+  SessionCacheAnalysisResponse,
   TaskArtifactsResponse,
   UserInfo,
 } from './types'
@@ -100,6 +102,28 @@ export async function getLogsAnalysis(
     params as unknown as Record<string, unknown>
   )
   const res = await api.get(`/api/log/analysis?${queryParams}`)
+  return res.data
+}
+
+// getCacheSkeleton fetches the prompt-cache skeleton of every attempt of one
+// request. Admin only.
+export async function getCacheSkeleton(
+  requestId: string
+): Promise<CacheSkeletonResponse> {
+  const res = await api.get(
+    `/api/log/cache-skeleton?request_id=${encodeURIComponent(requestId)}`
+  )
+  return res.data
+}
+
+// getSessionCacheAnalysis replays a session's skeletons through the cache
+// simulation. Admin only.
+export async function getSessionCacheAnalysis(
+  sessionId: string
+): Promise<SessionCacheAnalysisResponse> {
+  const res = await api.get(
+    `/api/log/cache-skeleton/session?session_id=${encodeURIComponent(sessionId)}`
+  )
   return res.data
 }
 

@@ -35,6 +35,7 @@ import { getLogSessions } from '../api'
 import { buildApiParams } from '../lib/utils'
 import type { LogSession } from '../types'
 import { useSessionColumns } from './columns/session-columns'
+import { SessionCacheDiagnosis } from './session-cache-diagnosis'
 import { SessionRequestsTable } from './session-requests-table'
 import { useLogsViewScope } from './usage-logs-provider'
 
@@ -150,6 +151,9 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                   colSpan={row.getVisibleCells().length}
                   className='bg-muted/30 p-0 pl-8'
                 >
+                  {isAdminView && (
+                    <SessionCacheDiagnosis sessionId={sessionId} />
+                  )}
                   <SessionRequestsTable sessionId={sessionId} />
                 </TableCell>
               </TableRow>

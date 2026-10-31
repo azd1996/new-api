@@ -50,6 +50,7 @@ import {
   Info,
   LogIn,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
@@ -98,6 +99,7 @@ import {
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
+import { CacheSkeletonDialog } from './cache-skeleton-dialog'
 import { DetailRow, DetailSection } from './log-detail-layout'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
@@ -730,6 +732,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const reasoningEffortVariant = getReasoningEffortVariant(
     other?.reasoning_effort
   )
+  // Skeletons are recorded for native Claude Messages attempts (consume and
+  // error logs); the dialog itself reports when none exists.
+  const showCacheSkeleton =
+    !!props.log.request_id &&
+    (isConsume || props.log.type === 5) &&
+    (other?.claude === true || props.log.model_name.includes('claude'))
+  const [skeletonOpen, setSkeletonOpen] = useState(false)
 
   return (
     <Dialog
@@ -791,6 +800,22 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 </span>
               }
               mono
+            />
+          )}
+
+          {props.isAdmin && showCacheSkeleton && (
+            <DetailRow
+              label={t('Request Skeleton')}
+              value={
+                <Button
+                  variant='outline'
+                  size='sm'
+                  className='h-6 px-2 text-xs'
+                  onClick={() => setSkeletonOpen(true)}
+                >
+                  {t('View')}
+                </Button>
+              }
             />
           )}
 
@@ -1654,6 +1679,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </div>
         )}
       </div>
+      {showCacheSkeleton && props.isAdmin && (
+        <CacheSkeletonDialog
+          requestId={props.log.request_id}
+          open={skeletonOpen}
+          onOpenChange={setSkeletonOpen}
+        />
+      )}
     </Dialog>
   )
 }

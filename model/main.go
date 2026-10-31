@@ -436,6 +436,9 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
 		return err
 	}
+	if err := MigrateCacheSkeletons(); err != nil {
+		return err
+	}
 	// Existing ClickHouse logs tables (created before session_id) get the column
 	// added idempotently; CREATE TABLE IF NOT EXISTS above covers fresh installs.
 	if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS session_id String DEFAULT ''").Error; err != nil {

@@ -366,6 +366,8 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
 		logRoute.GET("/analysis", middleware.AdminAuth(), controller.GetLogsAnalysis)
 		logRoute.GET("/sessions", middleware.AdminAuth(), controller.GetLogSessions)
+		logRoute.GET("/cache-skeleton", middleware.AdminAuth(), controller.GetCacheSkeleton)
+		logRoute.GET("/cache-skeleton/session", middleware.AdminAuth(), controller.GetCacheSkeletonSession)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/self/sessions", middleware.UserAuth(), controller.GetUserLogSessions)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)

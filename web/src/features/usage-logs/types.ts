@@ -694,6 +694,97 @@ export interface LogAnalysisResponse {
   data?: LogAnalysisResult
 }
 
+// One attempt of a Claude request reduced to its prompt-cache structure:
+// per block a hash, kind ("tool", "system.text", "user.tool_result", ...),
+// name and byte length. Blocks follow the cache prefix order tools -> system
+// -> messages; msg_start holds each message's first block index.
+export interface CacheSkeleton {
+  ts: string
+  end_ts: string
+  request_id: string
+  attempt: number
+  status: string
+  node: string
+  session_id: string
+  lane: string
+  channel_id: number
+  key_idx: number
+  model: string
+  param_fp: string
+  thinking: string
+  effort: string
+  blk_hash: string[]
+  blk_kind: string[]
+  blk_name: string[]
+  blk_len: number[]
+  msg_start: number[]
+  bp_idx: number[]
+  bp_ttl: string[]
+  fixed: string
+  cache_read: number
+  cache_creation: number
+  input: number
+}
+
+export interface CacheSkeletonResponse {
+  success: boolean
+  message?: string
+  data?: { enabled: boolean; items: CacheSkeleton[] }
+}
+
+// Simulated prompt-cache outcome of one recorded attempt. expected_* are
+// token estimates (the turn's input split across blocks by byte share): the
+// ceiling with the client's breakpoints, with the gateway adjustment, and
+// with the adjustment plus a 1h TTL.
+export interface SkeletonTurn {
+  request_id: string
+  ts: string
+  status: string
+  attempt: number
+  channel_id: number
+  key_idx: number
+  gap_s: number
+  total_tokens: number
+  actual_read: number
+  expected_current: number
+  expected_adjusted: number
+  expected_adjusted_1h: number
+  reason: string
+  // First block that differs from the previous turn; -1 when none.
+  diverge_idx: number
+  tail_volatile: boolean
+  total_bytes: number
+  segments: { state: 'same' | 'changed' | 'new'; bytes: number }[] | null
+  breakpoints: { offset: number; ttl: string }[] | null
+}
+
+// Token sums over the successful turns.
+export interface SkeletonRates {
+  total: number
+  actual: number
+  current: number
+  adjusted: number
+  adjusted_1h: number
+}
+
+export interface SkeletonLane {
+  lane: string
+  model: string
+  turns: SkeletonTurn[]
+  summary: SkeletonRates
+}
+
+export interface SessionCacheAnalysisResponse {
+  success: boolean
+  message?: string
+  data?: {
+    enabled: boolean
+    lanes?: SkeletonLane[]
+    summary?: SkeletonRates
+    truncated?: boolean
+  }
+}
+
 // One row of the session view: the consume and error logs sharing a
 // session_id. Intervals are seconds between consecutive consume logs.
 export interface LogSession {
