@@ -30,7 +30,7 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - Library: `nicksnyder/go-i18n/v2`
 - Languages: en, zh-CN, zh-TW
 - Scope: text with no web console in between (errors returned to AI clients, emails, notifications), translated with `i18n.T` / `i18n.Translate`
-- Web console API messages are English source text built with `common.NewMessage` / `common.ApiErrorT` / `common.ApiSuccessT`; the frontend translates them, so add each key to all seven frontend locale files
+- Web console API messages are English source text built with `common.NewMessage` / `common.ApiErrorT` / `common.ApiSuccessT`; the frontend translates them, so add each key to the `en` and `zh` frontend locale files (see the locale scope rule below)
 - Stored log content is `[]*common.Message`; a fail reason written by the gateway is a fixed English sentence that is also a key in the frontend locale files
 - Server log lines are English text passed through `common.LogText`; `DEFAULT_LANGUAGE=zh-CN` prints the Chinese text of the lines that have one in `common/log_text.zh-CN.json`, and is the language of backend messages for a reader who states none
 
@@ -38,6 +38,7 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - Library: `i18next` + `react-i18next` + `i18next-browser-languagedetector`
 - Languages: en (base), zh (fallback), zh-TW, fr, ru, ja, vi
 - Translation files: `web/src/i18n/locales/{lang}.json` — flat JSON, keys are English source strings
+- Locale scope: add new or changed keys only to `en.json` and `zh.json`. Do NOT add translations for `zh-TW`, `fr`, `ru`, `ja`, or `vi`; missing keys fall back to English at runtime (`fallbackLng: 'en'`). This overrides any "all seven locales" instruction, including the `i18n-translate` skill.
 - Usage: `useTranslation()` hook, call `t('English key')` in components
 - CLI tools: `bun run i18n:sync` (from `web/`)
 

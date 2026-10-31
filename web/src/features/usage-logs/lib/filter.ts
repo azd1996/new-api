@@ -95,6 +95,9 @@ export function buildSearchParams(
         ...(commonFilters.customerName && {
           customerName: commonFilters.customerName,
         }),
+        ...(commonFilters.customerId && {
+          customerId: commonFilters.customerId,
+        }),
         ...(commonFilters.retryTriggered && {
           retryTriggered: commonFilters.retryTriggered,
         }),

@@ -144,10 +144,51 @@ func GetLogsAnalysis(c *gin.Context) {
 	common.ApiSuccess(c, result)
 }
 
+// GetLogSessions groups every user's consume/error logs matching the admin
+// filter set by session_id for the usage-log session view.
+func GetLogSessions(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	sessions, total, err := model.GetLogSessions(0, logFilterFromQuery(c, true), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(sessions)
+	common.ApiSuccess(c, pageInfo)
+}
+
+// GetUserLogSessions is GetLogSessions over the caller's own logs, kept
+// within the longest log time range for non-administrators. An indexed
+// identifier lookup (request / upstream-request / session id) skips that guard.
+func GetUserLogSessions(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	filter := logFilterFromQuery(c, false)
+	if c.GetInt("role") < common.RoleAdminUser && !filter.HasIndexedIdentifier() {
+		startTimestamp, err := limitLogTimeRange(filter.StartTimestamp, filter.EndTimestamp)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		filter.StartTimestamp = startTimestamp
+	}
+	sessions, total, err := model.GetLogSessions(c.GetInt("id"), filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.SysError(common.LogText("failed to query user log sessions: %s", err.Error()))
+		common.ApiErrorT(c, "Failed to query logs")
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(sessions)
+	common.ApiSuccess(c, pageInfo)
+}
+
 func GetUserLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	filter := logFilterFromQuery(c, false)
-	if c.GetInt("role") < common.RoleAdminUser {
+	// An indexed identifier lookup (request / upstream-request / session id) is
+	// cheap regardless of time range, so it skips the non-admin time-range guard.
+	if c.GetInt("role") < common.RoleAdminUser && !filter.HasIndexedIdentifier() {
 		startTimestamp, err := limitLogTimeRange(filter.StartTimestamp, filter.EndTimestamp)
 		if err != nil {
 			common.ApiError(c, err)

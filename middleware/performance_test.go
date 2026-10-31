@@ -50,25 +50,27 @@ func TestSystemPerformanceCheckLogsRejectionBeforeAuth(t *testing.T) {
 	model.DB, model.LOG_DB = db, db
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	common.NodeName = "overload-test-node"
-	config := common.PerformanceMonitorConfig{Enabled: true, CPUThreshold: 90, MemoryThreshold: 90, DiskThreshold: 95}
+	config := common.PerformanceMonitorConfig{Enabled: true, OverloadConsecutiveSamples: 1, CPUThreshold: 90, MemoryThreshold: 90, DiskThreshold: 95}
 
 	for _, tc := range []struct {
-		name       string
-		path       string
-		status     common.SystemStatus
-		monitorOff bool
-		loggingOff bool
-		code       string
+		name          string
+		path          string
+		status        common.SystemStatus
+		protectionOff bool
+		loggingOff    bool
+		code          string
 	}{
 		{name: "cpu_openai", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 95, CPUOverloaded: true}, code: "system_cpu_overloaded"},
 		{name: "memory_claude", path: "/v1/messages", status: common.SystemStatus{MemoryUsage: 97, MemoryOverloaded: true}, code: "system_memory_overloaded"},
 		{name: "logging_disabled", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 99, CPUOverloaded: true}, loggingOff: true, code: "system_cpu_overloaded"},
-		{name: "monitor_disabled", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 99, CPUOverloaded: true}, monitorOff: true},
+		{name: "protection_disabled", path: "/v1/chat/completions", status: common.SystemStatus{CPUUsage: 99, CPUOverloaded: true}, protectionOff: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NoError(t, db.Where("1 = 1").Delete(&model.Log{}).Error)
 			cfg := config
-			cfg.Enabled = !tc.monitorOff
+			if tc.protectionOff {
+				cfg.OverloadConsecutiveSamples = 0
+			}
 			common.SetPerformanceMonitorConfig(cfg)
 			constant.ErrorLogEnabled = !tc.loggingOff
 			status := tc.status

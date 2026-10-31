@@ -189,7 +189,7 @@ func TestContainerMemoryUsageFallsBackWhenUnavailable(t *testing.T) {
 }
 
 func TestSystemOverloadRequiresConsecutiveSamples(t *testing.T) {
-	config := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 90, MemoryThreshold: 90, DiskThreshold: 95}
+	config := PerformanceMonitorConfig{Enabled: true, OverloadConsecutiveSamples: 3, CPUThreshold: 90, MemoryThreshold: 90, DiskThreshold: 95}
 	now := time.Date(2026, 9, 11, 3, 0, 0, 0, time.UTC)
 	cpuSamples := []struct {
 		usage        float64
@@ -221,7 +221,7 @@ func TestSystemOverloadRequiresConsecutiveSamples(t *testing.T) {
 
 func TestCheckSystemOverload(t *testing.T) {
 	now := time.Date(2026, 9, 11, 3, 0, 0, 0, time.UTC)
-	enabled := PerformanceMonitorConfig{Enabled: true, CPUThreshold: 90, MemoryThreshold: 90, DiskThreshold: 95}
+	enabled := PerformanceMonitorConfig{Enabled: true, OverloadConsecutiveSamples: 3, CPUThreshold: 90, MemoryThreshold: 90, DiskThreshold: 95}
 	cpuOverloaded := SystemStatus{CPUUsage: 99.5, CPUOverloaded: true, SampledAt: now}
 	tests := []struct {
 		name        string
@@ -254,13 +254,20 @@ func TestCheckSystemOverload(t *testing.T) {
 		{
 			name:        "lowered threshold reports the active threshold",
 			status:      cpuOverloaded,
-			config:      PerformanceMonitorConfig{Enabled: true, CPUThreshold: 80},
+			config:      PerformanceMonitorConfig{Enabled: true, OverloadConsecutiveSamples: 3, CPUThreshold: 80},
 			wantCode:    "system_cpu_overloaded",
 			wantMessage: "system cpu overloaded (current: 99.5%, threshold: 80%)",
 		},
-		{name: "monitor disabled", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: false, CPUThreshold: 90}},
-		{name: "cpu threshold disabled at runtime", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: true, CPUThreshold: 0}},
-		{name: "cpu threshold raised above usage", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: true, CPUThreshold: 100}},
+		{
+			name:        "overload protection works while monitoring display is off",
+			status:      cpuOverloaded,
+			config:      PerformanceMonitorConfig{Enabled: false, OverloadConsecutiveSamples: 3, CPUThreshold: 90},
+			wantCode:    "system_cpu_overloaded",
+			wantMessage: "system cpu overloaded (current: 99.5%, threshold: 90%)",
+		},
+		{name: "overload protection disabled", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: true, OverloadConsecutiveSamples: 0, CPUThreshold: 90}},
+		{name: "cpu threshold disabled at runtime", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: true, OverloadConsecutiveSamples: 3, CPUThreshold: 0}},
+		{name: "cpu threshold raised above usage", status: cpuOverloaded, config: PerformanceMonitorConfig{Enabled: true, OverloadConsecutiveSamples: 3, CPUThreshold: 100}},
 		{name: "stale sample", status: SystemStatus{CPUUsage: 99.5, CPUOverloaded: true, SampledAt: now.Add(-31 * time.Second)}, config: enabled},
 		{name: "missing sample", status: SystemStatus{CPUUsage: 99.5, CPUOverloaded: true}, config: enabled},
 		{name: "usage above threshold without consecutive samples", status: SystemStatus{CPUUsage: 99.5, SampledAt: now}, config: enabled},

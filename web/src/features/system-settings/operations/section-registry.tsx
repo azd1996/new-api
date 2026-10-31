@@ -138,6 +138,8 @@ const OPERATIONS_SECTIONS = [
             settings['performance_setting.disk_cache_path'] ?? '',
           'performance_setting.monitor_enabled':
             settings['performance_setting.monitor_enabled'] ?? false,
+          'performance_setting.monitor_overload_samples':
+            settings['performance_setting.monitor_overload_samples'] ?? 3,
           'performance_setting.monitor_cpu_threshold':
             settings['performance_setting.monitor_cpu_threshold'] ?? 90,
           'performance_setting.monitor_memory_threshold':

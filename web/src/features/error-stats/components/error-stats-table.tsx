@@ -152,7 +152,7 @@ function AliasEditCell(props: AliasEditCellProps) {
             openOnFocus
             placeholder={placeholder}
             searchPlaceholder={placeholder}
-            emptyText='No option found.'
+            emptyText={t('No option found.')}
             className='h-8'
           />
           <div className='flex justify-end gap-2'>

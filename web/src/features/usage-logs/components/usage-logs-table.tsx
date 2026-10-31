@@ -51,6 +51,7 @@ import { CommonLogsFilterBar } from './common-logs-filter-bar'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
 import { useLogsViewScope, type LogsViewAccess } from './usage-logs-provider'
+import { UsageLogsSessions } from './usage-logs-sessions'
 import { UsageLogsStatistics } from './usage-logs-statistics'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
@@ -81,9 +82,11 @@ function deserializeLogTypeFilter(value: unknown): unknown[] {
   return values.filter((item) => String(item) !== LOG_TYPE_ALL_VALUE)
 }
 
+export type UsageLogsViewMode = 'list' | 'stats' | 'sessions'
+
 interface UsageLogsTableProps {
   logCategory: LogCategory
-  viewMode?: 'list' | 'stats'
+  viewMode?: UsageLogsViewMode
 }
 
 export function UsageLogsTable({
@@ -233,8 +236,12 @@ export function UsageLogsTable({
 
   const isCommon = logCategory === 'common'
   const commonToolbar = (
-    <CommonLogsFilterBar table={table} showStats={viewMode !== 'stats'} />
+    <CommonLogsFilterBar table={table} showStats={viewMode === 'list'} />
   )
+
+  if (isCommon && viewMode === 'sessions') {
+    return <UsageLogsSessions toolbar={commonToolbar} />
+  }
 
   if (isCommon && viewMode === 'stats') {
     return (

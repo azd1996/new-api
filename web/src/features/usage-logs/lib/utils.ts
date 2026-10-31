@@ -102,7 +102,16 @@ function buildTimeRangeParams(
   useMilliseconds: boolean
 ): { start_timestamp?: number; end_timestamp?: number } {
   const hasTimeParams = searchParams.startTime ?? searchParams.endTime
-  const defaultTimeRange = !hasTimeParams ? getDefaultTimeRange() : null
+  // An indexed precise lookup (request / upstream-request / session id) must
+  // not be silently narrowed to the default (today) window when no range is
+  // picked.
+  const hasIndexedIdentifier = Boolean(
+    searchParams.sessionId ||
+      searchParams.requestId ||
+      searchParams.upstreamRequestId
+  )
+  const skipDefaultRange = Boolean(hasTimeParams) || hasIndexedIdentifier
+  const defaultTimeRange = !skipDefaultRange ? getDefaultTimeRange() : null
 
   const convertTimestamp = (timestamp: number) =>
     useMilliseconds ? timestamp : timestampToSeconds(timestamp)
@@ -248,6 +257,9 @@ export function buildApiParams(config: {
       : {}),
     ...(isAdmin && searchParams.customerName
       ? { customer_name: String(searchParams.customerName) }
+      : {}),
+    ...(isAdmin && searchParams.customerId
+      ? { customer_id: String(searchParams.customerId) }
       : {}),
     ...(isAdmin &&
     (searchParams.retryTriggered === 'true' ||

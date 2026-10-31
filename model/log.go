@@ -211,10 +211,13 @@ type Log struct {
 	// ErrorSignatureHash duplicates other.error_signature_hash into a real indexed
 	// column so the detailed-error stats drill-down is a fast exact match.
 	ErrorSignatureHash string `json:"error_signature_hash,omitempty" gorm:"type:varchar(64);index:idx_logs_error_signature_hash;default:''"`
-	// DownstreamRequestId / CustomerId are decoded from the downstream gateway
-	// trace-tag header and duplicated into real indexed columns for fast search.
+	// DownstreamRequestId / CustomerId / CustomerName are decoded from the
+	// downstream gateway trace-tag header and duplicated into real indexed
+	// columns for fast search. CustomerName is the write-time snapshot of the
+	// customer's configured display name for the decoded customer id.
 	DownstreamRequestId string `json:"downstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_downstream_request_id;default:''"`
 	CustomerId          string `json:"customer_id,omitempty" gorm:"type:varchar(128);index:idx_logs_customer_id;default:''"`
+	CustomerName        string `json:"customer_name,omitempty" gorm:"type:varchar(128);index:idx_logs_customer_name;default:''"`
 	// RetryTriggered duplicates other.admin_info.retry_triggered into a real
 	// indexed column (error logs) so the admin log list can filter attempts that
 	// fired an error-triggered retry-override. Reporting-only; never billed.
@@ -320,6 +323,13 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
 		logs[i].ChannelName = ""
+		// Admin-only downstream trace-tag columns must not leak to end users.
+		// The Other scrub below already hides their admin_info copies, so blank
+		// the dedicated columns too (customer_name is new; customer_id and
+		// downstream_request_id were previously returned to non-admins).
+		logs[i].CustomerName = ""
+		logs[i].CustomerId = ""
+		logs[i].DownstreamRequestId = ""
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
 	}
 	assignDisplayLogIds(logs, startIdx)
@@ -547,7 +557,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	if sessionID != "" && other != nil {
 		other.SetPublic("session_id", sessionID)
 	}
-	downstreamRequestID, customerID := "", ""
+	downstreamRequestID, customerID, customerName := "", "", ""
 	if raw, reqID, custID, decoded := common.TraceTagFromContext(c); raw != "" && other != nil {
 		other.SetAdmin("downstream_trace_tag", raw)
 		if decoded {
@@ -555,6 +565,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 			other.SetAdmin("downstream_request_id", reqID)
 			other.SetAdmin("customer_id", custID)
 			if name := CustomerName(custID); name != "" {
+				customerName = name
 				other.SetAdmin("customer_name", name)
 			}
 		}
@@ -586,6 +597,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		SessionID:           sessionID,
 		DownstreamRequestId: downstreamRequestID,
 		CustomerId:          customerID,
+		CustomerName:        customerName,
 		ErrorSignatureHash:  errorSignatureHash,
 		RetryTriggered:      retryTriggered,
 		Content:             content,
@@ -644,7 +656,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	if sessionID != "" && other != nil {
 		other.SetPublic("session_id", sessionID)
 	}
-	downstreamRequestID, customerID := "", ""
+	downstreamRequestID, customerID, customerName := "", "", ""
 	if raw, reqID, custID, decoded := common.TraceTagFromContext(c); raw != "" && other != nil {
 		other.SetAdmin("downstream_trace_tag", raw)
 		if decoded {
@@ -652,6 +664,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			other.SetAdmin("downstream_request_id", reqID)
 			other.SetAdmin("customer_id", custID)
 			if name := CustomerName(custID); name != "" {
+				customerName = name
 				other.SetAdmin("customer_name", name)
 			}
 		}
@@ -687,6 +700,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		SessionID:           sessionID,
 		DownstreamRequestId: downstreamRequestID,
 		CustomerId:          customerID,
+		CustomerName:        customerName,
 		Content:             content,
 		PromptTokens:        params.PromptTokens,
 		CompletionTokens:    params.CompletionTokens,
@@ -826,8 +840,10 @@ type LogFilter struct {
 	SessionId           string
 	DownstreamRequestId string
 	CustomerId          string
-	// CustomerName and DownstreamTraceTag match the admin-only trace-tag
-	// fields recorded in Other (unindexed; pair with a time range).
+	// CustomerName matches the admin-only customer-name snapshot on its indexed
+	// column (exact equality, mirroring CustomerId). DownstreamTraceTag still
+	// matches the trace-tag string recorded in Other (unindexed; pair with a
+	// time range).
 	CustomerName       string
 	DownstreamTraceTag string
 	StatusCode         int
@@ -836,6 +852,14 @@ type LogFilter struct {
 	// RetryTriggered, when set, restricts to error logs whose attempt did (true)
 	// or did not (false) fire an error-triggered retry-override. Admin-only.
 	RetryTriggered *bool
+}
+
+// HasIndexedIdentifier reports whether the filter targets logs by an indexed
+// identifier (request / upstream-request / session id). Such a lookup is cheap
+// regardless of time range, so callers skip the non-admin time-range guard
+// when one is set.
+func (f LogFilter) HasIndexedIdentifier() bool {
+	return f.RequestId != "" || f.UpstreamRequestId != "" || f.SessionId != ""
 }
 
 func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
@@ -868,8 +892,7 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 		tx = tx.Where("logs.customer_id = ?", f.CustomerId)
 	}
 	if f.CustomerName != "" {
-		cond, pat := otherFieldLikeCondition("logs.other", "customer_name", f.CustomerName)
-		tx = tx.Where(cond, pat)
+		tx = tx.Where("logs.customer_name = ?", f.CustomerName)
 	}
 	if f.DownstreamTraceTag != "" {
 		cond, pat := otherFieldLikeCondition("logs.other", "downstream_trace_tag", f.DownstreamTraceTag)

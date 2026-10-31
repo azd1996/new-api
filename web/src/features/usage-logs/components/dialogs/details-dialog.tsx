@@ -367,13 +367,13 @@ function BillingBreakdown(props: {
   const statGroupRatio = log.stat_group_ratio ?? 0
   const customerStatQuota = log.customer_stat_quota ?? 0
   const customerDiscount = log.customer_discount ?? 0
-  if (rawQuota > 0) {
+  if (typeof log.raw_quota === 'number') {
     rows.push({
       label: t('Original Amount'),
       value: formatLogQuota(rawQuota),
     })
   }
-  if (statQuota > 0) {
+  if (typeof log.stat_quota === 'number') {
     const hasStatRatio = statGroupRatio > 0 && statGroupRatio !== 1
     rows.push({
       label: hasStatRatio
@@ -382,13 +382,16 @@ function BillingBreakdown(props: {
       value: formatLogQuota(statQuota),
     })
   }
-  if (customerStatQuota > 0) {
+  if (typeof log.customer_stat_quota === 'number') {
     const hasCustomerDiscount = customerDiscount > 0 && customerDiscount !== 1
     rows.push({
       label: hasCustomerDiscount
         ? `${t('Customer Discounted Amount')} (x${customerDiscount})`
         : t('Customer Discounted Amount'),
-      value: formatLogQuota(customerStatQuota),
+      value:
+        other?.customer_discount_fallback === true
+          ? `${formatLogQuota(customerStatQuota)} (${t('No matching series discount; fallback to 1')})`
+          : formatLogQuota(customerStatQuota),
     })
     if (statQuota > 0) {
       rows.push({
@@ -791,38 +794,65 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
 
-          {props.isAdmin && props.log.downstream_request_id && (
-            <DetailRow
-              label={t('Downstream Request ID')}
-              value={props.log.downstream_request_id}
-              mono
-            />
-          )}
-
-          {props.isAdmin && adminInfo?.customer_name && (
-            <DetailRow
-              label={t('Customer Name')}
-              value={adminInfo.customer_name}
-              mono
-            />
-          )}
-
           {props.isAdmin &&
-            (props.log.customer_id || adminInfo?.customer_id) && (
+            (props.log.downstream_request_id ||
+              other?.downstream_request_id) && (
               <DetailRow
-                label={t('Customer ID')}
-                value={props.log.customer_id || adminInfo?.customer_id || ''}
+                label={t('Downstream Request ID')}
+                value={
+                  props.log.downstream_request_id ||
+                  other?.downstream_request_id ||
+                  ''
+                }
                 mono
               />
             )}
 
-          {props.isAdmin && adminInfo?.downstream_trace_tag && (
-            <DetailRow
-              label={t('Downstream Trace Tag')}
-              value={adminInfo.downstream_trace_tag}
-              mono
-            />
-          )}
+          {props.isAdmin &&
+            (props.log.customer_name ||
+              adminInfo?.customer_name ||
+              other?.customer_name) && (
+              <DetailRow
+                label={t('Customer Name')}
+                value={
+                  props.log.customer_name ||
+                  adminInfo?.customer_name ||
+                  other?.customer_name ||
+                  ''
+                }
+                mono
+              />
+            )}
+
+          {props.isAdmin &&
+            (props.log.customer_id ||
+              adminInfo?.customer_id ||
+              other?.customer_id) && (
+              <DetailRow
+                label={t('Customer ID')}
+                value={
+                  props.log.customer_id ||
+                  adminInfo?.customer_id ||
+                  other?.customer_id ||
+                  ''
+                }
+                mono
+              />
+            )}
+
+          {props.isAdmin &&
+            (adminInfo?.downstream_trace_tag ||
+              other?.downstream_trace_tag) && (
+              <DetailRow
+                label={t('Downstream Trace Tag')}
+                value={
+                  adminInfo?.downstream_trace_tag ||
+                  other?.downstream_trace_tag ||
+                  ''
+                }
+                mono
+              />
+            )}
 
           {props.isAdmin && props.log.channel > 0 && (
             <DetailRow

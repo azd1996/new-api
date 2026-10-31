@@ -37,7 +37,7 @@ const logTypeSearchSchema = z
   .catch([])
 
 const usageLogsSearchSchema = z.object({
-  view: z.enum(['list', 'stats']).optional().catch('list'),
+  view: z.enum(['list', 'stats', 'sessions']).optional().catch('list'),
   page: z.number().optional().catch(1),
   pageSize: z.number().optional().catch(undefined),
   type: logTypeSearchSchema.optional(),
@@ -60,6 +60,7 @@ const usageLogsSearchSchema = z.object({
   downstreamRequestId: z.string().optional().catch(''),
   downstreamTraceTag: z.string().optional().catch(''),
   customerName: z.string().optional().catch(''),
+  customerId: z.string().optional().catch(''),
   retryTriggered: z.enum(['true', 'false']).optional().catch(undefined),
   statusCode: z.string().optional().catch(''),
   errorKeyword: z.string().optional().catch(''),

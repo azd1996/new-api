@@ -48,6 +48,7 @@ export const usageLogSchema = z.object({
   session_id: z.string().optional(),
   downstream_request_id: z.string().optional(),
   customer_id: z.string().optional(),
+  customer_name: z.string().optional(),
   // Error logs: whether this failed attempt fired an error-triggered retry.
   retry_triggered: z.boolean().optional(),
   // Amount calibers (top-level log columns). raw_quota is the undiscounted

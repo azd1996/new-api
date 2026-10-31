@@ -49,9 +49,6 @@ var latestSystemStatus atomic.Value
 
 const (
 	systemMonitorInterval = 5 * time.Second
-	// 连续 3 次采样（约 15 秒）仍高于阈值才判定过载，
-	// 任一采样回落到阈值以下即恢复，避免瞬时尖峰打满重试。
-	overloadConsecutiveSamples = 3
 	// 采样超过该时长未刷新（监控未运行或被阻塞）时，哨兵不据此熔断。
 	systemStatusMaxAge = 30 * time.Second
 )
@@ -67,7 +64,8 @@ func StartSystemMonitor() {
 		var detector overloadDetector
 		for {
 			config := GetPerformanceMonitorConfig()
-			if !config.Enabled {
+			// 指标采集（监控展示）与过载保护解耦：任一开启都需要继续采样。
+			if !config.Enabled && config.OverloadConsecutiveSamples <= 0 {
 				detector = overloadDetector{}
 				latestSystemStatus.Store(SystemStatus{SampledAt: time.Now()})
 				time.Sleep(systemMonitorInterval)
@@ -83,8 +81,8 @@ func StartSystemMonitor() {
 	}()
 }
 
-// overloadDetector 为每项资源累计连续超阈值的采样次数：连续 overloadConsecutiveSamples 次
-// 才标记过载，任一次回落立即清零并重新累计。
+// overloadDetector 为每项资源累计连续超阈值的采样次数：连续 config.OverloadConsecutiveSamples
+// 次才标记过载，任一次回落立即清零并重新累计。OverloadConsecutiveSamples <= 0 表示关闭过载保护。
 type overloadDetector struct {
 	cpuSamples    int
 	memorySamples int
@@ -92,18 +90,22 @@ type overloadDetector struct {
 }
 
 func (d *overloadDetector) mark(status *SystemStatus, config PerformanceMonitorConfig) {
-	status.CPUOverloaded = countOverloadSample(&d.cpuSamples, exceedsThreshold(status.CPUUsage, config.CPUThreshold))
-	status.MemoryOverloaded = countOverloadSample(&d.memorySamples, exceedsThreshold(status.MemoryUsage, config.MemoryThreshold))
-	status.DiskOverloaded = countOverloadSample(&d.diskSamples, exceedsThreshold(status.DiskUsage, config.DiskThreshold))
+	if config.OverloadConsecutiveSamples <= 0 {
+		*d = overloadDetector{}
+		return
+	}
+	status.CPUOverloaded = countOverloadSample(&d.cpuSamples, exceedsThreshold(status.CPUUsage, config.CPUThreshold), config.OverloadConsecutiveSamples)
+	status.MemoryOverloaded = countOverloadSample(&d.memorySamples, exceedsThreshold(status.MemoryUsage, config.MemoryThreshold), config.OverloadConsecutiveSamples)
+	status.DiskOverloaded = countOverloadSample(&d.diskSamples, exceedsThreshold(status.DiskUsage, config.DiskThreshold), config.OverloadConsecutiveSamples)
 }
 
-func countOverloadSample(samples *int, over bool) bool {
+func countOverloadSample(samples *int, over bool, required int) bool {
 	if !over {
 		*samples = 0
 		return false
 	}
-	*samples = min(*samples+1, overloadConsecutiveSamples)
-	return *samples == overloadConsecutiveSamples
+	*samples = min(*samples+1, required)
+	return *samples >= required
 }
 
 // exceedsThreshold 判断采样值是否超过阈值；阈值 <= 0 表示不检查该项。
@@ -140,11 +142,12 @@ func GetSystemStatus() SystemStatus {
 	return latestSystemStatus.Load().(SystemStatus)
 }
 
-// CheckSystemOverload 返回哨兵应据以熔断的过载项。监控关闭、采样缺失或已超过
-// systemStatusMaxAge 时返回 nil。过载标记来自连续采样，阈值按当前配置复核，
+// CheckSystemOverload 返回哨兵应据以熔断的过载项。过载保护关闭
+// （OverloadConsecutiveSamples <= 0）、采样缺失或已超过 systemStatusMaxAge 时返回 nil。
+// 过载保护独立于监控展示开关（Enabled），过载标记来自连续采样，阈值按当前配置复核，
 // 运行时关闭或调高阈值后立即放行，不必等待下一次采样。
 func CheckSystemOverload(status SystemStatus, config PerformanceMonitorConfig, now time.Time) *SystemOverload {
-	if !config.Enabled || status.SampledAt.IsZero() || now.Sub(status.SampledAt) > systemStatusMaxAge {
+	if config.OverloadConsecutiveSamples <= 0 || status.SampledAt.IsZero() || now.Sub(status.SampledAt) > systemStatusMaxAge {
 		return nil
 	}
 	if status.CPUOverloaded && exceedsThreshold(status.CPUUsage, config.CPUThreshold) {

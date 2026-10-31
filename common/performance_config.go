@@ -4,10 +4,11 @@ import "sync/atomic"
 
 // PerformanceMonitorConfig 性能监控配置
 type PerformanceMonitorConfig struct {
-	Enabled         bool
-	CPUThreshold    int
-	MemoryThreshold int
-	DiskThreshold   int
+	Enabled                    bool
+	OverloadConsecutiveSamples int
+	CPUThreshold               int
+	MemoryThreshold            int
+	DiskThreshold              int
 }
 
 var performanceMonitorConfig atomic.Value
@@ -15,10 +16,11 @@ var performanceMonitorConfig atomic.Value
 func init() {
 	// 初始化默认配置
 	performanceMonitorConfig.Store(PerformanceMonitorConfig{
-		Enabled:         true,
-		CPUThreshold:    90,
-		MemoryThreshold: 90,
-		DiskThreshold:   90,
+		Enabled:                    true,
+		OverloadConsecutiveSamples: 3,
+		CPUThreshold:               90,
+		MemoryThreshold:            90,
+		DiskThreshold:              90,
 	})
 }
 

@@ -789,7 +789,7 @@ export function AdvancedCustomEditorDialog({
                   )
                 }
               >
-                {t('Expand all')}
+                {t('Expand All')}
               </Button>
             </div>
           </div>

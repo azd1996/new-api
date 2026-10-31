@@ -33,13 +33,16 @@ import {
   useLogsViewScope,
   useUsageLogsContext,
 } from './components/usage-logs-provider'
-import { UsageLogsTable } from './components/usage-logs-table'
+import {
+  UsageLogsTable,
+  type UsageLogsViewMode,
+} from './components/usage-logs-table'
+import { LOG_TYPE_ALL_VALUE } from './constants'
 import {
   isUsageLogsSectionId,
   USAGE_LOGS_DEFAULT_SECTION,
   type UsageLogsSectionId,
 } from './section-registry'
-import { LOG_TYPE_ALL_VALUE } from './constants'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 const TASK_LOG_SECTIONS = ['drawing', 'task'] as const
@@ -74,10 +77,13 @@ function UsageLogsContent() {
     setAffinityDialogOpen,
   } = useUsageLogsContext()
   const { canManageScope, viewScope, setViewScope } = useLogsViewScope()
-  const viewMode =
-    activeCategory === 'common' && searchParams.view === 'stats'
-      ? 'stats'
-      : 'list'
+  let viewMode: UsageLogsViewMode = 'list'
+  if (
+    activeCategory === 'common' &&
+    (searchParams.view === 'stats' || searchParams.view === 'sessions')
+  ) {
+    viewMode = searchParams.view
+  }
   const tabNavGroups = useMemo<NavGroup[]>(
     () => [
       {
@@ -125,7 +131,7 @@ function UsageLogsContent() {
 
   const handleViewModeChange = useCallback(
     (mode: string) => {
-      if (mode !== 'list' && mode !== 'stats') return
+      if (mode !== 'list' && mode !== 'stats' && mode !== 'sessions') return
       void navigate({
         to: '/usage-logs/$section',
         params: { section: 'common' },
@@ -157,6 +163,7 @@ function UsageLogsContent() {
                 <Tabs value={viewMode} onValueChange={handleViewModeChange}>
                   <TabsList>
                     <TabsTrigger value='list'>{t('List')}</TabsTrigger>
+                    <TabsTrigger value='sessions'>{t('Sessions')}</TabsTrigger>
                     <TabsTrigger value='stats'>{t('Statistics')}</TabsTrigger>
                   </TabsList>
                 </Tabs>
@@ -186,7 +193,10 @@ function UsageLogsContent() {
               </Tabs>
             )}
             <div className='min-h-0 flex-1'>
-              <UsageLogsTable logCategory={activeCategory} viewMode={viewMode} />
+              <UsageLogsTable
+                logCategory={activeCategory}
+                viewMode={viewMode}
+              />
             </div>
           </div>
         </SectionPageLayout.Content>

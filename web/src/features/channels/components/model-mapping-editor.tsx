@@ -477,7 +477,7 @@ export function ModelMappingEditor(props: ModelMappingEditorProps) {
                       handleRowChange(row.id, 'from', value)
                     }
                     placeholder='gpt-3.5-turbo'
-                    emptyText='No matching items'
+                    emptyText={t('No matching items')}
                     allowCustomValue
                     disabled={props.disabled}
                     aria-label={t('Request Model Name')}
@@ -490,7 +490,7 @@ export function ModelMappingEditor(props: ModelMappingEditorProps) {
                       handleRowChange(row.id, 'to', value)
                     }
                     placeholder='gpt-3.5-turbo-0125'
-                    emptyText='No matching items'
+                    emptyText={t('No matching items')}
                     allowCustomValue
                     disabled={props.disabled}
                     aria-label={t('Upstream Model Name')}

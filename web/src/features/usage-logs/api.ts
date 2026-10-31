@@ -24,6 +24,7 @@ import { buildQueryParams } from './lib/query-params'
 import { parseTaskArtifactsResponse } from './lib/task-artifacts'
 import type {
   GetLogsParams,
+  GetLogSessionsResponse,
   GetLogsResponse,
   GetLogStatsParams,
   GetLogStatsResponse,
@@ -99,6 +100,21 @@ export async function getLogsAnalysis(
     params as unknown as Record<string, unknown>
   )
   const res = await api.get(`/api/log/analysis?${queryParams}`)
+  return res.data
+}
+
+// getLogSessions groups the filtered consume and error logs by session_id,
+// newest activity first.
+export async function getLogSessions(
+  params: GetLogsParams,
+  isAdmin: boolean
+): Promise<GetLogSessionsResponse> {
+  const queryParams = buildQueryParams(
+    params as unknown as Record<string, unknown>
+  )
+  const res = await api.get(
+    `${buildApiPath('/api/log', isAdmin)}/sessions?${queryParams}`
+  )
   return res.data
 }
 

@@ -150,7 +150,8 @@ func TestRetryOverrideLogIsAdminOnly(t *testing.T) {
 }
 
 // TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag pins the admin filters
-// on customer_name / downstream_trace_tag, which live only in the Other JSON.
+// on customer_name (its dedicated indexed column, mirroring customer_id) and
+// downstream_trace_tag (which still lives only in the Other JSON).
 func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -160,8 +161,8 @@ func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
 
 	require.NoError(t, db.Create([]Log{
-		{Id: 1, Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"tag-a"}}`},
-		{Id: 2, Other: `{"admin_info":{"customer_name":"Other","downstream_trace_tag":"tag-b"}}`},
+		{Id: 1, CustomerName: "Acme", Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"tag-a"}}`},
+		{Id: 2, CustomerName: "Other", Other: `{"admin_info":{"customer_name":"Other","downstream_trace_tag":"tag-b"}}`},
 	}).Error)
 
 	findIDs := func(filter LogFilter) []int {
@@ -189,9 +190,9 @@ func TestSuccessCountsRetainCustomerAndTraceFilters(t *testing.T) {
 	LOG_DB = db
 	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
 	require.NoError(t, db.Create([]Log{
-		{ChannelId: 1, Type: LogTypeConsume, Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"a"}}`},
-		{ChannelId: 1, Type: LogTypeError, Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"b"}}`},
-		{ChannelId: 2, Type: LogTypeConsume, Other: `{"admin_info":{"customer_name":"Other","downstream_trace_tag":"b"}}`},
+		{ChannelId: 1, Type: LogTypeConsume, CustomerName: "Acme", Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"a"}}`},
+		{ChannelId: 1, Type: LogTypeError, CustomerName: "Acme", Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"b"}}`},
+		{ChannelId: 2, Type: LogTypeConsume, CustomerName: "Other", Other: `{"admin_info":{"customer_name":"Other","downstream_trace_tag":"b"}}`},
 	}).Error)
 	for _, tc := range []struct {
 		name, customer, trace string
@@ -211,4 +212,76 @@ func TestSuccessCountsRetainCustomerAndTraceFilters(t *testing.T) {
 			assert.Equal(t, tc.errors, errs)
 		})
 	}
+}
+
+// TestGetLogSessionsGroupsBySessionId pins the session view contract: only
+// consume/error logs with a real session id are grouped, the newest session
+// comes first, intervals use consume logs only, the cache cell matches the
+// log-analysis classification, and a user id limits the result to its logs.
+func TestGetLogSessionsGroupsBySessionId(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	oldDB, oldType := LOG_DB, common.LogDatabaseType()
+	t.Cleanup(func() { LOG_DB = oldDB; common.SetLogDatabaseType(oldType) })
+	LOG_DB = db
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+
+	claudeHit := `{"claude":true,"cache_tokens":3000,"cache_creation_tokens":0}`
+	claudeCold := `{"claude":true,"cache_tokens":0,"cache_creation_tokens":2000}`
+	require.NoError(t, db.Create([]Log{
+		{UserId: 1, Username: "alice", TokenId: 11, TokenName: "k1", ModelName: "claude-x", Type: LogTypeConsume, SessionID: "s-a", CreatedAt: 100, Quota: 10, PromptTokens: 100, CompletionTokens: 5, Other: claudeCold},
+		{UserId: 1, Username: "alice", TokenId: 11, TokenName: "k1", ModelName: "claude-x", Type: LogTypeError, SessionID: "s-a", CreatedAt: 101},
+		{UserId: 1, Username: "alice", TokenId: 11, TokenName: "k1", ModelName: "claude-x", Type: LogTypeConsume, SessionID: "s-a", CreatedAt: 130, Quota: 20, PromptTokens: 100, CompletionTokens: 7, Other: claudeHit},
+		{UserId: 1, Username: "alice", TokenId: 11, TokenName: "k1", ModelName: "claude-x", Type: LogTypeConsume, SessionID: "s-a", CreatedAt: 230, Quota: 30, PromptTokens: 100, CompletionTokens: 9, Other: claudeHit},
+		{UserId: 2, Username: "bob", TokenId: 22, TokenName: "k2", ModelName: "gpt-x", Type: LogTypeConsume, SessionID: "s-b", CreatedAt: 300, Quota: 5, PromptTokens: 50},
+		{UserId: 2, Username: "bob", Type: LogTypeConsume, SessionID: "notfound", CreatedAt: 400},
+		{UserId: 2, Username: "bob", Type: LogTypeConsume, SessionID: "", CreatedAt: 500},
+		{UserId: 2, Username: "bob", Type: LogTypeTopup, SessionID: "s-c", CreatedAt: 600},
+	}).Error)
+
+	sessions, total, err := GetLogSessions(0, LogFilter{Type: LogTypeError}, 0, 10)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	require.Len(t, sessions, 2)
+	assert.Equal(t, "s-b", sessions[0].SessionId)
+	assert.Zero(t, sessions[0].MinInterval)
+
+	a := sessions[1]
+	assert.Equal(t, "s-a", a.SessionId)
+	assert.EqualValues(t, 4, a.RequestCount)
+	assert.EqualValues(t, 3, a.ConsumeCount)
+	assert.EqualValues(t, 1, a.ErrorCount)
+	assert.EqualValues(t, 100, a.FirstAt)
+	assert.EqualValues(t, 230, a.LastAt)
+	assert.EqualValues(t, 60, a.Quota)
+	assert.EqualValues(t, 300, a.PromptTokens)
+	assert.EqualValues(t, 21, a.CompletionTokens)
+	assert.Equal(t, "alice", a.Username)
+	assert.EqualValues(t, 1, a.UserCount)
+	assert.EqualValues(t, 1, a.ModelCount)
+	assert.EqualValues(t, 30, a.MinInterval)
+	assert.EqualValues(t, 100, a.MaxInterval)
+	assert.InDelta(t, 65.0, a.AvgInterval, 1e-9)
+	assert.Equal(t, 2, a.Cache.Hit)
+	assert.Equal(t, 1, a.Cache.ColdWrite)
+	assert.EqualValues(t, 6000, a.Cache.CacheRead)
+	assert.EqualValues(t, 8300, a.Cache.InputAll)
+	assert.InDelta(t, 6000.0/8300.0, a.Cache.GrossRate, 1e-9)
+
+	page2, total, err := GetLogSessions(0, LogFilter{}, 1, 1)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	require.Len(t, page2, 1)
+	assert.Equal(t, "s-a", page2[0].SessionId)
+
+	own, total, err := GetLogSessions(2, LogFilter{}, 0, 10)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, own, 1)
+	assert.Equal(t, "s-b", own[0].SessionId)
 }

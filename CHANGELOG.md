@@ -5,6 +5,18 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## v0.0.9（基于上游 QuantumNous/new-api v1.0.0-rc.47 re-baseline 开发）
+
+> 本版本把既有自定义功能 re-baseline 迁移到上游 `v1.0.0-rc.47` 之上。下方仅记录本轮**真正新增或此前未记录**的变更；纯粹的端口恢复（从旧 `feature/custom-query-api` 分支迁移时丢失、现仅做还原，且已在下方历史条目中记录过的改动，如性能监控与过载保护解耦、成功率健康色阈值、客户名/ID 筛选下拉还原、少量硬编码英文补 i18n、零值金额行展示门控还原）不再重复列出。
+
+### 新增 Added
+- **使用日志新增「会话」分组视图（Usage Log Session View）**：Common 使用日志在「日志明细 / 统计分析」之外新增第三个视图「会话」（`web/src/features/usage-logs/index.tsx` 的 `view=sessions` Tab，路由 `$section.tsx` 的 `view` 枚举加 `sessions`）。该视图把**带真实会话 ID**（Claude metadata session / OpenAI `prompt_cache_key`，排除空值与 `notfound` 哨兵）的消耗/错误日志按 `session_id` 聚合成一行，按最近活动倒序；每行展示请求数、消耗/错误次数、首末时间、额度、prompt/completion tokens、涉及的用户/令牌/模型数量，以及**请求间隔（平均/最小/最大）**和与日志分析弹窗同口径的**缓存命中**单元格，行内可展开查看该会话的逐条请求（`usage-logs-sessions.tsx` / `session-requests-table.tsx` / `columns/session-columns.tsx`，另附 `__tests__/session-view.test.tsx`）。后端新增 `model.GetLogSessions`（`model/log_session.go`：按 `session_id` 分组聚合，`consume_count`/`error_count` 用 `CASE WHEN type=?` 条件计数，间隔取相邻消耗日志 `created_at` 之差、错误/重试不缩短间隔，缓存单元格复用 `classifyCacheRow`/`cacheCellFromAgg`；明细扫描上限 `logSessionScanLimit=200000`，命中则置 `Truncated`），接口 `GET /api/log/sessions`（`AdminAuth`，全量用户）与 `GET /api/log/self/sessions`（`UserAuth`，仅本人）在 `controller/log.go`（`GetLogSessions`/`GetUserLogSessions`）、`router/api-router.go` 与 `middleware/access_token_routes.go`（访问令牌作用域 `log:read` / `usage:read`）注册；前端经 `api.ts` 的 `getLogSessions` 与 `types.ts` 的 `LogSession`/`GetLogSessionsResponse` 消费。
+
+### 优化 Changed
+- **`customer_name` 提升为独立索引列并改走精确等值筛选（附非管理员隐私收敛）**：此前客户名只落在 `other.admin_info.customer_name`，筛选靠跨方言 `other LIKE` 子串匹配。现新增 `model.Log.CustomerName` 真列（`varchar(128)` + 索引 `idx_logs_customer_name`，`default:''`），`RecordConsumeLog`/`RecordErrorLog` 在解出下游 Trace-Tag 时把写时客户名快照**双写**进新列并保留 `other` 那份（随 `other` 继续同步远端 ClickHouse）；本机 CH 建表 DDL 与 `migrateClickHouseLogDB` 幂等 `ADD COLUMN IF NOT EXISTS customer_name` 补列（`model/main.go`），MySQL/SQLite 走 `AutoMigrate`。`LogFilter.CustomerName` 由 `other LIKE` 改为 `logs.customer_name = ?` **精确等值**（走索引，`model/log.go`）。**隐私修复**：`formatUserLogs`（非管理员返回路径）现额外清空 `CustomerName`/`CustomerId`/`DownstreamRequestId` 三个管理员专属下游列——此前 `customer_id`/`downstream_request_id` 会随非管理员列表泄漏，`customer_name` 为本轮新列一并收敛。注意：**筛选语义由子串匹配变为精确相等**；且**加列之前产生的历史日志**该列为空，仅 `other` 里有客户名，用列精确筛选查不到它们（新日志不受影响）。
+- **索引精确标识符查询跳过非管理员时间范围限制**：此前非管理员查使用日志会被强制收敛到「最长可查时间窗」。现当筛选带**索引精确标识符**（`session_id` / `request_id` / `upstream_request_id`）时，这类查询无论时间范围都走索引、开销很低，故跳过该时间范围守卫——后端 `model.LogFilter.HasIndexedIdentifier()` 判定，`controller/log.go` 的 `GetUserLogs`/`GetUserLogSessions` 在非管理员且无索引标识符时才限制时间窗；前端 `lib/utils.ts` 的 `buildTimeRangeParams` 同步：设置了上述任一标识符时不再注入默认「今天」时间窗，避免精确查询被静默缩窄。
+- **日志详情下游字段读取兼容旧版本写法**：旧版本把 `customer_id` / `customer_name` / `downstream_request_id` / `downstream_trace_tag` 直接写在 `other` 顶层（彼时尚无索引列、也未统一收进 `other.admin_info`）。详情弹窗（`details-dialog.tsx`）现对这四个管理员字段依次回退读取——先读顶层真列，再读 `other.admin_info.*`，最后回退旧版 `other.*` 顶层（`types.ts` 的 `LogOtherData` 补上这四个旧版字段类型），使**旧版本写入的历史日志**在新前端也能正确展示。
+
 ## [2026-10-29]
 
 ### 新增 Added

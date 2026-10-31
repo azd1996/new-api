@@ -67,6 +67,7 @@ export interface CommonLogFilters extends CommonFilters {
   downstreamRequestId?: string
   downstreamTraceTag?: string
   customerName?: string
+  customerId?: string
   // Error logs only: 'true' / 'false'; undefined means no filter.
   retryTriggered?: 'true' | 'false'
   statusCode?: string
@@ -200,6 +201,12 @@ export interface LogOtherData {
     customer_id?: string
     customer_name?: string
   }
+  // Legacy (pre-column) downstream trace-tag storage: older app versions wrote
+  // these at the top level of `other`; read as a fallback for old logs.
+  downstream_trace_tag?: string
+  downstream_request_id?: string
+  customer_id?: string
+  customer_name?: string
   root_info?: {
     task_plugin?: TaskPluginRuntimeInfo
     upstream_task_id?: string
@@ -250,6 +257,9 @@ export interface LogOtherData {
   model_price?: number
   group_ratio?: number
   user_group_ratio?: number
+  // Set when the customer-series discount lookup found no matching series and
+  // the backend fell back to a discount of 1 (no discount applied).
+  customer_discount_fallback?: boolean
   cache_ratio?: number
   cache_creation_ratio?: number
   cache_creation_ratio_5m?: number
@@ -507,6 +517,7 @@ export interface GetLogsParams {
   downstream_request_id?: string
   downstream_trace_tag?: string
   customer_name?: string
+  customer_id?: string
   retry_triggered?: 'true' | 'false'
   status_code?: number
   error_keyword?: string
@@ -681,6 +692,42 @@ export interface LogAnalysisResponse {
   success: boolean
   message?: string
   data?: LogAnalysisResult
+}
+
+// One row of the session view: the consume and error logs sharing a
+// session_id. Intervals are seconds between consecutive consume logs.
+export interface LogSession {
+  session_id: string
+  request_count: number
+  consume_count: number
+  error_count: number
+  first_at: number
+  last_at: number
+  quota: number
+  prompt_tokens: number
+  completion_tokens: number
+  username: string
+  user_count: number
+  token_name: string
+  token_count: number
+  model_name: string
+  model_count: number
+  avg_interval: number
+  min_interval: number
+  max_interval: number
+  cache: LogCacheCell
+  truncated?: boolean
+}
+
+export interface GetLogSessionsResponse {
+  success: boolean
+  message?: string
+  data?: {
+    items: LogSession[]
+    total: number
+    page: number
+    page_size: number
+  }
 }
 
 // ============================================================================

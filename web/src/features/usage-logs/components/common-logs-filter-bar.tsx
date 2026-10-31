@@ -40,6 +40,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { getEnabledModels } from '@/features/channels/api'
+import { CustomerFilterCombobox } from '@/features/customers/components/customer-filter-combobox'
 import { getGroups } from '@/features/users/api'
 import { useMediaQuery } from '@/hooks'
 import { getUserGroups } from '@/lib/api'
@@ -150,6 +151,7 @@ function buildSearchSourceKey(values: {
   downstreamRequestId?: unknown
   downstreamTraceTag?: unknown
   customerName?: unknown
+  customerId?: unknown
   retryTriggered?: unknown
   statusCode?: unknown
   errorKeyword?: unknown
@@ -176,6 +178,7 @@ function buildSearchSourceKey(values: {
     values.downstreamRequestId,
     values.downstreamTraceTag,
     values.customerName,
+    values.customerId,
     values.retryTriggered,
     values.statusCode,
     values.errorKeyword,
@@ -262,6 +265,7 @@ export function CommonLogsFilterBar<TData>(
       downstreamRequestId: searchParams.downstreamRequestId,
       downstreamTraceTag: searchParams.downstreamTraceTag,
       customerName: searchParams.customerName,
+      customerId: searchParams.customerId,
       retryTriggered: searchParams.retryTriggered,
       statusCode: searchParams.statusCode,
       errorKeyword: searchParams.errorKeyword,
@@ -290,6 +294,7 @@ export function CommonLogsFilterBar<TData>(
       downstreamRequestId: searchParams.downstreamRequestId || undefined,
       downstreamTraceTag: searchParams.downstreamTraceTag || undefined,
       customerName: searchParams.customerName || undefined,
+      customerId: searchParams.customerId || undefined,
       retryTriggered: searchParams.retryTriggered,
       statusCode: searchParams.statusCode || undefined,
       errorKeyword: searchParams.errorKeyword || undefined,
@@ -320,6 +325,7 @@ export function CommonLogsFilterBar<TData>(
     searchParams.downstreamRequestId,
     searchParams.downstreamTraceTag,
     searchParams.customerName,
+    searchParams.customerId,
     searchParams.retryTriggered,
     searchParams.statusCode,
     searchParams.errorKeyword,
@@ -412,6 +418,7 @@ export function CommonLogsFilterBar<TData>(
     !!filters.downstreamRequestId ||
     !!filters.downstreamTraceTag ||
     !!filters.customerName ||
+    !!filters.customerId ||
     !!filters.retryTriggered ||
     !!filters.statusCode ||
     !!filters.errorKeyword ||
@@ -431,6 +438,7 @@ export function CommonLogsFilterBar<TData>(
     isAdmin ? filters.downstreamRequestId : undefined,
     isAdmin ? filters.downstreamTraceTag : undefined,
     isAdmin ? filters.customerName : undefined,
+    isAdmin ? filters.customerId : undefined,
     isAdmin ? filters.retryTriggered : undefined,
     filters.statusCode,
     filters.errorKeyword,
@@ -733,11 +741,27 @@ export function CommonLogsFilterBar<TData>(
       )}
       {isAdmin && (
         <LogsFilterField>
-          <LogsFilterInput
-            placeholder={t('Customer Name')}
+          <CustomerFilterCombobox
+            field='name'
             value={filters.customerName || ''}
-            onChange={(e) => handleChange('customerName', e.target.value)}
-            onKeyDown={handleKeyDown}
+            onValueChange={(value) =>
+              handleChange('customerName', value || undefined)
+            }
+            enabled={isAdmin}
+            className='h-8 min-w-0 text-sm leading-5'
+          />
+        </LogsFilterField>
+      )}
+      {isAdmin && (
+        <LogsFilterField>
+          <CustomerFilterCombobox
+            field='id'
+            value={filters.customerId || ''}
+            onValueChange={(value) =>
+              handleChange('customerId', value || undefined)
+            }
+            enabled={isAdmin}
+            className='h-8 min-w-0 text-sm leading-5'
           />
         </LogsFilterField>
       )}
