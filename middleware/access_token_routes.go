@@ -238,6 +238,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/log/stat":                         accessTokenScopeRule("log:read"),
 	"GET /api/log/self/stat":                    accessTokenScopeRule("usage:read"),
 	"GET /api/log/sessions":                     accessTokenScopeRule("log:read"),
+	"GET /api/log/sessions/backfill":            accessTokenScopeRule("ops:read"),
+	"POST /api/log/sessions/backfill":           accessTokenScopeRule("ops:write"),
 	"GET /api/log/self/sessions":                accessTokenScopeRule("usage:read"),
 	"GET /api/log/channel_affinity_usage_cache": accessTokenScopeRule("log:read"),
 	"GET /api/log/search":                       accessTokenScopeRule("log:read"),

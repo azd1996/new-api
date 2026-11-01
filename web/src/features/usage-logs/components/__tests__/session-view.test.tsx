@@ -29,6 +29,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { UsageLogsProvider } from '../usage-logs-provider'
 import { UsageLogsSessions } from '../usage-logs-sessions'
@@ -65,13 +67,19 @@ const session = {
   },
 }
 
-function mockApi() {
+function mockApi(enabled = true) {
   return vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
     if (url.startsWith('/api/log/self/sessions')) {
       return {
         data: {
           success: true,
-          data: { items: [session], total: 1, page: 1, page_size: 20 },
+          data: {
+            enabled,
+            items: enabled ? [session] : [],
+            total: enabled ? 1 : 0,
+            page: 1,
+            page_size: 20,
+          },
         },
       }
     }
@@ -101,7 +109,7 @@ function mockApi() {
   })
 }
 
-async function renderSessions() {
+async function renderSessions(search = '') {
   const root = createRootRoute()
   const auth = createRoute({ getParentRoute: () => root, id: '_authenticated' })
   const logs = createRoute({
@@ -117,7 +125,7 @@ async function renderSessions() {
   const router = createRouter({
     routeTree: root.addChildren([auth.addChildren([logs])]),
     history: createMemoryHistory({
-      initialEntries: ['/usage-logs/common?view=sessions'],
+      initialEntries: [`/usage-logs/common?view=sessions${search}`],
     }),
   })
   const client = new QueryClient({
@@ -128,17 +136,18 @@ async function renderSessions() {
       <RouterProvider router={router} />
     </QueryClientProvider>
   )
-  return screen.findByRole('button', { name: 'Expand session' })
 }
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  useAuthStore.setState(useAuthStore.getInitialState(), true)
 })
 
 it('lists sessions collapsed and loads no session requests before expanding', async () => {
   const get = mockApi()
-  const toggle = await renderSessions()
+  await renderSessions()
+  const toggle = await screen.findByRole('button', { name: 'Expand session' })
 
   expect(screen.getByText('sess-abc')).toBeVisible()
   expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -147,9 +156,10 @@ it('lists sessions collapsed and loads no session requests before expanding', as
   ).toBe(false)
 })
 
-it('expands a session in place and loads only its requests', async () => {
+it('expands a session in place and loads all its requests regardless of the time range', async () => {
   const get = mockApi()
-  const toggle = await renderSessions()
+  await renderSessions('&startTime=1761900000000&endTime=1761903600000')
+  const toggle = await screen.findByRole('button', { name: 'Expand session' })
 
   await userEvent.click(toggle)
 
@@ -164,5 +174,84 @@ it('expands a session in place and loads only its requests', async () => {
     const params = new URLSearchParams(String(requestCall).split('?')[1])
     expect(params.get('session_id')).toBe('sess-abc')
     expect(params.has('type')).toBe(false)
+    expect(params.has('start_timestamp')).toBe(false)
+    expect(params.has('end_timestamp')).toBe(false)
   })
+})
+
+it('explains the view is unavailable when the deployment keeps no session table', async () => {
+  mockApi(false)
+  await renderSessions()
+
+  expect(
+    await screen.findByText('Session view requires a ClickHouse log database')
+  ).toBeVisible()
+  expect(
+    screen.queryByRole('button', { name: 'Expand session' })
+  ).not.toBeInTheDocument()
+})
+
+it('lets a root user start a backfill for the entered number of days', async () => {
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'root', role: ROLE.SUPER_ADMIN })
+  vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
+    if (url === '/api/log/sessions/backfill') {
+      return {
+        data: {
+          success: true,
+          data: {
+            running: false,
+            cutoff: 0,
+            days: 0,
+            done_days: [],
+            skipped_days: [],
+          },
+        },
+      }
+    }
+    if (url.startsWith('/api/log/sessions?')) {
+      return {
+        data: {
+          success: true,
+          data: {
+            enabled: true,
+            items: [session],
+            total: 1,
+            page: 1,
+            page_size: 20,
+          },
+        },
+      }
+    }
+    return { data: { success: true, data: {} } }
+  })
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        running: true,
+        cutoff: 1,
+        days: 30,
+        done_days: [],
+        skipped_days: [],
+      },
+    },
+  })
+  await renderSessions()
+
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Backfill session history' })
+  )
+  const daysInput = await screen.findByLabelText('Days to backfill (1-366)')
+  await userEvent.clear(daysInput)
+  await userEvent.type(daysInput, '30')
+  await userEvent.click(screen.getByRole('button', { name: 'Start' }))
+
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith('/api/log/sessions/backfill?days=30')
+  )
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    'Backfilling: 0 / 30 days done'
+  )
 })

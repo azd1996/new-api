@@ -26,6 +26,7 @@ import type {
   CacheSkeletonResponse,
   GetLogsParams,
   GetLogSessionsResponse,
+  LogSessionsBackfillResponse,
   GetLogsResponse,
   GetLogStatsParams,
   GetLogStatsResponse,
@@ -139,6 +140,20 @@ export async function getLogSessions(
   const res = await api.get(
     `${buildApiPath('/api/log', isAdmin)}/sessions?${queryParams}`
   )
+  return res.data
+}
+
+// Session backfill (root only): start loading the last `days` days of
+// pre-table history, or read the serving node's run status.
+export async function startLogSessionsBackfill(
+  days: number
+): Promise<LogSessionsBackfillResponse> {
+  const res = await api.post(`/api/log/sessions/backfill?days=${days}`)
+  return res.data
+}
+
+export async function getLogSessionsBackfillStatus(): Promise<LogSessionsBackfillResponse> {
+  const res = await api.get('/api/log/sessions/backfill')
   return res.data
 }
 

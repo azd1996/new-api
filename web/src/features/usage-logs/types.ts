@@ -810,10 +810,28 @@ export interface LogSession {
   truncated?: boolean
 }
 
+// Session backfill run of the node that served the request (root only).
+export interface LogSessionsBackfillStatus {
+  running: boolean
+  cutoff: number
+  days: number
+  done_days: number[] | null
+  skipped_days: number[] | null
+  last_error?: string
+}
+
+export interface LogSessionsBackfillResponse {
+  success: boolean
+  message?: string
+  data?: LogSessionsBackfillStatus
+}
+
 export interface GetLogSessionsResponse {
   success: boolean
   message?: string
   data?: {
+    // false when the log database is not ClickHouse: no session table exists.
+    enabled: boolean
     items: LogSession[]
     total: number
     page: number

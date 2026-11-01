@@ -44,8 +44,8 @@ interface SessionRequestsTableProps {
 
 // SessionRequestsTable lists the requests of one session with the regular log
 // columns, so each row keeps the usual detail dialog. It reuses the page's
-// filters but drops the log type filter: a session covers consume and error
-// logs alike.
+// filters but drops the log type and time range: a session covers consume and
+// error logs alike over its whole lifetime.
 export function SessionRequestsTable(props: SessionRequestsTableProps) {
   const { t } = useTranslation()
   const { isAdminView, isRootView, viewAccess } = useLogsViewScope()
@@ -74,6 +74,8 @@ export function SessionRequestsTable(props: SessionRequestsTableProps) {
         searchParams: {
           ...searchParams,
           type: undefined,
+          startTime: undefined,
+          endTime: undefined,
           sessionId: props.sessionId,
         },
         columnFilters: [],

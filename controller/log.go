@@ -149,14 +149,49 @@ func GetLogsAnalysis(c *gin.Context) {
 // filter set by session_id for the usage-log session view.
 func GetLogSessions(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
+	if !model.LogSessionsEnabled() {
+		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0)
+		return
+	}
 	sessions, total, err := model.GetLogSessions(0, logFilterFromQuery(c, true), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(sessions)
-	common.ApiSuccess(c, pageInfo)
+	respondLogSessions(c, pageInfo, true, sessions, total)
+}
+
+// respondLogSessions writes a session page. enabled=false means the log
+// database is not ClickHouse, so this deployment keeps no session table.
+func respondLogSessions(c *gin.Context, pageInfo *common.PageInfo, enabled bool, sessions []*model.LogSession, total int64) {
+	common.ApiSuccess(c, gin.H{
+		"enabled":   enabled,
+		"page":      pageInfo.GetPage(),
+		"page_size": pageInfo.GetPageSize(),
+		"total":     total,
+		"items":     sessions,
+	})
+}
+
+// StartLogSessionsBackfill loads the last `days` days of logs written before
+// the session table existed into it, in the background (root only). Run it at
+// a quiet hour: each day is one throttled INSERT ... SELECT over logs.
+func StartLogSessionsBackfill(c *gin.Context) {
+	days, err := strconv.Atoi(c.Query("days"))
+	if err != nil || days < 1 || days > 366 {
+		common.ApiErrorT(c, "Invalid backfill days")
+		return
+	}
+	if err := model.StartLogSessionsBackfill(days); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, model.GetLogSessionsBackfillStatus())
+}
+
+// GetLogSessionsBackfillStatus reports this node's session backfill run.
+func GetLogSessionsBackfillStatus(c *gin.Context) {
+	common.ApiSuccess(c, model.GetLogSessionsBackfillStatus())
 }
 
 // GetUserLogSessions is GetLogSessions over the caller's own logs, kept
@@ -173,15 +208,17 @@ func GetUserLogSessions(c *gin.Context) {
 		}
 		filter.StartTimestamp = startTimestamp
 	}
+	if !model.LogSessionsEnabled() {
+		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0)
+		return
+	}
 	sessions, total, err := model.GetLogSessions(c.GetInt("id"), filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.SysError(common.LogText("failed to query user log sessions: %s", err.Error()))
 		common.ApiErrorT(c, "Failed to query logs")
 		return
 	}
-	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(sessions)
-	common.ApiSuccess(c, pageInfo)
+	respondLogSessions(c, pageInfo, true, sessions, total)
 }
 
 func GetUserLogs(c *gin.Context) {

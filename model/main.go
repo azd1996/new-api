@@ -474,6 +474,16 @@ func migrateClickHouseLogDB() error {
 			return err
 		}
 	}
+	// The session view looks logs up by session_id, which is not in the
+	// sorting key. The skip index covers new parts only; older parts get it
+	// through merges or an operator-run MATERIALIZE INDEX.
+	if err := LOG_DB.Exec("ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_logs_session_id session_id TYPE bloom_filter(0.01) GRANULARITY 4").Error; err != nil {
+		return err
+	}
+	// The session view reads the columns added above.
+	if err := MigrateLogSessions(); err != nil {
+		return err
+	}
 	return syncClickHouseLogTTL(ttlDays)
 }
 
@@ -533,7 +543,8 @@ CREATE TABLE IF NOT EXISTS logs (
 	stat_group_ratio Float64 DEFAULT 0,
 	customer_stat_quota Int32 DEFAULT 0,
 	customer_discount Float64 DEFAULT 0,
-	other String DEFAULT ''
+	other String DEFAULT '',
+	INDEX idx_logs_session_id session_id TYPE bloom_filter(0.01) GRANULARITY 4
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime(created_at))

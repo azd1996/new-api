@@ -37,11 +37,16 @@ import type { LogSession } from '../types'
 import { useSessionColumns } from './columns/session-columns'
 import { SessionCacheDiagnosis } from './session-cache-diagnosis'
 import { SessionRequestsTable } from './session-requests-table'
+import { SessionsBackfillButton } from './sessions-backfill-button'
 import { useLogsViewScope } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 
-const DEFAULT_SESSIONS_DATA = { items: [] as LogSession[], total: 0 }
+const DEFAULT_SESSIONS_DATA = {
+  enabled: true,
+  items: [] as LogSession[],
+  total: 0,
+}
 
 interface UsageLogsSessionsProps {
   toolbar: ReactNode
@@ -51,7 +56,7 @@ interface UsageLogsSessionsProps {
 // session_id, expanded in place to list the session's requests.
 export function UsageLogsSessions(props: UsageLogsSessionsProps) {
   const { t } = useTranslation()
-  const { isAdminView, viewAccess } = useLogsViewScope()
+  const { isAdminView, isRootView, viewAccess } = useLogsViewScope()
   const searchParams = route.useSearch()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
 
@@ -101,6 +106,7 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
       previousQuery?.queryKey[2] === viewAccess ? previousData : undefined,
   })
 
+  const sessionsEnabled = data?.enabled ?? true
   const columns = useSessionColumns(isAdminView, expanded, toggleSession)
   const { table } = useDataTable({
     data: data?.items || [],
@@ -121,15 +127,31 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
       columns={columns as ColumnDef<LogSession, unknown>[]}
       isLoading={isLoading || (isFetching && !data)}
       isFetching={isFetching}
-      emptyTitle={t('No Sessions Found')}
-      emptyDescription={t(
-        'Sessions appear here for requests that carry a session ID.'
-      )}
+      emptyTitle={
+        sessionsEnabled
+          ? t('No Sessions Found')
+          : t('Session view is unavailable')
+      }
+      emptyDescription={
+        sessionsEnabled
+          ? t('Sessions appear here for requests that carry a session ID.')
+          : t('Session view requires a ClickHouse log database')
+      }
       skeletonKeyPrefix='usage-log-session-skeleton'
       applyHeaderSize
       hideMobile
       tableClassName='[&_[data-slot=table]]:text-[13px] [&_[data-slot=table]_td]:text-[13px] [&_[data-slot=table]_th]:text-[13px]'
-      toolbar={props.toolbar}
+      toolbar={
+        <div className='flex flex-col gap-2'>
+          {props.toolbar}
+          {isRootView && sessionsEnabled && <SessionsBackfillButton />}
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'Sessions are listed when their lifetime overlaps the time range. Only user, token, model, group, channel, customer and session ID filters apply.'
+            )}
+          </p>
+        </div>
+      }
       renderRow={(row) => {
         const sessionId = row.original.session_id
         const isExpanded = expanded.has(sessionId)
