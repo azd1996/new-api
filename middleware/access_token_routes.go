@@ -172,6 +172,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"DELETE /api/custom-oauth-provider/:id":     accessTokenScopeRule("option:write"),
 	"GET /api/ratio_sync/channels":              accessTokenScopeRule("option:read"),
 	"POST /api/ratio_sync/fetch":                accessTokenScopeRule("option:write"),
+	"GET /api/ratio_sync/models_dev_suggestion": accessTokenScopeRule("option:read"),
 
 	// router/api-router.go: /api/performance, /api/system-task, /api/system-info
 	"GET /api/performance/stats":                   accessTokenScopeRule("ops:read"),

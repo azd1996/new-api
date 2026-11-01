@@ -119,6 +119,29 @@ export async function previewModelPricing(request: {
   }
 }
 
+export type ModelsDevPricingSuggestion = {
+  expression: string
+  provider: string
+  source_model: string
+  derived_fields: string[]
+}
+
+// Read-only: the backend builds an expression from models.dev and never saves it.
+export async function getModelsDevPricingSuggestion(
+  modelName: string
+): Promise<ModelsDevPricingSuggestion> {
+  const response = await api.get('/api/ratio_sync/models_dev_suggestion', {
+    params: { model: modelName },
+  })
+  if (!response.data.success) {
+    throw createServerError(
+      response.data,
+      t('Failed to fetch models.dev pricing')
+    )
+  }
+  return response.data.data
+}
+
 export function useCanEditModelPricing() {
   return useAuthStore((state) => state.auth.user?.role === ROLE.SUPER_ADMIN)
 }

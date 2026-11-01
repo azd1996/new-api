@@ -149,3 +149,60 @@ func TestPricingSyncCompleteSourcesAndArrayFormats(t *testing.T) {
 	assert.NotContains(t, response.Data.Prices, "sync-invalid-expression")
 	assert.NotContains(t, response.Data.Differences, "sync-already")
 }
+
+func TestModelsDevPricingSuggestion(t *testing.T) {
+	var catalog modelsDevCatalog
+	require.NoError(t, common.UnmarshalJsonStr(`{
+		"openrouter": {"models": {"claude-haiku-4-5": {"cost": {"input": 0.5, "output": 2}}}},
+		"abacus": {"models": {"claude-3-7-sonnet-20250219": {"cost": {"input": 3, "output": 15}}}},
+		"anthropic": {"models": {
+			"claude-haiku-4-5": {"cost": {"input": 1, "output": 5, "cache_read": 0.1, "cache_write": 1.25}},
+			"claude-haiku-5-5": {"cost": {"input": 0.1, "output": 0.5, "cache_read": 0.01, "tiers": [{"input": 0.5, "output": 2.5, "cache_read": 0.05, "tier": {"type": "context", "size": 100000}}]}}
+		}},
+		"amazon-bedrock": {"models": {"anthropic.claude-opus-4-1-20250805-v1:0": {"cost": {"input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75}}}},
+		"openai": {"models": {
+			"gpt-6-astra": {"cost": {"input": 10, "output": 50, "cache_read": 1, "cache_write": 12.5, "tiers": [{"input": 20, "output": 75, "cache_read": 2, "cache_write": 25, "tier": {"type": "context", "size": 272001}}]}},
+			"gpt-4o": {"cost": {"input": 2.5, "output": 10, "cache_read": 1.25}},
+			"gpt-bad": {"cost": {"input": -1, "output": 10}}
+		}}
+	}`, &catalog))
+
+	cases := []struct {
+		name        string
+		model       string
+		provider    string
+		sourceModel string
+		expression  string
+		derived     []string
+	}{
+		{"official provider wins over cheaper reseller", "claude-haiku-4-5", "anthropic", "claude-haiku-4-5",
+			`tier("standard", p * 1 + c * 5 + cr * 0.1 + cc * 1.25 + cc1h * 2)`, []string{"cc1h"}},
+		{"dated id falls back to the date-less entry", "claude-haiku-4-5-20251001", "anthropic", "claude-haiku-4-5",
+			`tier("standard", p * 1 + c * 5 + cr * 0.1 + cc * 1.25 + cc1h * 2)`, []string{"cc1h"}},
+		{"claude derives a missing 5m write for every tier", "claude-haiku-5-5", "anthropic", "claude-haiku-5-5",
+			`len <= 100000 ? tier("standard", p * 0.1 + c * 0.5 + cr * 0.01 + cc * 0.125 + cc1h * 0.2) : tier("long_context", p * 0.5 + c * 2.5 + cr * 0.05 + cc * 0.625 + cc1h * 1)`, []string{"cc", "cc1h"}},
+		{"bedrock naming matches a third-party provider", "us.anthropic.claude-opus-4-1-20250805-v1:0", "amazon-bedrock", "anthropic.claude-opus-4-1-20250805-v1:0",
+			`tier("standard", p * 15 + c * 75 + cr * 1.5 + cc * 18.75 + cc1h * 30)`, []string{"cc1h"}},
+		{"reseller without cache prices gets Anthropic cache multiples", "claude-3-7-sonnet-20250219", "abacus", "claude-3-7-sonnet-20250219",
+			`tier("standard", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6)`, []string{"cc", "cc1h", "cr"}},
+		{"gpt long context uses the normalized tier boundary", "gpt-6-astra", "openai", "gpt-6-astra",
+			`len <= 272000 ? tier("standard", p * 10 + c * 50 + cr * 1 + cc * 12.5 + cc12h * 25) : tier("long_context", p * 20 + c * 75 + cr * 2 + cc * 25 + cc12h * 50)`, []string{"cc12h"}},
+		{"gpt without cache write prices no cache creation", "gpt-4o", "openai", "gpt-4o",
+			`tier("standard", p * 2.5 + c * 10 + cr * 1.25)`, []string{}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			suggestion, err := buildModelsDevPricingSuggestion(catalog, tt.model)
+			require.NoError(t, err)
+			assert.Equal(t, tt.provider, suggestion.Provider)
+			assert.Equal(t, tt.sourceModel, suggestion.SourceModel)
+			assert.Equal(t, tt.expression, suggestion.Expression)
+			assert.Equal(t, tt.derived, suggestion.DerivedFields)
+		})
+	}
+
+	_, err := buildModelsDevPricingSuggestion(catalog, "unknown-model")
+	assert.EqualError(t, err, "Model not found on models.dev")
+	_, err = buildModelsDevPricingSuggestion(catalog, "gpt-bad")
+	assert.EqualError(t, err, "models.dev pricing for this model is invalid")
+}

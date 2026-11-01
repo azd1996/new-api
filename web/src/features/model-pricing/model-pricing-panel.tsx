@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useMutation } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -40,6 +41,7 @@ import { usePricingPreferencesStore } from '@/stores/pricing-preferences-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import {
+  getModelsDevPricingSuggestion,
   useCanEditModelPricing,
   useModelPricing,
   useSaveModelPricing,
@@ -64,6 +66,23 @@ export function ModelPricingPanel(props: {
   const canEdit = useCanEditModelPricing()
   const query = useModelPricing([props.modelName], Boolean(props.modelName))
   const save = useSaveModelPricing()
+  const modelsDevFill = useMutation({
+    mutationFn: getModelsDevPricingSuggestion,
+    onSuccess: (suggestion) => {
+      editor.current?.applyBillingExpr(suggestion.expression)
+      const source = `${suggestion.provider} / ${suggestion.source_model}`
+      toast.success(
+        suggestion.derived_fields.length
+          ? t(
+              'Filled from models.dev ({{source}}). Estimated by provider rules: {{fields}}. Review and save.',
+              { source, fields: suggestion.derived_fields.join(', ') }
+            )
+          : t('Filled from models.dev ({{source}}). Review and save.', {
+              source,
+            })
+      )
+    },
+  })
   const [entry, setEntry] = useState<ModelPricingEntry | null>(null)
   const [resetOpen, setResetOpen] = useState(false)
   const editor = useRef<ModelPricingEditorPanelHandle>(null)
@@ -179,14 +198,24 @@ export function ModelPricingPanel(props: {
                     : t('Using built-in or default pricing')}
                 </p>
               </div>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={() => setResetOpen(true)}
-                disabled={save.isPending}
-              >
-                {t('Restore default pricing')}
-              </Button>
+              <div className='flex flex-wrap gap-2'>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => modelsDevFill.mutate(entry.model_name)}
+                  disabled={save.isPending || modelsDevFill.isPending}
+                >
+                  {t('Fill from models.dev')}
+                </Button>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => setResetOpen(true)}
+                  disabled={save.isPending}
+                >
+                  {t('Restore default pricing')}
+                </Button>
+              </div>
             </div>
             <section
               aria-label={t('Current Billing')}
