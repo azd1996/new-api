@@ -178,3 +178,64 @@ func TestAnalyzeCacheSkeletons(t *testing.T) {
 		assert.Equal(t, int64(60000), analysis.Summary.Total)
 	})
 }
+
+func openAISkeletonFixture(ts time.Time, cacheKey uint64, hashes []uint64, cacheRead uint32) *CacheSkeleton {
+	kinds := []string{"tool", "instructions", "user.input_text", "assistant.function_call", "tool.function_call_output"}[:len(hashes)]
+	row := skeletonFixture(ts, 1, hashes, kinds, []uint16{2}, 0, cacheRead)
+	row.Provider = SkeletonProviderOpenAI
+	row.Model = "gpt-5.5"
+	row.CacheKeyHash = cacheKey
+	row.BpIdx, row.BpTtl = nil, nil
+	return row
+}
+
+func TestAnalyzeOpenAICacheSkeletons(t *testing.T) {
+	t0 := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+
+	t.Run("matching prefix with the same key is expected to hit in 128-token steps", func(t *testing.T) {
+		rows := []*CacheSkeleton{
+			openAISkeletonFixture(t0, 7, []uint64{1, 2, 3}, 0),
+			openAISkeletonFixture(t0.Add(time.Minute), 7, []uint64{1, 2, 3, 4, 5}, 17920),
+		}
+		lane := AnalyzeCacheSkeletons(rows).Lanes[0]
+		assert.Equal(t, SkeletonProviderOpenAI, lane.Provider)
+		turn := lane.Turns[1]
+		// 30000 tokens * 3000/5000 bytes = 18000, rounded down to 17920.
+		assert.Equal(t, int64(17920), turn.ExpectedCurrent)
+		assert.Equal(t, SkeletonReasonHit, turn.Reason)
+		assert.False(t, turn.CacheKeyChanged)
+		assert.Empty(t, turn.Breakpoints)
+	})
+
+	t.Run("a new prompt_cache_key every turn is recovered by one key", func(t *testing.T) {
+		rows := []*CacheSkeleton{
+			openAISkeletonFixture(t0, 7, []uint64{1, 2, 3}, 0),
+			openAISkeletonFixture(t0.Add(time.Minute), 8, []uint64{1, 2, 3, 4, 5}, 0),
+		}
+		turn := AnalyzeCacheSkeletons(rows).Lanes[0].Turns[1]
+		assert.True(t, turn.CacheKeyChanged)
+		assert.Zero(t, turn.ExpectedCurrent)
+		assert.Equal(t, int64(17920), turn.ExpectedAdjusted)
+		assert.Equal(t, SkeletonReasonCacheKeyChanged, turn.Reason)
+	})
+
+	t.Run("a gap beyond in-memory retention is recovered by 24h retention", func(t *testing.T) {
+		rows := []*CacheSkeleton{
+			openAISkeletonFixture(t0, 0, []uint64{1, 2, 3}, 0),
+			openAISkeletonFixture(t0.Add(30*time.Minute), 0, []uint64{1, 2, 3, 4, 5}, 0),
+		}
+		turn := AnalyzeCacheSkeletons(rows).Lanes[0].Turns[1]
+		assert.True(t, turn.NoCacheKey)
+		assert.Zero(t, turn.ExpectedAdjusted)
+		assert.Equal(t, int64(17920), turn.ExpectedAdjusted1h)
+		assert.Equal(t, SkeletonReasonTTLExpired, turn.Reason)
+	})
+
+	t.Run("previous_response_id turns are counted as observed", func(t *testing.T) {
+		follow := openAISkeletonFixture(t0.Add(time.Minute), 7, []uint64{9}, 20000)
+		follow.ParentRequestId = "resp_1"
+		lane := AnalyzeCacheSkeletons([]*CacheSkeleton{openAISkeletonFixture(t0, 7, []uint64{1, 2, 3}, 0), follow}).Lanes[0]
+		assert.Equal(t, SkeletonReasonPreviousResponse, lane.Turns[1].Reason)
+		assert.Equal(t, SkeletonRates{Total: 60000, Actual: 20000, Current: 20000, Adjusted: 20000, Adjusted1h: 20000}, lane.Summary)
+	})
+}

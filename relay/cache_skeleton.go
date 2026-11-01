@@ -22,6 +22,38 @@ import (
 // breakpoint that omits "ttl".
 const claudeDefaultCacheTTL = "5m"
 
+// skeletonBuilder appends blocks to a skeleton in cache prefix order. A block
+// is hashed over hashRaw (its JSON with cache markers removed) and sized by
+// its original bytes.
+type skeletonBuilder struct {
+	row *model.CacheSkeleton
+}
+
+func (b skeletonBuilder) add(kind, name, hashRaw string, size int) {
+	b.row.BlkHash = append(b.row.BlkHash, xxhash.Sum64String(hashRaw))
+	b.row.BlkKind = append(b.row.BlkKind, kind)
+	b.row.BlkName = append(b.row.BlkName, name)
+	b.row.BlkLen = append(b.row.BlkLen, uint32(size))
+}
+
+func (b skeletonBuilder) startMessage() {
+	b.row.MsgStart = append(b.row.MsgStart, uint16(len(b.row.BlkHash)))
+}
+
+// setLane separates conversations that share one session id (a client's main
+// loop, sub-agents and small helper calls): same model, tools and the block
+// right after the tools (the leading system / instructions block).
+func (b skeletonBuilder) setLane(toolsEnd int) {
+	lane := xxhash.New()
+	_, _ = lane.WriteString(b.row.Model)
+	var buf [8]byte
+	for i := 0; i < len(b.row.BlkHash) && i <= toolsEnd; i++ {
+		binary.LittleEndian.PutUint64(buf[:], b.row.BlkHash[i])
+		_, _ = lane.Write(buf[:])
+	}
+	b.row.Lane = lane.Sum64()
+}
+
 // buildClaudeCacheSkeleton reduces a final outbound Claude Messages body to its
 // prompt-cache structure. Blocks are walked in the order Anthropic builds the
 // cache prefix (tools, system, messages); each block is hashed over its raw
@@ -31,6 +63,7 @@ func buildClaudeCacheSkeleton(body []byte) *model.CacheSkeleton {
 	root := gjson.ParseBytes(body)
 	row := &model.CacheSkeleton{
 		Ts:       time.Now(),
+		Provider: model.SkeletonProviderClaude,
 		Model:    root.Get("model").String(),
 		Thinking: root.Get("thinking.type").String(),
 		Effort:   root.Get("output_config.effort").String(),
@@ -39,6 +72,7 @@ func buildClaudeCacheSkeleton(body []byte) *model.CacheSkeleton {
 	// invalidates the cached message prefix; max_tokens/temperature are not.
 	row.ParamFp = xxhash.Sum64String(row.Model + "\x00" + root.Get("tool_choice").Raw + "\x00" +
 		root.Get("thinking").Raw + "\x00" + row.Effort)
+	b := skeletonBuilder{row: row}
 
 	addBlock := func(kind, name string, block gjson.Result) {
 		raw := block.Raw
@@ -53,10 +87,7 @@ func buildClaudeCacheSkeleton(body []byte) *model.CacheSkeleton {
 				raw = stripped
 			}
 		}
-		row.BlkHash = append(row.BlkHash, xxhash.Sum64String(raw))
-		row.BlkKind = append(row.BlkKind, kind)
-		row.BlkName = append(row.BlkName, name)
-		row.BlkLen = append(row.BlkLen, uint32(len(block.Raw)))
+		b.add(kind, name, raw, len(block.Raw))
 	}
 
 	root.Get("tools").ForEach(func(_, tool gjson.Result) bool {
@@ -72,21 +103,11 @@ func buildClaudeCacheSkeleton(body []byte) *model.CacheSkeleton {
 			return true
 		})
 	}
-	// lane separates conversations that share one session id (Claude Code's
-	// main loop, sub-agents and small helper calls): same model, tools and
-	// leading system block.
-	lane := xxhash.New()
-	_, _ = lane.WriteString(row.Model)
-	var buf [8]byte
-	for i := 0; i < len(row.BlkHash) && i <= toolsEnd; i++ {
-		binary.LittleEndian.PutUint64(buf[:], row.BlkHash[i])
-		_, _ = lane.Write(buf[:])
-	}
-	row.Lane = lane.Sum64()
+	b.setLane(toolsEnd)
 
 	root.Get("messages").ForEach(func(_, msg gjson.Result) bool {
 		role := msg.Get("role").String()
-		row.MsgStart = append(row.MsgStart, uint16(len(row.BlkHash)))
+		b.startMessage()
 		content := msg.Get("content")
 		if content.Type == gjson.String {
 			addBlock(role+".text", "", content)
@@ -116,10 +137,134 @@ func buildClaudeCacheSkeleton(body []byte) *model.CacheSkeleton {
 	return row
 }
 
-// finishClaudeCacheSkeleton fills the response-side fields of a skeleton built
+// newOpenAICacheSkeleton fills the fields shared by the Chat Completions and
+// Responses skeletons. OpenAI caches the longest previously seen prompt prefix
+// automatically, so there are no breakpoints; prompt_cache_key steers routing
+// to a machine holding that prefix.
+func newOpenAICacheSkeleton(root gjson.Result, effort string) (*model.CacheSkeleton, skeletonBuilder) {
+	row := &model.CacheSkeleton{
+		Ts:              time.Now(),
+		Provider:        model.SkeletonProviderOpenAI,
+		Model:           root.Get("model").String(),
+		Effort:          effort,
+		Retention:       root.Get("prompt_cache_retention").String(),
+		ParentRequestId: root.Get("previous_response_id").String(),
+	}
+	if key := root.Get("prompt_cache_key").String(); key != "" {
+		row.CacheKeyHash = xxhash.Sum64String(key)
+	}
+	row.ParamFp = xxhash.Sum64String(row.Model + "\x00" + root.Get("tool_choice").Raw + "\x00" + effort)
+	return row, skeletonBuilder{row: row}
+}
+
+// addOpenAITools records the tool definitions, which lead the cached prefix.
+func (b skeletonBuilder) addOpenAITools(tools gjson.Result) {
+	tools.ForEach(func(_, tool gjson.Result) bool {
+		name := tool.Get("function.name").String()
+		if name == "" {
+			name = tool.Get("name").String()
+		}
+		b.add("tool", name, tool.Raw, len(tool.Raw))
+		return true
+	})
+}
+
+// addOpenAIContent records one message's content: a plain string or an array
+// of typed parts.
+func (b skeletonBuilder) addOpenAIContent(role string, content gjson.Result) {
+	if content.Type == gjson.String {
+		b.add(role+".text", "", content.Raw, len(content.Raw))
+		return
+	}
+	// gjson iterates a scalar (e.g. a null content) once as itself.
+	if !content.IsArray() {
+		return
+	}
+	content.ForEach(func(_, part gjson.Result) bool {
+		b.add(role+"."+part.Get("type").String(), "", part.Raw, len(part.Raw))
+		return true
+	})
+}
+
+// buildOpenAIChatCacheSkeleton reduces a final outbound Chat Completions body
+// to its prompt-cache structure: tools, the structured-output schema, then
+// every message part and tool call. No prompt text is kept.
+func buildOpenAIChatCacheSkeleton(body []byte) *model.CacheSkeleton {
+	root := gjson.ParseBytes(body)
+	row, b := newOpenAICacheSkeleton(root, root.Get("reasoning_effort").String())
+	b.addOpenAITools(root.Get("tools"))
+	if schema := root.Get("response_format"); schema.Get("type").String() == "json_schema" {
+		b.add("schema", schema.Get("json_schema.name").String(), schema.Raw, len(schema.Raw))
+	}
+	toolsEnd := len(row.BlkHash)
+	root.Get("messages").ForEach(func(_, msg gjson.Result) bool {
+		role := msg.Get("role").String()
+		b.startMessage()
+		start := len(row.BlkHash)
+		b.addOpenAIContent(role, msg.Get("content"))
+		msg.Get("tool_calls").ForEach(func(_, call gjson.Result) bool {
+			b.add(role+".tool_call", call.Get("function.name").String(), call.Raw, len(call.Raw))
+			return true
+		})
+		if len(row.BlkHash) == start {
+			b.add(role+".message", "", msg.Raw, len(msg.Raw))
+		}
+		return true
+	})
+	b.setLane(toolsEnd)
+	return row
+}
+
+// buildOpenAIResponsesCacheSkeleton reduces a final outbound Responses body to
+// its prompt-cache structure: tools, instructions, the structured-output
+// schema, then every input item. With previous_response_id the earlier turns
+// live upstream and only the new input is visible here.
+func buildOpenAIResponsesCacheSkeleton(body []byte) *model.CacheSkeleton {
+	root := gjson.ParseBytes(body)
+	row, b := newOpenAICacheSkeleton(root, root.Get("reasoning.effort").String())
+	b.addOpenAITools(root.Get("tools"))
+	toolsEnd := len(row.BlkHash)
+	if instructions := root.Get("instructions"); instructions.Exists() && instructions.Type != gjson.Null {
+		b.add("instructions", "", instructions.Raw, len(instructions.Raw))
+	}
+	if schema := root.Get("text.format"); schema.Get("type").String() == "json_schema" {
+		b.add("schema", schema.Get("name").String(), schema.Raw, len(schema.Raw))
+	}
+	input := root.Get("input")
+	if input.Type == gjson.String {
+		b.startMessage()
+		b.add("user.text", "", input.Raw, len(input.Raw))
+		input = gjson.Result{}
+	}
+	input.ForEach(func(_, item gjson.Result) bool {
+		b.startMessage()
+		itemType := item.Get("type").String()
+		switch itemType {
+		case "", "message":
+			start := len(row.BlkHash)
+			b.addOpenAIContent(item.Get("role").String(), item.Get("content"))
+			if len(row.BlkHash) == start {
+				b.add(item.Get("role").String()+".message", "", item.Raw, len(item.Raw))
+			}
+		case "function_call", "custom_tool_call":
+			b.add("assistant."+itemType, item.Get("name").String(), item.Raw, len(item.Raw))
+		case "function_call_output", "custom_tool_call_output":
+			b.add("tool."+itemType, "", item.Raw, len(item.Raw))
+		case "reasoning":
+			b.add("assistant.reasoning", "", item.Raw, len(item.Raw))
+		default:
+			b.add("item."+itemType, item.Get("name").String(), item.Raw, len(item.Raw))
+		}
+		return true
+	})
+	b.setLane(toolsEnd)
+	return row
+}
+
+// finishCacheSkeleton fills the response-side fields of a skeleton built
 // before the upstream call and hands it to the background writer. usage is nil
 // when the attempt failed before a usable response.
-func finishClaudeCacheSkeleton(c *gin.Context, info *relaycommon.RelayInfo, row *model.CacheSkeleton, usage *dto.Usage, apiErr *types.NewAPIError) {
+func finishCacheSkeleton(c *gin.Context, info *relaycommon.RelayInfo, row *model.CacheSkeleton, usage *dto.Usage, apiErr *types.NewAPIError) {
 	row.EndTs = time.Now()
 	row.Status = "ok"
 	if apiErr != nil || usage == nil {

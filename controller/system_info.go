@@ -30,6 +30,22 @@ func ListSystemInstances(c *gin.Context) {
 	})
 }
 
+// GetLogNodes lists the known cluster node names (from the system instance
+// heartbeat table) as options for the admin usage-log node filter. It returns
+// names only, so admins do not need the root-only instance details.
+func GetLogNodes(c *gin.Context) {
+	instances, err := model.ListSystemInstances()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	names := make([]string, 0, len(instances))
+	for _, instance := range instances {
+		names = append(names, instance.NodeName)
+	}
+	common.ApiSuccess(c, names)
+}
+
 func DeleteStaleSystemInstances(c *gin.Context) {
 	deletedCount, err := model.DeleteStaleSystemInstances(common.GetTimestamp())
 	if err != nil {

@@ -40,6 +40,7 @@ import {
   buildTurnTimeline,
   skeletonLosses,
   skeletonRate,
+  skeletonTierLabels,
 } from '../lib/cache-skeleton'
 import type { SkeletonLane, SkeletonRates } from '../types'
 import { CacheSkeletonDialog } from './dialogs/cache-skeleton-dialog'
@@ -50,30 +51,35 @@ const SEGMENT_CLASSES: Record<string, string> = {
   new: 'bg-success/70',
 }
 
-function RatesLine(props: { rates: SkeletonRates }) {
+function RatesLine(props: { rates: SkeletonRates; provider: string }) {
   const { t } = useTranslation()
   const rates = props.rates
   const losses = skeletonLosses(rates)
+  const labels = skeletonTierLabels(props.provider)
   return (
     <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
       <span>
         {t('Actual hit rate')} <b>{skeletonRate(rates.actual, rates.total)}</b>
       </span>
       <span>
-        {t('Ceiling with client breakpoints')}{' '}
-        <b>{skeletonRate(rates.current, rates.total)}</b>
+        {t(labels.current)} <b>{skeletonRate(rates.current, rates.total)}</b>
       </span>
       <span>
-        {t('After breakpoint adjustment')}{' '}
-        <b>{skeletonRate(rates.adjusted, rates.total)}</b>
+        {t(labels.adjusted)} <b>{skeletonRate(rates.adjusted, rates.total)}</b>
       </span>
-      <span>
-        {t('Adjustment + 1h TTL')}{' '}
+      <span
+        title={
+          props.provider === 'openai'
+            ? t('Azure OpenAI does not support prompt_cache_retention')
+            : undefined
+        }
+      >
+        {t(labels.adjusted1h)}{' '}
         <b>{skeletonRate(rates.adjusted_1h, rates.total)}</b>
       </span>
       <span className='text-muted-foreground'>
         {t('Upstream loss')} {formatTokens(losses.upstream)} ·{' '}
-        {t('Breakpoint misplaced')} {formatTokens(losses.misplaced)} ·{' '}
+        {t(labels.adjustedLoss)} {formatTokens(losses.adjusted)} ·{' '}
         {t('TTL expired')} {formatTokens(losses.ttl)}
       </span>
     </div>
@@ -149,6 +155,16 @@ function LaneTurns(props: {
                     ⚠ {t('Volatile tail breakpoint')}
                   </span>
                 )}
+                {turn.cache_key_changed && (
+                  <span className='text-warning'>
+                    ⚠ {t('prompt_cache_key changed')}
+                  </span>
+                )}
+                {turn.no_cache_key && (
+                  <span className='text-muted-foreground'>
+                    {t('No prompt_cache_key')}
+                  </span>
+                )}
                 {turn.diverge_idx >= 0 && (
                   <span className='text-destructive'>
                     ✗ #{turn.diverge_idx}
@@ -198,7 +214,7 @@ export function SessionCacheDiagnosis(props: { sessionId: string }) {
     >
       <div className='flex items-center gap-3'>
         <span className='font-semibold'>{t('Cache diagnosis')}</span>
-        <RatesLine rates={data.summary} />
+        <RatesLine rates={data.summary} provider={lanes[0].provider} />
         <Button
           variant='ghost'
           size='sm'
@@ -223,7 +239,7 @@ export function SessionCacheDiagnosis(props: { sessionId: string }) {
                   lane {lane.lane.slice(0, 8)} · {lane.model} ·{' '}
                   {lane.turns.length} {t('turns')}
                 </span>
-                <RatesLine rates={lane.summary} />
+                <RatesLine rates={lane.summary} provider={lane.provider} />
               </div>
             )}
             <LaneTurns lane={lane} onOpenSkeleton={setSkeletonRequestId} />

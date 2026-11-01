@@ -93,6 +93,16 @@ export const getUserLogStats = (
   params: Omit<GetLogStatsParams, 'username' | 'channel'> = {}
 ) => fetchLogStats('/api/log', params, false)
 
+// getLogNodes lists the known cluster node names for the admin node filter.
+export async function getLogNodes(): Promise<{
+  success: boolean
+  message?: string
+  data?: string[]
+}> {
+  const res = await api.get('/api/log/nodes')
+  return res.data
+}
+
 // getLogsAnalysis aggregates the same filtered consume logs the list shows into
 // the prompt-size latency/FRT tables, the cache-hit table and the success-rate
 // table. Admin only.

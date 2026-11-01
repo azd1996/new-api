@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/binary"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,10 @@ const (
 	SkeletonReasonChannelSwitch = "channel_switch"
 	SkeletonReasonUpstreamMiss  = "upstream_miss"
 	SkeletonReasonHit           = "hit"
+	// OpenAI only: a changed prompt_cache_key routes the turn away from the
+	// machine holding its prefix; previous_response_id hides the prefix.
+	SkeletonReasonCacheKeyChanged  = "cache_key_changed"
+	SkeletonReasonPreviousResponse = "previous_response"
 )
 
 const (
@@ -34,6 +39,14 @@ const (
 	skeletonLossThreshold = 0.05
 	// skeletonSessionRowLimit caps one session analysis.
 	skeletonSessionRowLimit = 2000
+
+	// OpenAI caches prompts of at least 1024 tokens and reports hits in
+	// 128-token steps. In-memory entries are dropped after 5-10 minutes of
+	// inactivity (the upper bound is used); "24h" retention keeps them a day.
+	openaiCacheMinTokens   = 1024
+	openaiCacheGranularity = 128
+	openaiInMemoryTTL      = 10 * time.Minute
+	openaiExtendedTTL      = 24 * time.Hour
 )
 
 // SkeletonSegment is a run of blocks in one turn compared with the previous
@@ -51,7 +64,11 @@ type SkeletonBreakpointMark struct {
 
 // SkeletonTurn is one recorded attempt with its simulated cache outcomes.
 // Expected* are token estimates: the turn's real input total split across
-// blocks by byte share.
+// blocks by byte share. For Claude lanes ExpectedCurrent / ExpectedAdjusted /
+// ExpectedAdjusted1h are the ceilings with the client's breakpoints, with the
+// gateway breakpoint adjustment and with the adjustment plus a 1h TTL; for
+// OpenAI lanes they are the prefix-match ceiling, the ceiling with one
+// prompt_cache_key for the whole lane and that plus 24h retention.
 type SkeletonTurn struct {
 	RequestId          string                   `json:"request_id"`
 	Ts                 time.Time                `json:"ts"`
@@ -68,15 +85,16 @@ type SkeletonTurn struct {
 	Reason             string                   `json:"reason"`
 	DivergeIdx         int                      `json:"diverge_idx"`
 	TailVolatile       bool                     `json:"tail_volatile"`
+	CacheKeyChanged    bool                     `json:"cache_key_changed"`
+	NoCacheKey         bool                     `json:"no_cache_key"`
 	TotalBytes         uint64                   `json:"total_bytes"`
 	Segments           []SkeletonSegment        `json:"segments"`
 	Breakpoints        []SkeletonBreakpointMark `json:"breakpoints"`
 }
 
 // SkeletonRates sums tokens of successful turns: Actual is what upstream
-// read from cache; Current/Adjusted/Adjusted1h are the simulated ceilings
-// with the client's breakpoints, with the gateway breakpoint adjustment, and
-// with the adjustment plus a 1h TTL.
+// read from cache; Current/Adjusted/Adjusted1h are the three simulated
+// ceilings described on SkeletonTurn.
 type SkeletonRates struct {
 	Total      int64 `json:"total"`
 	Actual     int64 `json:"actual"`
@@ -94,10 +112,11 @@ func (r *SkeletonRates) add(o SkeletonRates) {
 }
 
 type SkeletonLane struct {
-	Lane    string         `json:"lane"`
-	Model   string         `json:"model"`
-	Turns   []SkeletonTurn `json:"turns"`
-	Summary SkeletonRates  `json:"summary"`
+	Lane     string         `json:"lane"`
+	Model    string         `json:"model"`
+	Provider string         `json:"provider"`
+	Turns    []SkeletonTurn `json:"turns"`
+	Summary  SkeletonRates  `json:"summary"`
 }
 
 type SessionCacheAnalysis struct {
@@ -157,15 +176,17 @@ type skeletonCacheEntry struct {
 }
 
 // skeletonCacheSim models the upstream prompt cache for one lane: entries
-// keyed by the rolling prefix hash at a breakpoint, readable once the writing
-// request finished and until its TTL lapses (refreshed on every read).
+// keyed by the rolling prefix hash at a cache point, readable once the writing
+// request finished and until its TTL lapses (refreshed on every read). A read
+// at a breakpoint also matches entries up to lookback blocks before it.
 type skeletonCacheSim struct {
 	entries   map[uint64]*skeletonCacheEntry
 	ignoreTTL bool
+	lookback  int
 }
 
-func newSkeletonCacheSim(ignoreTTL bool) *skeletonCacheSim {
-	return &skeletonCacheSim{entries: map[uint64]*skeletonCacheEntry{}, ignoreTTL: ignoreTTL}
+func newSkeletonCacheSim(ignoreTTL bool, lookback int) *skeletonCacheSim {
+	return &skeletonCacheSim{entries: map[uint64]*skeletonCacheEntry{}, ignoreTTL: ignoreTTL, lookback: lookback}
 }
 
 // lookup returns the cumulative tokens of the longest cached prefix reachable
@@ -173,7 +194,7 @@ func newSkeletonCacheSim(ignoreTTL bool) *skeletonCacheSim {
 func (s *skeletonCacheSim) lookup(prefix []uint64, cumTokens []int64, bps []skeletonBreakpoint, at time.Time) int64 {
 	var best int64
 	for _, bp := range bps {
-		for k := bp.idx; k >= 0 && k >= bp.idx-skeletonLookback; k-- {
+		for k := bp.idx; k >= 0 && k >= bp.idx-s.lookback; k-- {
 			e := s.entries[prefix[k]]
 			if e == nil || at.Before(e.availableAt) || (!s.ignoreTTL && at.After(e.expireAt)) {
 				continue
@@ -215,11 +236,12 @@ func parseSkeletonTTL(ttl string) time.Duration {
 	return 5 * time.Minute
 }
 
-// skeletonPrefixHashes chains block hashes so equal values mean an identical
-// prefix up to that block under the same rendering parameters.
-func skeletonPrefixHashes(row *CacheSkeleton) []uint64 {
+// skeletonPrefixHashes chains block hashes from seed so equal values mean an
+// identical prefix up to that block under the same rendering parameters (and,
+// for OpenAI, the same cache routing key when it is folded into seed).
+func skeletonPrefixHashes(row *CacheSkeleton, seed uint64) []uint64 {
 	out := make([]uint64, len(row.BlkHash))
-	prev := row.ParamFp
+	prev := seed
 	var buf [16]byte
 	for i, h := range row.BlkHash {
 		binary.LittleEndian.PutUint64(buf[:8], prev)
@@ -296,20 +318,138 @@ func withSkeletonTTL(bps []skeletonBreakpoint, ttl time.Duration) []skeletonBrea
 	return out
 }
 
+// skeletonExpectation is one turn's simulated hit tokens under the three
+// ceilings, plus the loss each step explains (largest one becomes the reason).
+type skeletonExpectation struct {
+	current, adjusted, adjusted1h int64
+	losses                        []skeletonLoss
+}
+
+type skeletonLoss struct {
+	reason string
+	loss   int64
+}
+
+// skeletonLaneSim replays the turns of one lane through a provider's cache
+// model. Calls are in time order; replay both reads and writes the cache.
+type skeletonLaneSim interface {
+	replay(row *CacheSkeleton, cumTokens []int64) skeletonExpectation
+}
+
+// claudeLaneSim follows Anthropic's explicit breakpoints: client breakpoints
+// as-is, ignoring TTL (to size the TTL loss), with the gateway adjustment, and
+// with the adjustment at a 1h TTL.
+type claudeLaneSim struct {
+	minTokens                            int64
+	current, noTTL, adjusted, adjusted1h *skeletonCacheSim
+}
+
+func newClaudeLaneSim(modelName string) *claudeLaneSim {
+	return &claudeLaneSim{
+		minTokens:  int64(cacheMinTokensFor(modelName)),
+		current:    newSkeletonCacheSim(false, skeletonLookback),
+		noTTL:      newSkeletonCacheSim(true, skeletonLookback),
+		adjusted:   newSkeletonCacheSim(false, skeletonLookback),
+		adjusted1h: newSkeletonCacheSim(false, skeletonLookback),
+	}
+}
+
+func (s *claudeLaneSim) replay(row *CacheSkeleton, cumTokens []int64) skeletonExpectation {
+	prefix := skeletonPrefixHashes(row, row.ParamFp)
+	bps := skeletonBreakpoints(row)
+	adjusted := adjustSkeletonBreakpoints(row, bps)
+	adjusted1h := withSkeletonTTL(adjusted, time.Hour)
+	var e skeletonExpectation
+	e.current = s.current.lookup(prefix, cumTokens, bps, row.Ts)
+	noTTL := s.noTTL.lookup(prefix, cumTokens, bps, row.Ts)
+	e.adjusted = max(s.adjusted.lookup(prefix, cumTokens, adjusted, row.Ts), e.current)
+	e.adjusted1h = max(s.adjusted1h.lookup(prefix, cumTokens, adjusted1h, row.Ts), e.adjusted)
+	s.current.write(prefix, cumTokens, bps, row.EndTs, s.minTokens)
+	s.noTTL.write(prefix, cumTokens, bps, row.EndTs, s.minTokens)
+	s.adjusted.write(prefix, cumTokens, adjusted, row.EndTs, s.minTokens)
+	s.adjusted1h.write(prefix, cumTokens, adjusted1h, row.EndTs, s.minTokens)
+	e.losses = []skeletonLoss{
+		{SkeletonReasonTTLExpired, noTTL - e.current},
+		{SkeletonReasonMisplaced, e.adjusted - e.current},
+	}
+	return e
+}
+
+// openAILaneSim follows OpenAI's automatic caching: every request caches its
+// whole prompt and a later one reads the longest cached prefix. Routing is
+// modelled by keying entries on prompt_cache_key; the unified sim drops the
+// key (one key for the whole lane) and the day sim adds 24h retention.
+type openAILaneSim struct {
+	keyed, unified, day *skeletonCacheSim
+}
+
+func newOpenAILaneSim() *openAILaneSim {
+	// Every block is a cache point, so a read may fall back to any prefix.
+	lookback := math.MaxInt32
+	return &openAILaneSim{
+		keyed:   newSkeletonCacheSim(false, lookback),
+		unified: newSkeletonCacheSim(false, lookback),
+		day:     newSkeletonCacheSim(false, lookback),
+	}
+}
+
+// openAICachedTokens rounds a matched prefix to what OpenAI reports: nothing
+// below 1024 tokens, then whole 128-token steps.
+func openAICachedTokens(tokens int64) int64 {
+	if tokens < openaiCacheMinTokens {
+		return 0
+	}
+	return tokens / openaiCacheGranularity * openaiCacheGranularity
+}
+
+func (s *openAILaneSim) replay(row *CacheSkeleton, cumTokens []int64) skeletonExpectation {
+	ttl := openaiInMemoryTTL
+	if row.Retention == "24h" {
+		ttl = openaiExtendedTTL
+	}
+	points := make([]skeletonBreakpoint, len(row.BlkHash))
+	dayPoints := make([]skeletonBreakpoint, len(row.BlkHash))
+	for i := range points {
+		points[i] = skeletonBreakpoint{idx: i, ttl: ttl}
+		dayPoints[i] = skeletonBreakpoint{idx: i, ttl: openaiExtendedTTL}
+	}
+	probe := points[len(points)-1:]
+	keyed := skeletonPrefixHashes(row, row.ParamFp^(row.CacheKeyHash*0x9E3779B97F4A7C15))
+	unified := skeletonPrefixHashes(row, row.ParamFp)
+
+	var e skeletonExpectation
+	e.current = openAICachedTokens(s.keyed.lookup(keyed, cumTokens, probe, row.Ts))
+	e.adjusted = max(openAICachedTokens(s.unified.lookup(unified, cumTokens, probe, row.Ts)), e.current)
+	e.adjusted1h = max(openAICachedTokens(s.day.lookup(unified, cumTokens, probe, row.Ts)), e.adjusted)
+	s.keyed.write(keyed, cumTokens, points, row.EndTs, openaiCacheMinTokens)
+	s.unified.write(unified, cumTokens, points, row.EndTs, openaiCacheMinTokens)
+	s.day.write(unified, cumTokens, dayPoints, row.EndTs, openaiCacheMinTokens)
+	e.losses = []skeletonLoss{
+		{SkeletonReasonCacheKeyChanged, e.adjusted - e.current},
+		{SkeletonReasonTTLExpired, e.adjusted1h - e.adjusted},
+	}
+	return e
+}
+
 func analyzeSkeletonLane(rows []*CacheSkeleton) SkeletonLane {
-	lane := SkeletonLane{Turns: make([]SkeletonTurn, 0, len(rows))}
+	lane := SkeletonLane{Turns: make([]SkeletonTurn, 0, len(rows)), Provider: SkeletonProviderClaude}
 	if len(rows) > 0 {
 		lane.Lane = strconv.FormatUint(rows[0].Lane, 16)
 		lane.Model = rows[0].Model
+		if rows[0].Provider == SkeletonProviderOpenAI {
+			lane.Provider = SkeletonProviderOpenAI
+		}
 	}
-	minTokens := int64(0)
-	if lane.Model != "" {
-		minTokens = int64(cacheMinTokensFor(lane.Model))
+	openAI := lane.Provider == SkeletonProviderOpenAI
+	var sim skeletonLaneSim
+	minTokens := int64(openaiCacheMinTokens)
+	if openAI {
+		sim = newOpenAILaneSim()
+	} else {
+		claude := newClaudeLaneSim(lane.Model)
+		minTokens = claude.minTokens
+		sim = claude
 	}
-	simCurrent := newSkeletonCacheSim(false)
-	simNoTTL := newSkeletonCacheSim(true)
-	simAdjusted := newSkeletonCacheSim(false)
-	simAdjusted1h := newSkeletonCacheSim(false)
 	var prev *CacheSkeleton
 
 	for _, row := range rows {
@@ -325,7 +465,9 @@ func analyzeSkeletonLane(rows []*CacheSkeleton) SkeletonLane {
 		}
 		turn.TotalTokens = int64(row.CacheRead) + int64(row.CacheCreation) + int64(row.Input)
 		bps := skeletonBreakpoints(row)
-		turn.TailVolatile = skeletonTailVolatile(row, bps)
+		turn.TailVolatile = !openAI && skeletonTailVolatile(row, bps)
+		turn.NoCacheKey = openAI && row.CacheKeyHash == 0
+		turn.CacheKeyChanged = openAI && prev != nil && row.CacheKeyHash != prev.CacheKeyHash
 		cumBytes := make([]uint64, len(row.BlkLen))
 		var total uint64
 		for i, l := range row.BlkLen {
@@ -334,13 +476,11 @@ func analyzeSkeletonLane(rows []*CacheSkeleton) SkeletonLane {
 		}
 		turn.TotalBytes = total
 		for _, bp := range bps {
-			if bp.idx < len(cumBytes) {
-				ttl := "5m"
-				if bp.ttl == time.Hour {
-					ttl = "1h"
-				}
-				turn.Breakpoints = append(turn.Breakpoints, SkeletonBreakpointMark{Offset: cumBytes[bp.idx], TTL: ttl})
+			ttl := "5m"
+			if bp.ttl == time.Hour {
+				ttl = "1h"
 			}
+			turn.Breakpoints = append(turn.Breakpoints, SkeletonBreakpointMark{Offset: cumBytes[bp.idx], TTL: ttl})
 		}
 		if prev != nil {
 			turn.GapSeconds = row.Ts.Sub(prev.EndTs).Seconds()
@@ -354,26 +494,26 @@ func analyzeSkeletonLane(rows []*CacheSkeleton) SkeletonLane {
 			lane.Turns = append(lane.Turns, turn)
 			continue
 		}
+		// With previous_response_id the earlier turns stay upstream, so the
+		// prefix cannot be replayed: count the turn as observed.
+		if openAI && row.ParentRequestId != "" {
+			turn.Reason = SkeletonReasonPreviousResponse
+			turn.ExpectedCurrent, turn.ExpectedAdjusted, turn.ExpectedAdjusted1h = turn.ActualRead, turn.ActualRead, turn.ActualRead
+			lane.Summary.add(SkeletonRates{Total: turn.TotalTokens, Actual: turn.ActualRead, Current: turn.ActualRead, Adjusted: turn.ActualRead, Adjusted1h: turn.ActualRead})
+			lane.Turns = append(lane.Turns, turn)
+			continue
+		}
 
-		prefix := skeletonPrefixHashes(row)
 		cumTokens := make([]int64, len(cumBytes))
 		for i, b := range cumBytes {
-			if total > 0 {
-				cumTokens[i] = int64(float64(turn.TotalTokens) * float64(b) / float64(total))
-			}
+			cumTokens[i] = int64(float64(turn.TotalTokens) * float64(b) / float64(total))
 		}
-		adjusted := adjustSkeletonBreakpoints(row, bps)
-		adjusted1h := withSkeletonTTL(adjusted, time.Hour)
-		turn.ExpectedCurrent = simCurrent.lookup(prefix, cumTokens, bps, row.Ts)
-		expectedNoTTL := simNoTTL.lookup(prefix, cumTokens, bps, row.Ts)
-		turn.ExpectedAdjusted = max(simAdjusted.lookup(prefix, cumTokens, adjusted, row.Ts), turn.ExpectedCurrent)
-		turn.ExpectedAdjusted1h = max(simAdjusted1h.lookup(prefix, cumTokens, adjusted1h, row.Ts), turn.ExpectedAdjusted)
-		simCurrent.write(prefix, cumTokens, bps, row.EndTs, minTokens)
-		simNoTTL.write(prefix, cumTokens, bps, row.EndTs, minTokens)
-		simAdjusted.write(prefix, cumTokens, adjusted, row.EndTs, minTokens)
-		simAdjusted1h.write(prefix, cumTokens, adjusted1h, row.EndTs, minTokens)
+		expect := sim.replay(row, cumTokens)
+		turn.ExpectedCurrent = expect.current
+		turn.ExpectedAdjusted = expect.adjusted
+		turn.ExpectedAdjusted1h = expect.adjusted1h
 
-		turn.Reason = classifySkeletonTurn(row, prev, &turn, bps, expectedNoTTL, minTokens)
+		turn.Reason = classifySkeletonTurn(row, prev, &turn, openAI || len(bps) > 0, minTokens, expect.losses)
 		lane.Summary.add(SkeletonRates{
 			Total:      turn.TotalTokens,
 			Actual:     turn.ActualRead,
@@ -432,14 +572,17 @@ func skeletonSegments(prev, cur *CacheSkeleton) (int, []SkeletonSegment) {
 	return diverge, segments
 }
 
-func classifySkeletonTurn(row, prev *CacheSkeleton, turn *SkeletonTurn, bps []skeletonBreakpoint, expectedNoTTL, minTokens int64) string {
+// classifySkeletonTurn names the main reason a turn read less than it could:
+// structural causes first, then the largest simulated loss above 5% of the
+// turn. losses holds the provider-specific steps beyond the upstream one.
+func classifySkeletonTurn(row, prev *CacheSkeleton, turn *SkeletonTurn, cacheable bool, minTokens int64, losses []skeletonLoss) string {
 	if prev == nil {
 		return SkeletonReasonFirstTurn
 	}
 	if turn.TotalTokens < minTokens {
 		return SkeletonReasonTooSmall
 	}
-	if len(bps) == 0 {
+	if !cacheable {
 		return SkeletonReasonNoBreakpoint
 	}
 	if row.ParamFp != prev.ParamFp {
@@ -456,20 +599,12 @@ func classifySkeletonTurn(row, prev *CacheSkeleton, turn *SkeletonTurn, bps []sk
 		return SkeletonReasonConcurrent
 	}
 
-	threshold := int64(float64(turn.TotalTokens) * skeletonLossThreshold)
 	upstreamReason := SkeletonReasonUpstreamMiss
 	if row.ChannelId != prev.ChannelId || row.KeyIdx != prev.KeyIdx {
 		upstreamReason = SkeletonReasonChannelSwitch
 	}
-	candidates := []struct {
-		reason string
-		loss   int64
-	}{
-		{upstreamReason, turn.ExpectedCurrent - turn.ActualRead},
-		{SkeletonReasonTTLExpired, expectedNoTTL - turn.ExpectedCurrent},
-		{SkeletonReasonMisplaced, turn.ExpectedAdjusted - turn.ExpectedCurrent},
-	}
-	reason, best := SkeletonReasonHit, threshold
+	candidates := append([]skeletonLoss{{upstreamReason, turn.ExpectedCurrent - turn.ActualRead}}, losses...)
+	reason, best := SkeletonReasonHit, int64(float64(turn.TotalTokens)*skeletonLossThreshold)
 	for _, c := range candidates {
 		if c.loss > best {
 			reason, best = c.reason, c.loss

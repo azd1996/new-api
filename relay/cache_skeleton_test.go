@@ -87,3 +87,63 @@ func TestBuildClaudeCacheSkeletonTopLevelAutomaticCaching(t *testing.T) {
 	assert.Equal(t, []uint16{1}, row.BpIdx)
 	assert.Equal(t, []string{"5m"}, row.BpTtl)
 }
+
+func TestBuildOpenAIChatCacheSkeleton(t *testing.T) {
+	turn1 := buildOpenAIChatCacheSkeleton([]byte(`{
+  "model":"gpt-5.5","reasoning_effort":"high","prompt_cache_key":"sess-1",
+  "tools":[{"type":"function","function":{"name":"shell","parameters":{}}}],
+  "messages":[
+    {"role":"system","content":"You are Codex"},
+    {"role":"user","content":[{"type":"text","text":"fix it"},{"type":"image_url","image_url":{"url":"data:x"}}]},
+    {"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"shell","arguments":"{}"}}]}
+  ]}`))
+	turn2 := buildOpenAIChatCacheSkeleton([]byte(`{
+  "model":"gpt-5.5","reasoning_effort":"high","prompt_cache_key":"sess-1",
+  "tools":[{"type":"function","function":{"name":"shell","parameters":{}}}],
+  "messages":[
+    {"role":"system","content":"You are Codex"},
+    {"role":"user","content":[{"type":"text","text":"fix it"},{"type":"image_url","image_url":{"url":"data:x"}}]},
+    {"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"shell","arguments":"{}"}}]},
+    {"role":"tool","tool_call_id":"c1","content":"ok"}
+  ]}`))
+
+	assert.Equal(t, "openai", turn1.Provider)
+	assert.Equal(t, []string{"tool", "system.text", "user.text", "user.image_url", "assistant.tool_call"}, turn1.BlkKind)
+	assert.Equal(t, []string{"shell", "", "", "", "shell"}, turn1.BlkName)
+	assert.Equal(t, []uint16{1, 2, 4}, turn1.MsgStart)
+	assert.Equal(t, "high", turn1.Effort)
+	assert.NotZero(t, turn1.CacheKeyHash)
+	assert.Empty(t, turn1.BpIdx)
+
+	require.Len(t, turn2.BlkHash, 6)
+	assert.Equal(t, turn1.BlkHash, turn2.BlkHash[:5], "an appended message keeps the prefix")
+	assert.Equal(t, turn1.Lane, turn2.Lane)
+	assert.Equal(t, turn1.ParamFp, turn2.ParamFp)
+}
+
+func TestBuildOpenAIResponsesCacheSkeleton(t *testing.T) {
+	row := buildOpenAIResponsesCacheSkeleton([]byte(`{
+  "model":"gpt-5.5","reasoning":{"effort":"medium"},"prompt_cache_retention":"24h",
+  "previous_response_id":"resp_1",
+  "instructions":"You are Codex",
+  "tools":[{"type":"function","name":"shell","parameters":{}}],
+  "text":{"format":{"type":"json_schema","name":"answer","schema":{}}},
+  "input":[
+    {"role":"user","content":[{"type":"input_text","text":"fix it"}]},
+    {"type":"reasoning","encrypted_content":"x"},
+    {"type":"function_call","call_id":"c1","name":"shell","arguments":"{}"},
+    {"type":"function_call_output","call_id":"c1","output":"ok"}
+  ]}`))
+
+	assert.Equal(t, []string{"tool", "instructions", "schema", "user.input_text", "assistant.reasoning", "assistant.function_call", "tool.function_call_output"}, row.BlkKind)
+	assert.Equal(t, []string{"shell", "", "answer", "", "", "shell", ""}, row.BlkName)
+	assert.Equal(t, []uint16{3, 4, 5, 6}, row.MsgStart)
+	assert.Equal(t, "medium", row.Effort)
+	assert.Equal(t, "24h", row.Retention)
+	assert.Equal(t, "resp_1", row.ParentRequestId)
+	assert.Zero(t, row.CacheKeyHash)
+
+	plain := buildOpenAIResponsesCacheSkeleton([]byte(`{"model":"gpt-5.5","input":"hello"}`))
+	assert.Equal(t, []string{"user.text"}, plain.BlkKind)
+	assert.Equal(t, []uint16{0}, plain.MsgStart)
+}

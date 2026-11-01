@@ -732,12 +732,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const reasoningEffortVariant = getReasoningEffortVariant(
     other?.reasoning_effort
   )
-  // Skeletons are recorded for native Claude Messages attempts (consume and
-  // error logs); the dialog itself reports when none exists.
+  // Skeletons are recorded for Claude Messages, OpenAI Chat Completions and
+  // Responses attempts (consume and error logs); the dialog itself reports
+  // when none exists.
   const showCacheSkeleton =
-    !!props.log.request_id &&
-    (isConsume || props.log.type === 5) &&
-    (other?.claude === true || props.log.model_name.includes('claude'))
+    !!props.log.request_id && (isConsume || props.log.type === 5)
   const [skeletonOpen, setSkeletonOpen] = useState(false)
 
   return (

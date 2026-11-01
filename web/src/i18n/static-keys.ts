@@ -927,4 +927,15 @@ export const STATIC_I18N_KEYS = [
   'Upstream miss',
   'Hit as expected',
   'Invalid session ID',
+  'prompt_cache_key changed',
+  'Uses previous_response_id',
+  // Session cache diagnosis tier labels (skeletonTierLabels).
+  'Ceiling with client breakpoints',
+  'After breakpoint adjustment',
+  'Adjustment + 1h TTL',
+  'Breakpoint misplaced',
+  'Prefix-match ceiling',
+  'With one prompt_cache_key',
+  'One key + 24h retention',
+  'prompt_cache_key changes',
 ] as const

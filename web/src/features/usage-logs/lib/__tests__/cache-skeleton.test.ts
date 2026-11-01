@@ -26,6 +26,7 @@ import {
   buildTurnTimeline,
   skeletonLosses,
   skeletonRate,
+  skeletonTierLabels,
 } from '../cache-skeleton'
 
 function skeleton(overrides: Partial<CacheSkeleton>): CacheSkeleton {
@@ -55,6 +56,9 @@ function skeleton(overrides: Partial<CacheSkeleton>): CacheSkeleton {
     cache_read: 0,
     cache_creation: 0,
     input: 0,
+    provider: 'claude',
+    retention: '',
+    parent_request_id: '',
     ...overrides,
   }
 }
@@ -150,6 +154,8 @@ function turn(overrides: Partial<SkeletonTurn>): SkeletonTurn {
     reason: 'hit',
     diverge_idx: -1,
     tail_volatile: false,
+    cache_key_changed: false,
+    no_cache_key: false,
     total_bytes: 0,
     segments: null,
     breakpoints: null,
@@ -172,7 +178,7 @@ describe('session cache diagnosis', () => {
       adjusted_1h: 900,
     })
 
-    assert.deepEqual(losses, { upstream: 300, misplaced: 300, ttl: 100 })
+    assert.deepEqual(losses, { upstream: 300, adjusted: 300, ttl: 100 })
   })
 
   test('losses never go negative when actual exceeds the simulation', () => {
@@ -214,5 +220,17 @@ describe('session cache diagnosis', () => {
     const bar = buildTurnTimeline(turn({ status: 'error' }), 0)
 
     assert.deepEqual(bar, { segments: [], breakpoints: [] })
+  })
+
+  test('tier labels follow the provider cache model', () => {
+    assert.equal(
+      skeletonTierLabels('openai').adjusted,
+      'With one prompt_cache_key'
+    )
+    assert.equal(
+      skeletonTierLabels('claude').adjusted,
+      'After breakpoint adjustment'
+    )
+    assert.equal(skeletonTierLabels('').adjustedLoss, 'Breakpoint misplaced')
   })
 })

@@ -163,24 +163,36 @@ func TestClaudeSessionDerivation(t *testing.T) {
 		assert.Equal(t, want, innerSessionID(t, body, " s1 "))
 	})
 
-	t.Run("falls back to ephemeral cache_control content", func(t *testing.T) {
-		body := `{"model":"m1","system":[{"type":"text","text":"SYS","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"MSGCACHE","cache_control":{"type":"ephemeral"}}]}]}`
-		want := claudeSessionHash(strings.Join([]string{"m1", "SYS", "SYSMSGCACHE"}, seedSep))
+	t.Run("without header the first message anchors the conversation", func(t *testing.T) {
+		body := `{"model":"m1","system":[{"type":"text","text":"SYS","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"Q1"},{"type":"image","source":{"type":"base64","data":"AA"},"cache_control":{"type":"ephemeral"}}]}]}`
+		want := claudeSessionHash(strings.Join([]string{"m1", "SYS", testAPIKey, `Q1{"type":"image","source":{"type":"base64","data":"AA"}}`}, seedSep))
 		assert.Equal(t, want, innerSessionID(t, body, ""))
 	})
 
-	t.Run("identity fallback is stable across turns", func(t *testing.T) {
-		turn1 := `{"model":"m1","messages":[{"role":"user","content":"hello"}]}`
-		turn2 := `{"model":"m1","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi"},{"role":"user","content":"more"}]}`
+	t.Run("different first messages are different sessions", func(t *testing.T) {
+		a := `{"model":"m1","messages":[{"role":"user","content":"task A"}]}`
+		b := `{"model":"m1","messages":[{"role":"user","content":"task B"}]}`
+		assert.NotEqual(t, innerSessionID(t, a, ""), innerSessionID(t, b, ""))
+	})
+
+	t.Run("identity fallback when there is no message content", func(t *testing.T) {
+		body := `{"model":"m1","messages":[]}`
 		want := claudeSessionHash(strings.Join([]string{"m1", "", testClientIP + testUserAgent + testAPIKey}, seedSep))
-		assert.Equal(t, want, innerSessionID(t, turn1, ""))
-		assert.Equal(t, want, innerSessionID(t, turn2, ""))
+		assert.Equal(t, want, innerSessionID(t, body, ""))
 	})
 
 	t.Run("model switch changes the session for the same conversation", func(t *testing.T) {
 		opus := `{"model":"claude-opus-5-5","system":[{"type":"text","text":"P","cache_control":{"type":"ephemeral"}}]}`
 		sonnet := `{"model":"claude-sonnet-5","system":[{"type":"text","text":"P","cache_control":{"type":"ephemeral"}}]}`
 		assert.NotEqual(t, innerSessionID(t, opus, "s1"), innerSessionID(t, sonnet, "s1"))
+	})
+
+	// Clients move the message breakpoint onto the newest message every turn.
+	t.Run("moving message breakpoint keeps the session across turns", func(t *testing.T) {
+		sys := `"system":[{"type":"text","text":"SYS","cache_control":{"type":"ephemeral"}}]`
+		turn1 := `{"model":"m1",` + sys + `,"messages":[{"role":"user","content":[{"type":"text","text":"Q1","cache_control":{"type":"ephemeral"}}]}]}`
+		turn2 := `{"model":"m1",` + sys + `,"messages":[{"role":"user","content":[{"type":"text","text":"Q1"}]},{"role":"assistant","content":[{"type":"text","text":"A1"}]},{"role":"user","content":[{"type":"text","text":"Q2","cache_control":{"type":"ephemeral"}}]}]}`
+		assert.Equal(t, innerSessionID(t, turn1, ""), innerSessionID(t, turn2, ""))
 	})
 
 	t.Run("dynamic system tail after the breakpoint does not change the session", func(t *testing.T) {

@@ -218,6 +218,10 @@ type Log struct {
 	DownstreamRequestId string `json:"downstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_downstream_request_id;default:''"`
 	CustomerId          string `json:"customer_id,omitempty" gorm:"type:varchar(128);index:idx_logs_customer_id;default:''"`
 	CustomerName        string `json:"customer_name,omitempty" gorm:"type:varchar(128);index:idx_logs_customer_name;default:''"`
+	// NodeName is the cluster node that served the request, duplicated from
+	// other.admin_info.node_name into an indexed column for the admin node
+	// filter. Rows predating the column read as ''.
+	NodeName string `json:"node_name,omitempty" gorm:"type:varchar(128);index:idx_logs_node_name;default:''"`
 	// RetryTriggered duplicates other.admin_info.retry_triggered into a real
 	// indexed column (error logs) so the admin log list can filter attempts that
 	// fired an error-triggered retry-override. Reporting-only; never billed.
@@ -330,6 +334,7 @@ func formatUserLogs(logs []*Log, startIdx int) {
 		logs[i].CustomerName = ""
 		logs[i].CustomerId = ""
 		logs[i].DownstreamRequestId = ""
+		logs[i].NodeName = ""
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
 	}
 	assignDisplayLogIds(logs, startIdx)
@@ -461,6 +466,7 @@ func RecordRetryOverrideLog(params OverrideAuditLogParams, content string, detai
 		IsStream:          params.IsStream,
 		RequestId:         params.RequestId,
 		UpstreamRequestId: params.UpstreamRequestId,
+		NodeName:          common.NodeName,
 		Other:             other.JSONString(),
 	}
 	if err := createLog(log); err != nil {
@@ -598,6 +604,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		DownstreamRequestId: downstreamRequestID,
 		CustomerId:          customerID,
 		CustomerName:        customerName,
+		NodeName:            common.NodeName,
 		ErrorSignatureHash:  errorSignatureHash,
 		RetryTriggered:      retryTriggered,
 		Content:             content,
@@ -701,6 +708,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		DownstreamRequestId: downstreamRequestID,
 		CustomerId:          customerID,
 		CustomerName:        customerName,
+		NodeName:            common.NodeName,
 		Content:             content,
 		PromptTokens:        params.PromptTokens,
 		CompletionTokens:    params.CompletionTokens,
@@ -785,6 +793,10 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 	createdAt := common.GetTimestamp()
 	other := params.Other
+	nodeName := params.NodeName
+	if nodeName == "" {
+		nodeName = common.NodeName
+	}
 	log := &Log{
 		UserId:    params.UserId,
 		Username:  username,
@@ -797,6 +809,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		ChannelId: params.ChannelId,
 		TokenId:   params.TokenId,
 		Group:     params.Group,
+		NodeName:  nodeName,
 		Other:     other.JSONString(),
 	}
 	err := createLog(log)
@@ -804,10 +817,6 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		common.SysLog(common.LogText("failed to record task billing log: %s", err.Error()))
 	}
 	if params.LogType == LogTypeConsume && common.DataExportEnabled {
-		nodeName := params.NodeName
-		if nodeName == "" {
-			nodeName = common.NodeName
-		}
 		LogQuotaData(QuotaDataLogParams{
 			UserID:    params.UserId,
 			Username:  username,
@@ -846,6 +855,9 @@ type LogFilter struct {
 	// time range).
 	CustomerName       string
 	DownstreamTraceTag string
+	// NodeName matches the serving cluster node on its indexed column, with the
+	// same multi-value include/exclude semantics as Group. Admin-only.
+	NodeName           LogFieldFilter
 	StatusCode         int
 	ErrorKeyword       string
 	ErrorSignatureHash string
@@ -893,6 +905,9 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	}
 	if f.CustomerName != "" {
 		tx = tx.Where("logs.customer_name = ?", f.CustomerName)
+	}
+	if tx, err = applyLogFieldFilter(tx, "logs.node_name", f.NodeName, false); err != nil {
+		return nil, err
 	}
 	if f.DownstreamTraceTag != "" {
 		cond, pat := otherFieldLikeCondition("logs.other", "downstream_trace_tag", f.DownstreamTraceTag)

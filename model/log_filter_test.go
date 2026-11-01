@@ -164,8 +164,8 @@ func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
 
 	require.NoError(t, db.Create([]Log{
-		{Id: 1, CustomerName: "Acme", Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"tag-a"}}`},
-		{Id: 2, CustomerName: "Other", Other: `{"admin_info":{"customer_name":"Other","downstream_trace_tag":"tag-b"}}`},
+		{Id: 1, CustomerName: "Acme", NodeName: "node-a", Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"tag-a"}}`},
+		{Id: 2, CustomerName: "Other", NodeName: "node-b", Other: `{"admin_info":{"customer_name":"Other","downstream_trace_tag":"tag-b"}}`},
 	}).Error)
 
 	findIDs := func(filter LogFilter) []int {
@@ -179,6 +179,9 @@ func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	assert.Equal(t, []int{1}, findIDs(LogFilter{CustomerName: "Acme"}))
 	assert.Equal(t, []int{2}, findIDs(LogFilter{DownstreamTraceTag: "tag-b"}))
 	assert.Empty(t, findIDs(LogFilter{CustomerName: "Acme", DownstreamTraceTag: "tag-b"}))
+	assert.Equal(t, []int{2}, findIDs(LogFilter{NodeName: LogFieldFilter{Values: []string{"node-b"}}}))
+	assert.Equal(t, []int{1}, findIDs(LogFilter{NodeName: LogFieldFilter{Values: []string{"node-b"}, Exclude: true}}))
+	assert.Empty(t, findIDs(LogFilter{NodeName: LogFieldFilter{Values: []string{"node-c"}}}))
 }
 
 func TestSuccessCountsRetainCustomerAndTraceFilters(t *testing.T) {

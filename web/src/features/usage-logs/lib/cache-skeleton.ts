@@ -121,6 +121,8 @@ export const SKELETON_REASON_LABELS: Record<string, string> = {
   channel_switch: 'Channel or key switched',
   upstream_miss: 'Upstream miss',
   hit: 'Hit as expected',
+  cache_key_changed: 'prompt_cache_key changed',
+  previous_response: 'Uses previous_response_id',
 }
 
 // Badge color per reason: gateway-recoverable causes warn, upstream-side
@@ -141,6 +143,36 @@ export const SKELETON_REASON_VARIANTS: Record<
   channel_switch: 'danger',
   upstream_miss: 'danger',
   hit: 'success',
+  cache_key_changed: 'warning',
+  previous_response: 'neutral',
+}
+
+export interface SkeletonTierLabels {
+  current: string
+  adjusted: string
+  adjusted1h: string
+  // Loss closed by the adjusted step (the TTL step is shared).
+  adjustedLoss: string
+}
+
+// skeletonTierLabels names the three simulated ceilings of a lane (i18n
+// keys). Claude caches at explicit breakpoints the gateway can move; OpenAI
+// caches the longest prefix automatically and routes by prompt_cache_key.
+export function skeletonTierLabels(provider: string): SkeletonTierLabels {
+  if (provider === 'openai') {
+    return {
+      current: 'Prefix-match ceiling',
+      adjusted: 'With one prompt_cache_key',
+      adjusted1h: 'One key + 24h retention',
+      adjustedLoss: 'prompt_cache_key changes',
+    }
+  }
+  return {
+    current: 'Ceiling with client breakpoints',
+    adjusted: 'After breakpoint adjustment',
+    adjusted1h: 'Adjustment + 1h TTL',
+    adjustedLoss: 'Breakpoint misplaced',
+  }
 }
 
 // skeletonRate is part/total as a percentage, '—' without input tokens.
@@ -150,11 +182,12 @@ export function skeletonRate(part: number, total: number): string {
 }
 
 export interface SkeletonLossBreakdown {
-  // Expected by the simulation with the client's breakpoints, not read.
+  // Expected by the first simulated ceiling, not read.
   upstream: number
-  // Recovered by the gateway breakpoint adjustment.
-  misplaced: number
-  // Recovered by additionally raising the TTL to 1h.
+  // Recovered by the adjusted step: the gateway breakpoint adjustment
+  // (Claude) or one prompt_cache_key (OpenAI).
+  adjusted: number
+  // Recovered by additionally extending the TTL (1h / 24h).
   ttl: number
 }
 
@@ -163,7 +196,7 @@ export interface SkeletonLossBreakdown {
 export function skeletonLosses(rates: SkeletonRates): SkeletonLossBreakdown {
   return {
     upstream: Math.max(0, rates.current - rates.actual),
-    misplaced: Math.max(0, rates.adjusted - rates.current),
+    adjusted: Math.max(0, rates.adjusted - rates.current),
     ttl: Math.max(0, rates.adjusted_1h - rates.adjusted),
   }
 }

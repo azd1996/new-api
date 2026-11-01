@@ -75,11 +75,21 @@ function SkeletonAttempt(props: { item: CacheSkeleton; showAttempt: boolean }) {
           {item.lane.slice(0, 8)} · {t('Channel')} {item.channel_id} / key{' '}
           {item.key_idx} · {item.node}
         </div>
-        <div>
-          {t('Breakpoints')} {item.bp_idx.length} (
-          {item.bp_ttl.join(', ') || '-'}) · {t('Gateway rewrite')}{' '}
-          {item.fixed || '-'}
-        </div>
+        {item.provider === 'openai' ? (
+          <div>
+            prompt_cache_key {item.cache_key_hash?.slice(0, 8) || '-'} ·
+            prompt_cache_retention {item.retention || '-'}
+            {item.parent_request_id && (
+              <> · previous_response_id {item.parent_request_id}</>
+            )}
+          </div>
+        ) : (
+          <div>
+            {t('Breakpoints')} {item.bp_idx.length} (
+            {item.bp_ttl.join(', ') || '-'}) · {t('Gateway rewrite')}{' '}
+            {item.fixed || '-'}
+          </div>
+        )}
         <div>
           {t('Cache read')} {formatNumber(item.cache_read, locale)} ·{' '}
           {t('Cache write')} {formatNumber(item.cache_creation, locale)} ·{' '}
@@ -190,7 +200,7 @@ export function CacheSkeletonDialog(props: CacheSkeletonDialogProps) {
         <EmptyState
           title={t('No request skeleton for this request')}
           description={t(
-            'Only native Claude Messages requests are recorded; rows expire after the retention period'
+            'Only Claude Messages, OpenAI Chat Completions and Responses requests are recorded; rows expire after the retention period'
           )}
         />
       )}

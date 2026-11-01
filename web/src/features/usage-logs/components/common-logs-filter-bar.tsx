@@ -48,6 +48,7 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { buildSearchParams } from '../lib/filter'
+import { getLogNodes } from '../api'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters, LogFilterOperator } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
@@ -152,6 +153,8 @@ function buildSearchSourceKey(values: {
   downstreamTraceTag?: unknown
   customerName?: unknown
   customerId?: unknown
+  node?: unknown
+  nodeOp?: unknown
   retryTriggered?: unknown
   statusCode?: unknown
   errorKeyword?: unknown
@@ -179,6 +182,8 @@ function buildSearchSourceKey(values: {
     values.downstreamTraceTag,
     values.customerName,
     values.customerId,
+    values.node,
+    values.nodeOp,
     values.retryTriggered,
     values.statusCode,
     values.errorKeyword,
@@ -244,6 +249,23 @@ export function CommonLogsFilterBar<TData>(
     [enabledModels]
   )
 
+  // Known cluster nodes (heartbeat table) as node-filter candidates; free text
+  // stays allowed for nodes that have since been removed from the table.
+  const { data: logNodes } = useQuery({
+    queryKey: ['log-filter-nodes'],
+    queryFn: async () => requireServerSuccess(await getLogNodes()),
+    enabled: isAdmin,
+    staleTime: 5 * 60 * 1000,
+  })
+  const nodeOptions = useMemo(
+    () =>
+      (logNodes?.data ?? []).map((node) => ({
+        label: node,
+        value: node,
+      })),
+    [logNodes]
+  )
+
   const searchState = useMemo<CommonLogDraft>(() => {
     const { start, end } = getDefaultTimeRange()
     const sourceValues = {
@@ -266,6 +288,8 @@ export function CommonLogsFilterBar<TData>(
       downstreamTraceTag: searchParams.downstreamTraceTag,
       customerName: searchParams.customerName,
       customerId: searchParams.customerId,
+      node: searchParams.node,
+      nodeOp: searchParams.nodeOp,
       retryTriggered: searchParams.retryTriggered,
       statusCode: searchParams.statusCode,
       errorKeyword: searchParams.errorKeyword,
@@ -295,6 +319,8 @@ export function CommonLogsFilterBar<TData>(
       downstreamTraceTag: searchParams.downstreamTraceTag || undefined,
       customerName: searchParams.customerName || undefined,
       customerId: searchParams.customerId || undefined,
+      node: searchParams.node || undefined,
+      nodeOp: searchParams.nodeOp || 'include',
       retryTriggered: searchParams.retryTriggered,
       statusCode: searchParams.statusCode || undefined,
       errorKeyword: searchParams.errorKeyword || undefined,
@@ -326,6 +352,8 @@ export function CommonLogsFilterBar<TData>(
     searchParams.downstreamTraceTag,
     searchParams.customerName,
     searchParams.customerId,
+    searchParams.node,
+    searchParams.nodeOp,
     searchParams.retryTriggered,
     searchParams.statusCode,
     searchParams.errorKeyword,
@@ -419,6 +447,7 @@ export function CommonLogsFilterBar<TData>(
     !!filters.downstreamTraceTag ||
     !!filters.customerName ||
     !!filters.customerId ||
+    !!filters.node ||
     !!filters.retryTriggered ||
     !!filters.statusCode ||
     !!filters.errorKeyword ||
@@ -439,6 +468,7 @@ export function CommonLogsFilterBar<TData>(
     isAdmin ? filters.downstreamTraceTag : undefined,
     isAdmin ? filters.customerName : undefined,
     isAdmin ? filters.customerId : undefined,
+    isAdmin ? filters.node : undefined,
     isAdmin ? filters.retryTriggered : undefined,
     filters.statusCode,
     filters.errorKeyword,
@@ -763,6 +793,28 @@ export function CommonLogsFilterBar<TData>(
             enabled={isAdmin}
             className='h-8 min-w-0 text-sm leading-5'
           />
+        </LogsFilterField>
+      )}
+      {isAdmin && (
+        <LogsFilterField>
+          <div className='flex min-w-0 gap-1'>
+            <MultiSelect
+              options={nodeOptions}
+              selected={getFilterValues(filters.node)}
+              onChange={(values) =>
+                handleChange('node', serializeFilterValues(values))
+              }
+              placeholder={t('Node Name')}
+              emptyText={t('No option found.')}
+              allowCreate
+              className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
+            />
+            <LogFilterModeButton
+              fieldLabel={t('Node Name')}
+              operator={filters.nodeOp}
+              onChange={(value) => handleChange('nodeOp', value)}
+            />
+          </div>
         </LogsFilterField>
       )}
       {isAdmin && (

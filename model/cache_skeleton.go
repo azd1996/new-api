@@ -12,11 +12,12 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 )
 
-// CacheSkeleton is one outbound Claude request reduced to its prompt-cache
-// structure: per content block a hash, kind, name and byte length, plus the
-// cache_control breakpoints and the upstream cache usage. It never stores
-// prompt text; comparing consecutive skeletons of one session shows where the
-// cached prefix diverged. ClickHouse-only (see MigrateCacheSkeletons).
+// CacheSkeleton is one outbound request reduced to its prompt-cache structure:
+// per content block a hash, kind, name and byte length, plus the cache
+// breakpoints (Claude) or cache routing key (OpenAI) and the upstream cache
+// usage. It never stores prompt text; comparing consecutive skeletons of one
+// session shows where the cached prefix diverged. ClickHouse-only (see
+// MigrateCacheSkeletons).
 type CacheSkeleton struct {
 	Ts        time.Time `json:"ts" gorm:"column:ts"`
 	EndTs     time.Time `json:"end_ts" gorm:"column:end_ts"`
@@ -33,22 +34,36 @@ type CacheSkeleton struct {
 	ParamFp   uint64    `json:"param_fp,string" gorm:"column:param_fp"`
 	Thinking  string    `json:"thinking" gorm:"column:thinking"`
 	Effort    string    `json:"effort" gorm:"column:effort"`
+	// Provider is SkeletonProviderClaude or SkeletonProviderOpenAI; it selects
+	// the cache model used by the session analysis.
+	Provider string `json:"provider" gorm:"column:provider"`
+	// CacheKeyHash hashes the OpenAI prompt_cache_key (0 when absent) and
+	// Retention is its prompt_cache_retention.
+	CacheKeyHash uint64 `json:"-" gorm:"column:cache_key_hash"`
+	Retention    string `json:"retention" gorm:"column:retention"`
 	// Array columns need an explicit type: without one GORM parses a slice
 	// field as an association and rejects the model.
-	BlkHash         []uint64 `json:"-" gorm:"column:blk_hash;type:Array(UInt64)"`
-	BlkKind         []string `json:"blk_kind" gorm:"column:blk_kind;type:Array(LowCardinality(String))"`
-	BlkName         []string `json:"blk_name" gorm:"column:blk_name;type:Array(LowCardinality(String))"`
-	BlkLen          []uint32 `json:"blk_len" gorm:"column:blk_len;type:Array(UInt32)"`
-	MsgStart        []uint16 `json:"msg_start" gorm:"column:msg_start;type:Array(UInt16)"`
-	BpIdx           []uint16 `json:"bp_idx" gorm:"column:bp_idx;type:Array(UInt16)"`
-	BpTtl           []string `json:"bp_ttl" gorm:"column:bp_ttl;type:Array(LowCardinality(String))"`
-	Fixed           string   `json:"fixed" gorm:"column:fixed"`
-	CacheRead       uint32   `json:"cache_read" gorm:"column:cache_read"`
-	CacheCreation   uint32   `json:"cache_creation" gorm:"column:cache_creation"`
-	Input           uint32   `json:"input" gorm:"column:input"`
-	ParentRequestId string   `json:"-" gorm:"column:parent_request_id"`
-	PrefixLen       uint16   `json:"-" gorm:"column:prefix_len"`
+	BlkHash       []uint64 `json:"-" gorm:"column:blk_hash;type:Array(UInt64)"`
+	BlkKind       []string `json:"blk_kind" gorm:"column:blk_kind;type:Array(LowCardinality(String))"`
+	BlkName       []string `json:"blk_name" gorm:"column:blk_name;type:Array(LowCardinality(String))"`
+	BlkLen        []uint32 `json:"blk_len" gorm:"column:blk_len;type:Array(UInt32)"`
+	MsgStart      []uint16 `json:"msg_start" gorm:"column:msg_start;type:Array(UInt16)"`
+	BpIdx         []uint16 `json:"bp_idx" gorm:"column:bp_idx;type:Array(UInt16)"`
+	BpTtl         []string `json:"bp_ttl" gorm:"column:bp_ttl;type:Array(LowCardinality(String))"`
+	Fixed         string   `json:"fixed" gorm:"column:fixed"`
+	CacheRead     uint32   `json:"cache_read" gorm:"column:cache_read"`
+	CacheCreation uint32   `json:"cache_creation" gorm:"column:cache_creation"`
+	Input         uint32   `json:"input" gorm:"column:input"`
+	// ParentRequestId holds the OpenAI previous_response_id: the cached
+	// prefix then lives upstream and the skeleton only sees the new input.
+	ParentRequestId string `json:"parent_request_id" gorm:"column:parent_request_id"`
+	PrefixLen       uint16 `json:"-" gorm:"column:prefix_len"`
 }
+
+const (
+	SkeletonProviderClaude = "claude"
+	SkeletonProviderOpenAI = "openai"
+)
 
 func (CacheSkeleton) TableName() string { return "cache_skeletons" }
 
@@ -76,12 +91,14 @@ func MigrateCacheSkeletons() error {
 	if policy := common.GetEnvOrDefaultString("CACHE_SKELETON_STORAGE_POLICY", ""); policy != "" && !strings.ContainsAny(policy, `'\`) {
 		settings += ", storage_policy = '" + policy + "'"
 	}
-	return LOG_DB.Exec(`CREATE TABLE IF NOT EXISTS cache_skeletons (
+	err := LOG_DB.Exec(`CREATE TABLE IF NOT EXISTS cache_skeletons (
 		ts DateTime64(3), end_ts DateTime64(3), request_id String, attempt UInt8,
 		status LowCardinality(String), node LowCardinality(String),
 		token_id UInt32, session_id String, lane UInt64,
 		channel_id UInt32, key_idx UInt16, model LowCardinality(String),
 		param_fp UInt64, thinking LowCardinality(String), effort LowCardinality(String),
+		provider LowCardinality(String) DEFAULT 'claude',
+		cache_key_hash UInt64 DEFAULT 0, retention LowCardinality(String) DEFAULT '',
 		blk_hash Array(UInt64) CODEC(ZSTD(3)),
 		blk_kind Array(LowCardinality(String)) CODEC(ZSTD(3)),
 		blk_name Array(LowCardinality(String)) CODEC(ZSTD(3)),
@@ -96,6 +113,21 @@ func MigrateCacheSkeletons() error {
 	ORDER BY (token_id, session_id, lane, ts)
 	TTL toDateTime(ts) + INTERVAL ` + strconv.Itoa(ttlDays) + ` DAY
 	SETTINGS ` + settings).Error
+	if err != nil {
+		return err
+	}
+	// Tables created before OpenAI skeletons were recorded hold Claude rows
+	// only, so the provider default backfills them correctly.
+	for _, column := range []string{
+		"provider LowCardinality(String) DEFAULT 'claude'",
+		"cache_key_hash UInt64 DEFAULT 0",
+		"retention LowCardinality(String) DEFAULT ''",
+	} {
+		if err := LOG_DB.Exec("ALTER TABLE cache_skeletons ADD COLUMN IF NOT EXISTS " + column).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetCacheSkeletons returns every recorded attempt of one request, oldest first.

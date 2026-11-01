@@ -68,6 +68,9 @@ export interface CommonLogFilters extends CommonFilters {
   downstreamTraceTag?: string
   customerName?: string
   customerId?: string
+  // Cluster node that served the request (admin only).
+  node?: string
+  nodeOp?: LogFilterOperator
   // Error logs only: 'true' / 'false'; undefined means no filter.
   retryTriggered?: 'true' | 'false'
   statusCode?: string
@@ -518,6 +521,8 @@ export interface GetLogsParams {
   downstream_trace_tag?: string
   customer_name?: string
   customer_id?: string
+  node_name?: string
+  node_name_op?: LogFilterOperator
   retry_triggered?: 'true' | 'false'
   status_code?: number
   error_keyword?: string
@@ -555,6 +560,8 @@ export interface GetLogStatsParams {
   downstream_request_id?: string
   downstream_trace_tag?: string
   customer_name?: string
+  node_name?: string
+  node_name_op?: LogFilterOperator
   retry_triggered?: 'true' | 'false'
   status_code?: number
   error_keyword?: string
@@ -724,6 +731,14 @@ export interface CacheSkeleton {
   cache_read: number
   cache_creation: number
   input: number
+  // 'claude' (explicit cache_control breakpoints) or 'openai' (automatic
+  // prefix caching routed by prompt_cache_key).
+  provider: string
+  // Hex hash of the OpenAI prompt_cache_key; empty when none was sent.
+  cache_key_hash?: string
+  retention: string
+  // OpenAI previous_response_id: earlier turns live upstream.
+  parent_request_id: string
 }
 
 export interface CacheSkeletonResponse {
@@ -733,9 +748,11 @@ export interface CacheSkeletonResponse {
 }
 
 // Simulated prompt-cache outcome of one recorded attempt. expected_* are
-// token estimates (the turn's input split across blocks by byte share): the
-// ceiling with the client's breakpoints, with the gateway adjustment, and
-// with the adjustment plus a 1h TTL.
+// token estimates (the turn's input split across blocks by byte share). For
+// Claude lanes: the ceiling with the client's breakpoints, with the gateway
+// adjustment, and with the adjustment plus a 1h TTL. For OpenAI lanes: the
+// prefix-match ceiling, with one prompt_cache_key, and that plus 24h
+// retention.
 export interface SkeletonTurn {
   request_id: string
   ts: string
@@ -753,6 +770,8 @@ export interface SkeletonTurn {
   // First block that differs from the previous turn; -1 when none.
   diverge_idx: number
   tail_volatile: boolean
+  cache_key_changed: boolean
+  no_cache_key: boolean
   total_bytes: number
   segments: { state: 'same' | 'changed' | 'new'; bytes: number }[] | null
   breakpoints: { offset: number; ttl: string }[] | null
@@ -770,6 +789,7 @@ export interface SkeletonRates {
 export interface SkeletonLane {
   lane: string
   model: string
+  provider: string
   turns: SkeletonTurn[]
   summary: SkeletonRates
 }

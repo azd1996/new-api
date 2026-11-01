@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	openaichannel "github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -111,7 +112,15 @@ func textRequestViaResponses(c *gin.Context, info *relaycommon.RelayInfo, adapto
 	return relayResponsesRequest(c, info, adaptor, responsesReq, paramOverrideApplied)
 }
 
-func relayResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, responsesReq *dto.OpenAIResponsesRequest, paramOverrideApplied bool) (*dto.Usage, *types.NewAPIError) {
+func relayResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, responsesReq *dto.OpenAIResponsesRequest, paramOverrideApplied bool) (resultUsage *dto.Usage, resultErr *types.NewAPIError) {
+	// The upstream sees a Responses body, so that is what the skeleton
+	// records; it is written once the attempt ends, success or not.
+	var cacheSkeleton *model.CacheSkeleton
+	defer func() {
+		if cacheSkeleton != nil {
+			finishCacheSkeleton(c, info, cacheSkeleton, resultUsage, resultErr)
+		}
+	}()
 	savedRelayMode := info.RelayMode
 	savedRequestURLPath := info.RequestURLPath
 	defer func() {
@@ -142,6 +151,10 @@ func relayResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor 
 		if err != nil {
 			return nil, newAPIErrorFromParamOverride(err)
 		}
+	}
+
+	if model.CacheSkeletonEnabled() {
+		cacheSkeleton = buildOpenAIResponsesCacheSkeleton(jsonData)
 	}
 
 	body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)

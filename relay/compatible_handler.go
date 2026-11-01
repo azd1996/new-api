@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -37,6 +38,18 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	// Capture the request session_id (prompt_cache_key) for the consume/error log.
 	recordRequestSessionID(c, request.PromptCacheKey, "prompt_cache_key")
+
+	// The prompt-cache skeleton of a direct Chat Completions call is recorded
+	// once the attempt ends, success or not. Calls converted to Responses
+	// record theirs in relayResponsesRequest.
+	var cacheSkeleton *model.CacheSkeleton
+	var cacheSkeletonUsage *dto.Usage
+	defer func() {
+		if cacheSkeleton != nil {
+			finishCacheSkeleton(c, info, cacheSkeleton, cacheSkeletonUsage, newAPIError)
+		}
+	}()
+	recordCacheSkeleton := info.RelayMode == relayconstant.RelayModeChatCompletions && model.CacheSkeletonEnabled()
 
 	if request.WebSearchOptions != nil {
 		c.Set("chat_completion_web_search_context_size", request.WebSearchOptions.SearchContextSize)
@@ -110,6 +123,11 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 				logger.LogDebug(c, "requestBody: %s", debugBytes)
 			}
 		}
+		if recordCacheSkeleton {
+			if raw, bErr := storage.Bytes(); bErr == nil {
+				cacheSkeleton = buildOpenAIChatCacheSkeleton(raw)
+			}
+		}
 		requestBody = common.NewReplayableBodyReader(storage)
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIRequest(c, info, request)
@@ -142,6 +160,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		}
 
 		logger.LogDebug(c, "text request body: %s", jsonData)
+		if recordCacheSkeleton {
+			cacheSkeleton = buildOpenAIChatCacheSkeleton(jsonData)
+		}
 
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
@@ -178,6 +199,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		return newApiErr
 	}
 
+	cacheSkeletonUsage, _ = usage.(*dto.Usage)
 	var containAudioTokens = usage.(*dto.Usage).CompletionTokenDetails.AudioTokens > 0 || usage.(*dto.Usage).PromptTokensDetails.AudioTokens > 0
 	var containsAudioRatios = ratio_setting.ContainsAudioRatio(info.OriginModelName) || ratio_setting.ContainsAudioCompletionRatio(info.OriginModelName)
 

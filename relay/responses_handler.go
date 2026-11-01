@@ -2,9 +2,11 @@ package relay
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -50,11 +52,29 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	responsesSID, responsesSIDSource := responsesSessionID(responsesReq)
 	recordRequestSessionID(c, responsesSID, responsesSIDSource)
 
+	// The prompt-cache skeleton is recorded once the attempt ends, success or
+	// not. Compact requests are excluded: they rewrite history server-side.
+	var cacheSkeleton *model.CacheSkeleton
+	var cacheSkeletonUsage *dto.Usage
+	defer func() {
+		if cacheSkeleton != nil {
+			finishCacheSkeleton(c, info, cacheSkeleton, cacheSkeletonUsage, newAPIError)
+		}
+	}()
+
 	adaptor, requestBody, closer, apiErr := PrepareResponsesRequest(c, info, responsesReq)
 	if apiErr != nil {
 		return apiErr
 	}
 	defer closer.Close()
+	if info.RelayMode == relayconstant.RelayModeResponses && model.CacheSkeletonEnabled() {
+		if reader, err := requestBody.NewReader(); err == nil {
+			if raw, err := io.ReadAll(reader); err == nil {
+				cacheSkeleton = buildOpenAIResponsesCacheSkeleton(raw)
+			}
+			_ = reader.Close()
+		}
+	}
 
 	var httpResp *http.Response
 	resp, err := adaptor.DoRequest(c, info, requestBody)
@@ -83,6 +103,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 
 	usageDto := usage.(*dto.Usage)
+	cacheSkeletonUsage = usageDto
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		originModelName := info.OriginModelName
 		originPriceData := info.PriceData

@@ -80,6 +80,7 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 		filter.DownstreamRequestId = c.Query("downstream_request_id")
 		filter.CustomerId = c.Query("customer_id")
 		filter.CustomerName = c.Query("customer_name")
+		filter.NodeName = logFieldFilterFromQuery(c, "node_name")
 		filter.DownstreamTraceTag = c.Query("downstream_trace_tag")
 		filter.ErrorSignatureHash = c.Query("error_signature_hash")
 		// retry_triggered is a tri-state admin filter: absent = no filter; only
@@ -418,7 +419,8 @@ func GetLogsSelfStat(c *gin.Context) {
 // uint64 values do not survive a JavaScript number.
 type cacheSkeletonView struct {
 	*model.CacheSkeleton
-	BlkHash []string `json:"blk_hash"`
+	BlkHash      []string `json:"blk_hash"`
+	CacheKeyHash string   `json:"cache_key_hash"`
 }
 
 // GetCacheSkeleton returns the prompt-cache skeleton of every attempt of one
@@ -444,7 +446,11 @@ func GetCacheSkeleton(c *gin.Context) {
 		for i, h := range row.BlkHash {
 			hashes[i] = fmt.Sprintf("%016x", h)
 		}
-		items = append(items, cacheSkeletonView{CacheSkeleton: row, BlkHash: hashes})
+		view := cacheSkeletonView{CacheSkeleton: row, BlkHash: hashes}
+		if row.CacheKeyHash != 0 {
+			view.CacheKeyHash = fmt.Sprintf("%016x", row.CacheKeyHash)
+		}
+		items = append(items, view)
 	}
 	common.ApiSuccess(c, gin.H{"enabled": true, "items": items})
 }

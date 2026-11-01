@@ -365,6 +365,7 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.DELETE("/error-signature-aliases/:hash", middleware.AdminAuth(), controller.DeleteErrorSignatureAlias)
 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
 		logRoute.GET("/analysis", middleware.AdminAuth(), controller.GetLogsAnalysis)
+		logRoute.GET("/nodes", middleware.AdminAuth(), controller.GetLogNodes)
 		logRoute.GET("/sessions", middleware.AdminAuth(), controller.GetLogSessions)
 		logRoute.GET("/sessions/backfill", middleware.RootAuth(), controller.GetLogSessionsBackfillStatus)
 		logRoute.POST("/sessions/backfill", middleware.RootAuth(), controller.StartLogSessionsBackfill)

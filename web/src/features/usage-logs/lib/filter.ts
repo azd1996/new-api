@@ -98,6 +98,12 @@ export function buildSearchParams(
         ...(commonFilters.customerId && {
           customerId: commonFilters.customerId,
         }),
+        ...(commonFilters.node && { node: commonFilters.node }),
+        ...(commonFilters.nodeOp &&
+        commonFilters.nodeOp !== 'include' &&
+        commonFilters.node
+          ? { nodeOp: commonFilters.nodeOp }
+          : {}),
         ...(commonFilters.retryTriggered && {
           retryTriggered: commonFilters.retryTriggered,
         }),

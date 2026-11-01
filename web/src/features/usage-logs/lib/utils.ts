@@ -261,6 +261,14 @@ export function buildApiParams(config: {
     ...(isAdmin && searchParams.customerId
       ? { customer_id: String(searchParams.customerId) }
       : {}),
+    ...(isAdmin && searchParams.node
+      ? {
+          node_name: String(searchParams.node),
+          ...(searchParams.nodeOp === 'exclude'
+            ? { node_name_op: 'exclude' as const }
+            : {}),
+        }
+      : {}),
     ...(isAdmin &&
     (searchParams.retryTriggered === 'true' ||
       searchParams.retryTriggered === 'false')

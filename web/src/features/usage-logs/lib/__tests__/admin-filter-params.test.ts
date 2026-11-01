@@ -24,10 +24,12 @@ const adminSearch = {
   downstreamTraceTag: 'tag-1',
   customerName: 'acme',
   retryTriggered: 'true',
+  node: 'node-a,node-b',
+  nodeOp: 'exclude',
 }
 
 describe('usage log admin filter params', () => {
-  test('sends trace tag, customer name and retry flag for admin views', () => {
+  test('sends trace tag, customer name, node and retry flag for admin views', () => {
     const params = buildApiParams({
       page: 1,
       pageSize: 20,
@@ -39,6 +41,8 @@ describe('usage log admin filter params', () => {
       downstream_trace_tag: 'tag-1',
       customer_name: 'acme',
       retry_triggered: 'true',
+      node_name: 'node-a,node-b',
+      node_name_op: 'exclude',
     })
   })
 
@@ -53,6 +57,8 @@ describe('usage log admin filter params', () => {
     expect(params.downstream_trace_tag).toBeUndefined()
     expect(params.customer_name).toBeUndefined()
     expect(params.retry_triggered).toBeUndefined()
+    expect(params.node_name).toBeUndefined()
+    expect(params.node_name_op).toBeUndefined()
   })
 
   test('ignores a retry flag that is neither true nor false', () => {

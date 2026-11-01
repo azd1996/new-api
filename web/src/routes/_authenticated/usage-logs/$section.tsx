@@ -61,6 +61,8 @@ const usageLogsSearchSchema = z.object({
   downstreamTraceTag: z.string().optional().catch(''),
   customerName: z.string().optional().catch(''),
   customerId: z.string().optional().catch(''),
+  node: z.string().optional().catch(''),
+  nodeOp: z.enum(['include', 'exclude']).optional().catch('include'),
   retryTriggered: z.enum(['true', 'false']).optional().catch(undefined),
   statusCode: z.string().optional().catch(''),
   errorKeyword: z.string().optional().catch(''),

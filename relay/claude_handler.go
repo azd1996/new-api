@@ -96,7 +96,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	var cacheSkeletonUsage *dto.Usage
 	defer func() {
 		if cacheSkeleton != nil {
-			finishClaudeCacheSkeleton(c, info, cacheSkeleton, cacheSkeletonUsage, newAPIError)
+			finishCacheSkeleton(c, info, cacheSkeleton, cacheSkeletonUsage, newAPIError)
 		}
 	}()
 
@@ -305,13 +305,16 @@ func deriveClaudeSessionSeed(jsonData []byte, headerSessionID, clientIP, userAge
 }
 
 // claudeConversationSeed picks the conversation identity by priority: session
-// header, then ephemeral cache_control content, then a request-wide fallback.
+// header, then the first message (scoped to the API key), then a request-wide
+// fallback. Message cache_control breakpoints are not used: clients move them
+// onto the newest message every turn, which would split one conversation into
+// single-request sessions.
 func claudeConversationSeed(jsonData []byte, headerSessionID, clientIP, userAgent, apiKeyID string) string {
 	if s := strings.TrimSpace(headerSessionID); s != "" {
 		return s
 	}
-	if s := claudeCacheControlSeed(jsonData); strings.TrimSpace(s) != "" {
-		return s
+	if s := claudeFirstMessageSeed(jsonData); strings.TrimSpace(s) != "" {
+		return apiKeyID + "\x1f" + s
 	}
 	return claudeFallbackSessionSeed(clientIP, userAgent, apiKeyID)
 }
@@ -351,32 +354,29 @@ func claudeStableSystemPrefix(jsonData []byte) string {
 	return ""
 }
 
-// claudeCacheControlSeed concatenates the text of system/message blocks that
-// carry an ephemeral cache_control breakpoint — the stable cached prefix of a
-// conversation.
-func claudeCacheControlSeed(jsonData []byte) string {
+// claudeFirstMessageSeed returns the content of the first message, which stays
+// fixed for the whole conversation. cache_control is ignored so a breakpoint
+// moving on or off the first message does not change the seed.
+func claudeFirstMessageSeed(jsonData []byte) string {
+	content := gjson.GetBytes(jsonData, "messages.0.content")
+	if content.Type == gjson.String {
+		return content.String()
+	}
+	if !content.IsArray() {
+		return ""
+	}
 	var sb strings.Builder
-	collect := func(blocks gjson.Result) {
-		blocks.ForEach(func(_, block gjson.Result) bool {
-			if block.Get("cache_control.type").String() == "ephemeral" {
-				if t := block.Get("text"); t.Exists() {
-					sb.WriteString(t.String())
-				} else {
-					sb.WriteString(block.Raw)
-				}
-			}
-			return true
-		})
-	}
-	if sys := gjson.GetBytes(jsonData, "system"); sys.IsArray() {
-		collect(sys)
-	}
-	gjson.GetBytes(jsonData, "messages").ForEach(func(_, msg gjson.Result) bool {
-		if content := msg.Get("content"); content.IsArray() {
-			collect(content)
+	for _, block := range content.Array() {
+		if t := block.Get("text"); t.Exists() {
+			sb.WriteString(t.String())
+			continue
 		}
-		return true
-	})
+		raw, err := sjson.Delete(block.Raw, "cache_control")
+		if err != nil {
+			raw = block.Raw
+		}
+		sb.WriteString(raw)
+	}
 	return sb.String()
 }
 
