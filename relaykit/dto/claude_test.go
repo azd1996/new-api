@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"strings"
 	"testing"
 
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
@@ -50,4 +51,22 @@ func TestClaudeResponseMessageStringTolerated(t *testing.T) {
 		require.Len(t, resp.Content, 1)
 		assert.Equal(t, "stray", resp.Content[0].GetText())
 	})
+}
+
+// A mid-conversation system message carries clear_at ("next_user_message" or
+// "never"); dropping it on re-marshal turns a turn-scoped reminder into a
+// permanent one upstream.
+func TestClaudeRequestKeepsMessageClearAt(t *testing.T) {
+	var req ClaudeRequest
+	require.NoError(t, kitutil.UnmarshalJsonStr(`{"model":"m","messages":[
+		{"role":"user","content":"hi"},
+		{"role":"system","clear_at":"next_user_message","content":"<total_tokens>9 tokens left</total_tokens>"}
+	]}`, &req))
+
+	out, err := kitutil.Marshal(req)
+	require.NoError(t, err)
+	assert.Equal(t, "", req.Messages[0].ClearAt)
+	assert.Equal(t, "next_user_message", req.Messages[1].ClearAt)
+	assert.Contains(t, string(out), `"clear_at":"next_user_message"`)
+	assert.Equal(t, 1, strings.Count(string(out), "clear_at"), "messages without clear_at stay unchanged")
 }

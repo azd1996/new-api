@@ -66,6 +66,8 @@ type SystemBehaviorSectionProps = {
   defaultValues: BehaviorFormValues & {
     'extended_cache_ttl_setting.rules': GroupModelRule[]
     'metadata_injection_disable_setting.rules': GroupModelRule[]
+    'cache_breakpoint_fix_setting.rules': GroupModelRule[]
+    'prompt_cache_key_injection_setting.rules': GroupModelRule[]
     'client_disconnect_setting.rules': ClientDisconnectRule[]
     'debug_scope_setting.rules': DebugScopeRule[]
   }
@@ -96,6 +98,12 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
   const [metadataDisableRules, setMetadataDisableRules] = useState(
     props.defaultValues['metadata_injection_disable_setting.rules']
   )
+  const [breakpointFixRules, setBreakpointFixRules] = useState(
+    props.defaultValues['cache_breakpoint_fix_setting.rules']
+  )
+  const [promptCacheKeyRules, setPromptCacheKeyRules] = useState(
+    props.defaultValues['prompt_cache_key_injection_setting.rules']
+  )
   const [clientDisconnectRules, setClientDisconnectRules] = useState(
     props.defaultValues['client_disconnect_setting.rules']
   )
@@ -104,9 +112,17 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
   )
 
   useEffect(() => {
-    setExtendedCacheRules(props.defaultValues['extended_cache_ttl_setting.rules'])
+    setExtendedCacheRules(
+      props.defaultValues['extended_cache_ttl_setting.rules']
+    )
     setMetadataDisableRules(
       props.defaultValues['metadata_injection_disable_setting.rules']
+    )
+    setBreakpointFixRules(
+      props.defaultValues['cache_breakpoint_fix_setting.rules']
+    )
+    setPromptCacheKeyRules(
+      props.defaultValues['prompt_cache_key_injection_setting.rules']
     )
     setClientDisconnectRules(
       props.defaultValues['client_disconnect_setting.rules']
@@ -149,6 +165,30 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
       updates.push({
         key: 'metadata_injection_disable_setting.rules',
         value: metadataSerialized,
+      })
+    }
+
+    const breakpointFixSerialized = JSON.stringify(breakpointFixRules)
+    if (
+      breakpointFixSerialized !==
+      JSON.stringify(props.defaultValues['cache_breakpoint_fix_setting.rules'])
+    ) {
+      updates.push({
+        key: 'cache_breakpoint_fix_setting.rules',
+        value: breakpointFixSerialized,
+      })
+    }
+
+    const promptCacheKeySerialized = JSON.stringify(promptCacheKeyRules)
+    if (
+      promptCacheKeySerialized !==
+      JSON.stringify(
+        props.defaultValues['prompt_cache_key_injection_setting.rules']
+      )
+    ) {
+      updates.push({
+        key: 'prompt_cache_key_injection_setting.rules',
+        value: promptCacheKeySerialized,
       })
     }
 
@@ -343,6 +383,24 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
               )}
               value={metadataDisableRules}
               onChange={setMetadataDisableRules}
+            />
+
+            <GroupModelRulesField
+              label={t('Fix Misplaced Cache Breakpoints')}
+              description={t(
+                'For the listed group and model combinations (Claude), move a prompt-cache breakpoint placed on a volatile trailing reminder (such as <total_tokens>) onto the last stable block before it. Leave empty to disable.'
+              )}
+              value={breakpointFixRules}
+              onChange={setBreakpointFixRules}
+            />
+
+            <GroupModelRulesField
+              label={t('Inject prompt_cache_key')}
+              description={t(
+                'For the listed group and model combinations (OpenAI), give requests without a prompt_cache_key one derived from the conversation, so its turns reach the cached prefix. Leave empty to disable.'
+              )}
+              value={promptCacheKeyRules}
+              onChange={setPromptCacheKeyRules}
             />
           </SettingsForm>
         </Form>

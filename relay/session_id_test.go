@@ -79,3 +79,32 @@ func TestRecordRequestSessionID(t *testing.T) {
 		})
 	}
 }
+
+func TestDeriveOpenAIPromptCacheKey(t *testing.T) {
+	turn1 := &dto.OpenAIResponsesRequest{
+		Instructions: json.RawMessage(`"You are Codex"`),
+		Input:        json.RawMessage(`[{"role":"user","content":"fix it"}]`),
+	}
+	turn2 := &dto.OpenAIResponsesRequest{
+		Instructions: json.RawMessage(`"You are Codex"`),
+		Input:        json.RawMessage(`[{"role":"user","content":"fix it"},{"type":"function_call","name":"shell"}]`),
+	}
+	other := &dto.OpenAIResponsesRequest{
+		Instructions: json.RawMessage(`"You are Codex"`),
+		Input:        json.RawMessage(`[{"role":"user","content":"write docs"}]`),
+	}
+	key1 := deriveOpenAIPromptCacheKey("gpt-5.5", "sk-a", responsesPromptCacheAnchor(turn1))
+	assert.Equal(t, key1, deriveOpenAIPromptCacheKey("gpt-5.5", "sk-a", responsesPromptCacheAnchor(turn2)), "later turns keep the key")
+	assert.Regexp(t, `^gw-[0-9a-f]{16}$`, key1)
+	assert.NotEqual(t, key1, deriveOpenAIPromptCacheKey("gpt-5.5", "sk-a", responsesPromptCacheAnchor(other)), "another conversation gets another key")
+	assert.NotEqual(t, key1, deriveOpenAIPromptCacheKey("gpt-5.5", "sk-b", responsesPromptCacheAnchor(turn1)), "keys are scoped to the API key")
+
+	withSession := &dto.OpenAIResponsesRequest{ClientMetadata: json.RawMessage(`{"session_id":"s-1"}`), Input: json.RawMessage(`"x"`)}
+	assert.Equal(t, "s-1", responsesPromptCacheAnchor(withSession), "the client's session id anchors the key")
+	assert.Empty(t, deriveOpenAIPromptCacheKey("gpt-5.5", "sk-a", responsesPromptCacheAnchor(&dto.OpenAIResponsesRequest{})))
+
+	chat1 := &dto.GeneralOpenAIRequest{Messages: []dto.Message{{Role: "system", Content: "S"}, {Role: "user", Content: "q"}}}
+	chat2 := &dto.GeneralOpenAIRequest{Messages: []dto.Message{{Role: "system", Content: "S"}, {Role: "user", Content: "q"}, {Role: "assistant", Content: "a"}}}
+	assert.Equal(t, chatPromptCacheAnchor(chat1), chatPromptCacheAnchor(chat2))
+	assert.Empty(t, chatPromptCacheAnchor(&dto.GeneralOpenAIRequest{}))
+}

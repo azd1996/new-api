@@ -153,7 +153,7 @@ func TestRetryOverrideLogIsAdminOnly(t *testing.T) {
 }
 
 // TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag pins the admin filters
-// on customer_name (its dedicated indexed column, mirroring customer_id) and
+// on customer_name (matched against its dedicated indexed column) and
 // downstream_trace_tag (which still lives only in the Other JSON).
 func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -182,6 +182,44 @@ func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	assert.Equal(t, []int{2}, findIDs(LogFilter{NodeName: LogFieldFilter{Values: []string{"node-b"}}}))
 	assert.Equal(t, []int{1}, findIDs(LogFilter{NodeName: LogFieldFilter{Values: []string{"node-b"}, Exclude: true}}))
 	assert.Empty(t, findIDs(LogFilter{NodeName: LogFieldFilter{Values: []string{"node-c"}}}))
+}
+
+// TestLogFilterCustomerFallsBackToOtherJSON pins that the customer_id /
+// customer_name filters also match rows whose decoded customer lives only in
+// the Other JSON blob (rows written before the dedicated columns were added),
+// and that the __none__ sentinel selects rows with no decoded customer.
+func TestLogFilterCustomerFallsBackToOtherJSON(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	oldType := common.LogDatabaseType()
+	t.Cleanup(func() { common.SetLogDatabaseType(oldType) })
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+
+	require.NoError(t, db.Create([]Log{
+		// New row: value in both the indexed column and Other.
+		{Id: 1, CustomerId: "cust-new", CustomerName: "NewCo", Other: `{"admin_info":{"customer_id":"cust-new","customer_name":"NewCo"}}`},
+		// Legacy row: value only in Other, columns empty (pre-column rows).
+		{Id: 2, Other: `{"admin_info":{"customer_id":"cust-legacy","customer_name":"LegacyCo"}}`},
+		// No decoded customer at all.
+		{Id: 3, Other: `{"admin_info":{}}`},
+	}).Error)
+
+	findIDs := func(filter LogFilter) []int {
+		query, applyErr := filter.apply(db.Model(&Log{}))
+		require.NoError(t, applyErr)
+		var ids []int
+		require.NoError(t, query.Order("id").Pluck("id", &ids).Error)
+		return ids
+	}
+
+	assert.Equal(t, []int{1}, findIDs(LogFilter{CustomerId: "cust-new"}))
+	assert.Equal(t, []int{1}, findIDs(LogFilter{CustomerName: "NewCo"}))
+	// Legacy rows (column empty) are found via the Other JSON fallback.
+	assert.Equal(t, []int{2}, findIDs(LogFilter{CustomerId: "cust-legacy"}))
+	assert.Equal(t, []int{2}, findIDs(LogFilter{CustomerName: "LegacyCo"}))
+	// __none__ selects rows with no decoded customer.
+	assert.Equal(t, []int{3}, findIDs(LogFilter{CustomerId: customerNoneFilter}))
 }
 
 func TestSuccessCountsRetainCustomerAndTraceFilters(t *testing.T) {

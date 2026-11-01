@@ -34,6 +34,8 @@ const defaultOperationsSettings: OperationsSettings = {
   DebugEnabled: false,
   'extended_cache_ttl_setting.rules': [],
   'metadata_injection_disable_setting.rules': [],
+  'cache_breakpoint_fix_setting.rules': [],
+  'prompt_cache_key_injection_setting.rules': [],
   'client_disconnect_setting.rules': [],
   'debug_scope_setting.rules': [],
   QuotaRemindEnabled: true,

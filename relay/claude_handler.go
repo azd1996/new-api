@@ -163,6 +163,26 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
+		// For configured (group, model) rules, move a breakpoint that sits on a
+		// volatile trailing reminder onto the last stable block before it. Runs
+		// before the forced TTL so a new breakpoint is raised to 1h as well.
+		cacheBreakpointFix := ""
+		if operation_setting.ShouldFixCacheBreakpoints(claudeGroup, claudeModel) {
+			jsonData, cacheBreakpointFix, err = fixClaudeCacheBreakpoints(jsonData)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+		}
+		// clear_at messages need their beta header and no cache_control on a
+		// turn-scoped message; upstream rejects the request otherwise.
+		jsonData, hasClearAt, err := prepareClaudeTurnScopedMessages(jsonData)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		if hasClearAt {
+			c.Request.Header.Set("anthropic-beta", mergeAnthropicBeta(c.Request.Header.Get("anthropic-beta"), claudeClearAtBeta))
+		}
+
 		// For configured (group, model) rules, force the 1-hour prompt-cache TTL:
 		// rewrite every existing cache_control breakpoint to ttl=1h and append the
 		// extended cache TTL beta header. Only list models that support 1h, else
@@ -195,6 +215,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		recordRequestSessionID(c, claudeSID, claudeSource)
 		if model.CacheSkeletonEnabled() {
 			cacheSkeleton = buildClaudeCacheSkeleton(jsonData)
+			cacheSkeleton.Fixed = cacheBreakpointFix
 		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)

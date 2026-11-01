@@ -52,11 +52,15 @@ type GroupModelRuleSetting struct {
 var (
 	extendedCacheTTLSetting         = GroupModelRuleSetting{} // opt-in: force 1h prompt-cache TTL
 	metadataInjectionDisableSetting = GroupModelRuleSetting{} // opt-out: disable metadata.user_id injection
+	cacheBreakpointFixSetting       = GroupModelRuleSetting{} // opt-in: move Claude breakpoints off volatile tails
+	promptCacheKeyInjectionSetting  = GroupModelRuleSetting{} // opt-in: fill a stable OpenAI prompt_cache_key
 )
 
 func init() {
 	config.GlobalConfig.Register("extended_cache_ttl_setting", &extendedCacheTTLSetting)
 	config.GlobalConfig.Register("metadata_injection_disable_setting", &metadataInjectionDisableSetting)
+	config.GlobalConfig.Register("cache_breakpoint_fix_setting", &cacheBreakpointFixSetting)
+	config.GlobalConfig.Register("prompt_cache_key_injection_setting", &promptCacheKeyInjectionSetting)
 }
 
 func GetExtendedCacheTTLSetting() *GroupModelRuleSetting { return &extendedCacheTTLSetting }
@@ -68,4 +72,16 @@ func GetMetadataInjectionDisableSetting() *GroupModelRuleSetting {
 // to force the 1-hour prompt-cache TTL.
 func ShouldForceExtendedCacheTTL(group, model string) bool {
 	return MatchGroupModel(extendedCacheTTLSetting.Rules, group, model)
+}
+
+// ShouldFixCacheBreakpoints reports whether Claude requests of the given
+// group+model get their misplaced cache breakpoints adjusted.
+func ShouldFixCacheBreakpoints(group, model string) bool {
+	return MatchGroupModel(cacheBreakpointFixSetting.Rules, group, model)
+}
+
+// ShouldInjectPromptCacheKey reports whether OpenAI requests of the given
+// group+model without a prompt_cache_key get a gateway-derived one.
+func ShouldInjectPromptCacheKey(group, model string) bool {
+	return MatchGroupModel(promptCacheKeyInjectionSetting.Rules, group, model)
 }

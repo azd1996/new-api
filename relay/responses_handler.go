@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -50,6 +52,21 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 	// Capture the request session_id (prompt_cache_key, else client_metadata.session_id).
 	responsesSID, responsesSIDSource := responsesSessionID(responsesReq)
+
+	// For configured (group, model) rules, a request without prompt_cache_key
+	// gets one derived from its conversation, keeping its turns on the
+	// upstream machine that holds the cached prefix. The request is copied so
+	// the client's parsed request stays as received.
+	if len(responsesReq.PromptCacheKey) == 0 && shouldInjectPromptCacheKey(c, info.OriginModelName) {
+		if key := deriveOpenAIPromptCacheKey(info.OriginModelName, common.GetContextKeyString(c, constant.ContextKeyTokenKey), responsesPromptCacheAnchor(responsesReq)); key != "" {
+			injected := *responsesReq
+			injected.PromptCacheKey, _ = common.Marshal(key)
+			responsesReq = &injected
+			if responsesSID == "" {
+				responsesSID, responsesSIDSource = key, gatewayPromptCacheKeySource
+			}
+		}
+	}
 	recordRequestSessionID(c, responsesSID, responsesSIDSource)
 
 	// The prompt-cache skeleton is recorded once the attempt ends, success or

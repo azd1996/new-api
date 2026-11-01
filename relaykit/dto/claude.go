@@ -168,6 +168,10 @@ type ClaudeMessage struct {
 	// OutputConfig carries per-message effort (beta): an effort-only system
 	// message has empty content and the new level in output_config.effort.
 	OutputConfig json.RawMessage `json:"output_config,omitempty"`
+	// ClearAt scopes a mid-conversation system message ("next_user_message"
+	// or "never", beta mid-conversation-system-clear-at-2026-08-21). Dropping
+	// it would turn a turn-scoped reminder into a permanent one upstream.
+	ClearAt string `json:"clear_at,omitempty"`
 }
 
 func (c *ClaudeMessage) IsStringContent() bool {

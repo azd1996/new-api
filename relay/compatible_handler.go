@@ -36,8 +36,16 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		return types.NewError(fmt.Errorf("failed to copy request to GeneralOpenAIRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
+	// For configured (group, model) rules, a request without prompt_cache_key
+	// gets one derived from its conversation, keeping its turns on the
+	// upstream machine that holds the cached prefix.
+	sessionSource := "prompt_cache_key"
+	if request.PromptCacheKey == "" && shouldInjectPromptCacheKey(c, info.OriginModelName) {
+		request.PromptCacheKey = deriveOpenAIPromptCacheKey(info.OriginModelName, common.GetContextKeyString(c, constant.ContextKeyTokenKey), chatPromptCacheAnchor(request))
+		sessionSource = gatewayPromptCacheKeySource
+	}
 	// Capture the request session_id (prompt_cache_key) for the consume/error log.
-	recordRequestSessionID(c, request.PromptCacheKey, "prompt_cache_key")
+	recordRequestSessionID(c, request.PromptCacheKey, sessionSource)
 
 	// The prompt-cache skeleton of a direct Chat Completions call is recorded
 	// once the attempt ends, success or not. Calls converted to Responses

@@ -418,6 +418,8 @@ export type OperationsSettings = {
   DebugEnabled: boolean
   'extended_cache_ttl_setting.rules': GroupModelRule[]
   'metadata_injection_disable_setting.rules': GroupModelRule[]
+  'cache_breakpoint_fix_setting.rules': GroupModelRule[]
+  'prompt_cache_key_injection_setting.rules': GroupModelRule[]
   'client_disconnect_setting.rules': ClientDisconnectRule[]
   'debug_scope_setting.rules': DebugScopeRule[]
   QuotaRemindEnabled: boolean

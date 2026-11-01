@@ -849,10 +849,10 @@ type LogFilter struct {
 	SessionId           string
 	DownstreamRequestId string
 	CustomerId          string
-	// CustomerName matches the admin-only customer-name snapshot on its indexed
-	// column (exact equality, mirroring CustomerId). DownstreamTraceTag still
-	// matches the trace-tag string recorded in Other (unindexed; pair with a
-	// time range).
+	// CustomerName / CustomerId match either the dedicated indexed column or the
+	// customer snapshot in the Other JSON, so rows written before those columns
+	// existed (value only in Other) stay searchable. DownstreamTraceTag matches
+	// the trace-tag string recorded in Other (unindexed; pair with a time range).
 	CustomerName       string
 	DownstreamTraceTag string
 	// NodeName matches the serving cluster node on its indexed column, with the
@@ -900,11 +900,22 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	if f.DownstreamRequestId != "" {
 		tx = tx.Where("logs.downstream_request_id = ?", f.DownstreamRequestId)
 	}
-	if f.CustomerId != "" {
-		tx = tx.Where("logs.customer_id = ?", f.CustomerId)
-	}
-	if f.CustomerName != "" {
-		tx = tx.Where("logs.customer_name = ?", f.CustomerName)
+	// customer_id / customer_name live in dedicated indexed columns for rows
+	// written since those columns were added, but older rows carry the decoded
+	// values only in the Other JSON blob. Match either so historical logs stay
+	// searchable; the __none__ sentinel selects rows with no decoded customer.
+	if f.CustomerId == customerNoneFilter || f.CustomerName == customerNoneFilter {
+		cond, pat := otherFieldAbsentCondition("logs.other", "customer_id")
+		tx = tx.Where(cond, pat)
+	} else {
+		if f.CustomerId != "" {
+			cond, pat := otherFieldLikeCondition("logs.other", "customer_id", f.CustomerId)
+			tx = tx.Where("(logs.customer_id = ? OR "+cond+")", f.CustomerId, pat)
+		}
+		if f.CustomerName != "" {
+			cond, pat := otherFieldLikeCondition("logs.other", "customer_name", f.CustomerName)
+			tx = tx.Where("(logs.customer_name = ? OR "+cond+")", f.CustomerName, pat)
+		}
 	}
 	if tx, err = applyLogFieldFilter(tx, "logs.node_name", f.NodeName, false); err != nil {
 		return nil, err
