@@ -36,6 +36,7 @@ export {
   processChartData,
   processUserChartData,
   processCustomerChartData,
+  processChannelChartData,
 } from './charts'
 export {
   buildDashboardFlowData,

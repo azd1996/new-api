@@ -51,11 +51,17 @@ const DASHBOARD_SECTIONS = [
     adminOnly: true,
     build: () => null,
   },
+  {
+    id: 'channels',
+    titleKey: 'Channel Analytics',
+    adminOnly: true,
+    build: () => null,
+  },
 ] as const
 
 export type DashboardSectionId = (typeof DASHBOARD_SECTIONS)[number]['id']
 
-const ADMIN_ONLY_SECTIONS = new Set<string>(['users', 'customers'])
+const ADMIN_ONLY_SECTIONS = new Set<string>(['users', 'customers', 'channels'])
 
 const dashboardRegistry = createSectionRegistry<
   DashboardSectionId,

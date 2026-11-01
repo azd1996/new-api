@@ -52,6 +52,7 @@ import {
   DASHBOARD_SECTION_IDS,
 } from './section-registry'
 import type {
+  ChannelChartsFilters,
   CustomerChartsFilters,
   DashboardChartPreferences,
   DashboardFilters,
@@ -125,6 +126,12 @@ const LazyFlowCharts = lazy(() =>
 const LazyCustomerCharts = lazy(() =>
   import('./components/customers/customer-charts').then((m) => ({
     default: m.CustomerCharts,
+  }))
+)
+
+const LazyChannelCharts = lazy(() =>
+  import('./components/channels/channel-charts').then((m) => ({
+    default: m.ChannelCharts,
   }))
 )
 
@@ -210,6 +217,9 @@ const SECTION_META: Record<DashboardSectionId, { titleKey: string }> = {
   customers: {
     titleKey: 'Customer Analytics',
   },
+  channels: {
+    titleKey: 'Channel Analytics',
+  },
 }
 
 export function Dashboard() {
@@ -248,6 +258,16 @@ export function Dashboard() {
         amountMetric: 'customer_stat_quota',
       }
     })
+  const [channelChartsFilters, setChannelChartsFilters] =
+    useState<ChannelChartsFilters>(() => {
+      const granularity = getSavedGranularity()
+      return {
+        timeGranularity: granularity,
+        selectedRange: getDefaultDays(granularity),
+        topChannelLimit: 10,
+        amountMetric: 'channel_stat_quota',
+      }
+    })
   const [flowSensitiveVisible, setFlowSensitiveVisible] = useState(true)
 
   const handleFilterChange = useCallback((filters: DashboardFilters) => {
@@ -283,7 +303,8 @@ export function Dashboard() {
         (section) =>
           section !== 'overview' &&
           (section !== 'users' || isAdmin) &&
-          (section !== 'customers' || isAdmin)
+          (section !== 'customers' || isAdmin) &&
+          (section !== 'channels' || isAdmin)
       ),
     [isAdmin]
   )
@@ -463,6 +484,16 @@ export function Dashboard() {
                 <LazyCustomerCharts
                   filters={customerChartsFilters}
                   onFiltersChange={setCustomerChartsFilters}
+                />
+              </Suspense>
+            </FadeIn>
+          )}
+          {activeSection === 'channels' && (
+            <FadeIn>
+              <Suspense fallback={<ModelChartsFallback />}>
+                <LazyChannelCharts
+                  filters={channelChartsFilters}
+                  onFiltersChange={setChannelChartsFilters}
                 />
               </Suspense>
             </FadeIn>

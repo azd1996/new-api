@@ -46,9 +46,9 @@ import { useMediaQuery } from '@/hooks'
 import { getUserGroups } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
+import { getLogNodes } from '../api'
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { buildSearchParams } from '../lib/filter'
-import { getLogNodes } from '../api'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters, LogFilterOperator } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
@@ -58,6 +58,7 @@ import { LogAnalysisDialog } from './log-analysis-dialog'
 import {
   LogsFilterField,
   LogsFilterInput,
+  LogsFilterRow,
   LogsFilterToolbar,
 } from './logs-filter-toolbar'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
@@ -652,40 +653,16 @@ export function CommonLogsFilterBar<TData>(
   )
   const advancedFilters = (
     <>
-      <LogsFilterField>
-        <div className='flex min-w-0 gap-1'>
-          <MultiSelect
-            options={[]}
-            selected={getFilterValues(filters.token)}
-            onChange={(values) =>
-              handleChange('token', serializeFilterValues(values))
-            }
-            placeholder={t('Token Name')}
-            allowCreate
-            renderSelectedSummary={
-              sensitiveVisible
-                ? undefined
-                : (values) => '•'.repeat(Math.min(values.length * 4, 12))
-            }
-            className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
-          />
-          <LogFilterModeButton
-            fieldLabel={t('Token Name')}
-            operator={filters.tokenOp}
-            onChange={(value) => handleChange('tokenOp', value)}
-          />
-        </div>
-      </LogsFilterField>
-      {isAdmin && (
+      <LogsFilterRow>
         <LogsFilterField>
           <div className='flex min-w-0 gap-1'>
             <MultiSelect
               options={[]}
-              selected={getFilterValues(filters.username)}
+              selected={getFilterValues(filters.token)}
               onChange={(values) =>
-                handleChange('username', serializeFilterValues(values))
+                handleChange('token', serializeFilterValues(values))
               }
-              placeholder={t('Username')}
+              placeholder={t('Token Name')}
               allowCreate
               renderSelectedSummary={
                 sensitiveVisible
@@ -695,180 +672,206 @@ export function CommonLogsFilterBar<TData>(
               className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
             />
             <LogFilterModeButton
-              fieldLabel={t('Username')}
-              operator={filters.usernameOp}
-              onChange={(value) => handleChange('usernameOp', value)}
+              fieldLabel={t('Token Name')}
+              operator={filters.tokenOp}
+              onChange={(value) => handleChange('tokenOp', value)}
             />
           </div>
         </LogsFilterField>
-      )}
-      {isAdmin && (
-        <LogsFilterField>
-          <div className='flex min-w-0 gap-1'>
-            <MultiSelect
-              options={[]}
-              selected={getFilterValues(filters.channel)}
-              onChange={(values) =>
-                handleChange('channel', serializeFilterValues(values))
-              }
-              placeholder={t('Channel ID')}
-              allowCreate
-              className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
-            />
-            <LogFilterModeButton
-              fieldLabel={t('Channel ID')}
-              operator={filters.channelOp}
-              onChange={(value) => handleChange('channelOp', value)}
-            />
-          </div>
-        </LogsFilterField>
-      )}
-      <LogsFilterField>
-        <LogsFilterInput
-          placeholder={t('Request ID')}
-          value={filters.requestId || ''}
-          onChange={(e) => handleChange('requestId', e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-      </LogsFilterField>
-      <LogsFilterField>
-        <LogsFilterInput
-          placeholder={t('Upstream Request ID')}
-          value={filters.upstreamRequestId || ''}
-          onChange={(e) => handleChange('upstreamRequestId', e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-      </LogsFilterField>
-      <LogsFilterField>
-        <LogsFilterInput
-          placeholder={t('Session ID')}
-          value={filters.sessionId || ''}
-          onChange={(e) => handleChange('sessionId', e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-      </LogsFilterField>
-      {isAdmin && (
+        {isAdmin && (
+          <LogsFilterField>
+            <div className='flex min-w-0 gap-1'>
+              <MultiSelect
+                options={[]}
+                selected={getFilterValues(filters.username)}
+                onChange={(values) =>
+                  handleChange('username', serializeFilterValues(values))
+                }
+                placeholder={t('Username')}
+                allowCreate
+                renderSelectedSummary={
+                  sensitiveVisible
+                    ? undefined
+                    : (values) => '•'.repeat(Math.min(values.length * 4, 12))
+                }
+                className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
+              />
+              <LogFilterModeButton
+                fieldLabel={t('Username')}
+                operator={filters.usernameOp}
+                onChange={(value) => handleChange('usernameOp', value)}
+              />
+            </div>
+          </LogsFilterField>
+        )}
+        {isAdmin && (
+          <LogsFilterField>
+            <div className='flex min-w-0 gap-1'>
+              <MultiSelect
+                options={[]}
+                selected={getFilterValues(filters.channel)}
+                onChange={(values) =>
+                  handleChange('channel', serializeFilterValues(values))
+                }
+                placeholder={t('Channel ID')}
+                allowCreate
+                className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
+              />
+              <LogFilterModeButton
+                fieldLabel={t('Channel ID')}
+                operator={filters.channelOp}
+                onChange={(value) => handleChange('channelOp', value)}
+              />
+            </div>
+          </LogsFilterField>
+        )}
         <LogsFilterField>
           <LogsFilterInput
-            placeholder={t('Downstream Request ID')}
-            value={filters.downstreamRequestId || ''}
-            onChange={(e) =>
-              handleChange('downstreamRequestId', e.target.value)
-            }
+            placeholder={t('Request ID')}
+            value={filters.requestId || ''}
+            onChange={(e) => handleChange('requestId', e.target.value)}
             onKeyDown={handleKeyDown}
           />
         </LogsFilterField>
-      )}
-      {isAdmin && (
         <LogsFilterField>
           <LogsFilterInput
-            placeholder={t('Downstream Trace Tag')}
-            value={filters.downstreamTraceTag || ''}
-            onChange={(e) => handleChange('downstreamTraceTag', e.target.value)}
+            placeholder={t('Upstream Request ID')}
+            value={filters.upstreamRequestId || ''}
+            onChange={(e) => handleChange('upstreamRequestId', e.target.value)}
             onKeyDown={handleKeyDown}
           />
         </LogsFilterField>
-      )}
-      {isAdmin && (
-        <LogsFilterField>
-          <CustomerFilterCombobox
-            field='name'
-            value={filters.customerName || ''}
-            onValueChange={(value) =>
-              handleChange('customerName', value || undefined)
-            }
-            enabled={isAdmin}
-            className='h-8 min-w-0 text-sm leading-5'
-          />
-        </LogsFilterField>
-      )}
-      {isAdmin && (
-        <LogsFilterField>
-          <CustomerFilterCombobox
-            field='id'
-            value={filters.customerId || ''}
-            onValueChange={(value) =>
-              handleChange('customerId', value || undefined)
-            }
-            enabled={isAdmin}
-            className='h-8 min-w-0 text-sm leading-5'
-          />
-        </LogsFilterField>
-      )}
-      {isAdmin && (
-        <LogsFilterField>
-          <div className='flex min-w-0 gap-1'>
-            <MultiSelect
-              options={nodeOptions}
-              selected={getFilterValues(filters.node)}
-              onChange={(values) =>
-                handleChange('node', serializeFilterValues(values))
-              }
-              placeholder={t('Node Name')}
-              emptyText={t('No option found.')}
-              allowCreate
-              className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
-            />
-            <LogFilterModeButton
-              fieldLabel={t('Node Name')}
-              operator={filters.nodeOp}
-              onChange={(value) => handleChange('nodeOp', value)}
-            />
-          </div>
-        </LogsFilterField>
-      )}
-      {isAdmin && (
-        <LogsFilterField>
-          <Select
-            items={retryTriggeredItems}
-            value={filters.retryTriggered ?? RETRY_TRIGGERED_ALL}
-            onValueChange={(value) =>
-              handleChange(
-                'retryTriggered',
-                value === 'true' || value === 'false' ? value : undefined
-              )
-            }
-          >
-            <SelectTrigger aria-label={t('Retry triggered')}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}>
-              <SelectGroup>
-                {retryTriggeredItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </LogsFilterField>
-      )}
-      <LogsFilterField>
-        <LogsFilterInput
-          type='number'
-          placeholder={t('Status Code')}
-          value={filters.statusCode || ''}
-          onChange={(e) => handleChange('statusCode', e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-      </LogsFilterField>
-      <LogsFilterField>
-        <LogsFilterInput
-          placeholder={t('Error Keyword')}
-          value={filters.errorKeyword || ''}
-          onChange={(e) => handleChange('errorKeyword', e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-      </LogsFilterField>
-      {isAdmin && filters.errorSignatureHash && (
         <LogsFilterField>
           <LogsFilterInput
-            readOnly
-            placeholder={t('Error Signature')}
-            value={filters.errorSignature || filters.errorSignatureHash}
+            placeholder={t('Session ID')}
+            value={filters.sessionId || ''}
+            onChange={(e) => handleChange('sessionId', e.target.value)}
+            onKeyDown={handleKeyDown}
           />
         </LogsFilterField>
+      </LogsFilterRow>
+      <LogsFilterRow>
+        {isAdmin && (
+          <LogsFilterField wide>
+            <div className='flex min-w-0 gap-1'>
+              <MultiSelect
+                options={nodeOptions}
+                selected={getFilterValues(filters.node)}
+                onChange={(values) =>
+                  handleChange('node', serializeFilterValues(values))
+                }
+                placeholder={t('Node Name')}
+                emptyText={t('No option found.')}
+                allowCreate
+                className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
+              />
+              <LogFilterModeButton
+                fieldLabel={t('Node Name')}
+                operator={filters.nodeOp}
+                onChange={(value) => handleChange('nodeOp', value)}
+              />
+            </div>
+          </LogsFilterField>
+        )}
+        {isAdmin && (
+          <LogsFilterField>
+            <Select
+              items={retryTriggeredItems}
+              value={filters.retryTriggered ?? RETRY_TRIGGERED_ALL}
+              onValueChange={(value) =>
+                handleChange(
+                  'retryTriggered',
+                  value === 'true' || value === 'false' ? value : undefined
+                )
+              }
+            >
+              <SelectTrigger aria-label={t('Retry triggered')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {retryTriggeredItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </LogsFilterField>
+        )}
+        <LogsFilterField>
+          <LogsFilterInput
+            type='number'
+            placeholder={t('Status Code')}
+            value={filters.statusCode || ''}
+            onChange={(e) => handleChange('statusCode', e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </LogsFilterField>
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Error Keyword')}
+            value={filters.errorKeyword || ''}
+            onChange={(e) => handleChange('errorKeyword', e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </LogsFilterField>
+        {isAdmin && filters.errorSignatureHash && (
+          <LogsFilterField>
+            <LogsFilterInput
+              readOnly
+              placeholder={t('Error Signature')}
+              value={filters.errorSignature || filters.errorSignatureHash}
+            />
+          </LogsFilterField>
+        )}
+      </LogsFilterRow>
+      {isAdmin && (
+        <LogsFilterRow>
+          <LogsFilterField>
+            <CustomerFilterCombobox
+              field='name'
+              value={filters.customerName || ''}
+              onValueChange={(value) =>
+                handleChange('customerName', value || undefined)
+              }
+              enabled={isAdmin}
+              className='h-8 min-w-0 text-sm leading-5'
+            />
+          </LogsFilterField>
+          <LogsFilterField>
+            <CustomerFilterCombobox
+              field='id'
+              value={filters.customerId || ''}
+              onValueChange={(value) =>
+                handleChange('customerId', value || undefined)
+              }
+              enabled={isAdmin}
+              className='h-8 min-w-0 text-sm leading-5'
+            />
+          </LogsFilterField>
+          <LogsFilterField>
+            <LogsFilterInput
+              placeholder={t('Downstream Request ID')}
+              value={filters.downstreamRequestId || ''}
+              onChange={(e) =>
+                handleChange('downstreamRequestId', e.target.value)
+              }
+              onKeyDown={handleKeyDown}
+            />
+          </LogsFilterField>
+          <LogsFilterField>
+            <LogsFilterInput
+              placeholder={t('Downstream Trace Tag')}
+              value={filters.downstreamTraceTag || ''}
+              onChange={(e) =>
+                handleChange('downstreamTraceTag', e.target.value)
+              }
+              onKeyDown={handleKeyDown}
+            />
+          </LogsFilterField>
+        </LogsFilterRow>
       )}
     </>
   )

@@ -21,11 +21,14 @@ import { dataScheme as vchartDefaultDataScheme } from '@visactor/vchart/esm/them
 import { MAX_CHART_TREND_POINTS } from '@/features/dashboard/constants'
 import type {
   ConsumptionAmountCaliber,
+  ChannelAmountMetric,
+  ChannelQuotaDataItem,
   CustomerAmountMetric,
   CustomerGroupBy,
   CustomerQuotaDataItem,
   QuotaDataItem,
   ProcessedChartData,
+  ProcessedChannelChartData,
   ProcessedCustomerChartData,
   ProcessedUserChartData,
 } from '@/features/dashboard/types'
@@ -1159,5 +1162,69 @@ export function processCustomerChartData(
   return {
     spec_customer_rank: result.spec_user_rank,
     spec_customer_trend: result.spec_user_trend,
+  }
+}
+
+// processChannelChartData builds the channel-statistics rank/trend specs. It
+// reuses the user-chart renderer: each channel row is flattened to a labelled
+// amount keyed by channel name. The three calibers are the channel cost
+// (channel_stat_quota), the customer-charged amount (customer_stat_quota) and
+// the margin between them (customer_stat_quota - channel_stat_quota).
+export function processChannelChartData(
+  data: ChannelQuotaDataItem[],
+  timeGranularity: TimeGranularity = 'day',
+  t?: TFunction,
+  limit = 10,
+  amountMetric: ChannelAmountMetric = 'channel_stat_quota'
+): ProcessedChannelChartData {
+  const getChannelAmount = (item: ChannelQuotaDataItem) => {
+    const channelAmount = Number(item.channel_stat_quota) || 0
+    const customerAmount = Number(item.customer_stat_quota) || 0
+    if (amountMetric === 'customer_stat_quota') return customerAmount
+    if (amountMetric === 'profit_quota') return customerAmount - channelAmount
+    return channelAmount
+  }
+
+  const mapped: QuotaDataItem[] = (data ?? []).map((item) => ({
+    username: item.channel_name,
+    created_at: item.created_at,
+    quota: getChannelAmount(item),
+  }))
+
+  const channelTotals = new Map<string, number>()
+  for (const item of mapped) {
+    const label = item.username ?? 'unknown'
+    channelTotals.set(
+      label,
+      (channelTotals.get(label) ?? 0) + (Number(item.quota) || 0)
+    )
+  }
+  const sortedLabels = [...channelTotals]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([label]) => label)
+  const topLabels = new Set(sortedLabels)
+  const totalValue = (data ?? [])
+    .filter((item) => topLabels.has(item.channel_name))
+    .reduce((sum, item) => sum + getChannelAmount(item), 0)
+
+  const result = processUserChartData(
+    mapped,
+    timeGranularity,
+    t,
+    limit,
+    'quota',
+    {
+      rankKey: 'Channel Consumption Ranking',
+      trendKey: 'Channel Consumption Trend',
+    },
+    {
+      formatValue: (value: number) => renderQuotaCompat(value, 2),
+      totalValue,
+    }
+  )
+  return {
+    spec_channel_rank: result.spec_user_rank,
+    spec_channel_trend: result.spec_user_trend,
   }
 }

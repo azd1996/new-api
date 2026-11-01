@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 
 import type {
+  ChannelQuotaDataItem,
   CustomerQuotaDataItem,
   FlowQuotaDataItem,
   QuotaDataItem,
@@ -73,8 +74,22 @@ export async function getCustomerQuotaData(params: {
   start_timestamp: number
   end_timestamp: number
 }) {
-  const res = await api.get<{ success: boolean; data: CustomerQuotaDataItem[] }>(
-    '/api/data/customers',
+  const res = await api.get<{
+    success: boolean
+    data: CustomerQuotaDataItem[]
+  }>('/api/data/customers', { params })
+  return res.data
+}
+
+// Get per-channel quota data within a time range (admin only). Each row carries
+// the resolved channel name; channels with no id (id 0) are excluded
+// server-side.
+export async function getChannelQuotaData(params: {
+  start_timestamp: number
+  end_timestamp: number
+}) {
+  const res = await api.get<{ success: boolean; data: ChannelQuotaDataItem[] }>(
+    '/api/data/channels',
     { params }
   )
   return res.data

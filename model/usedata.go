@@ -231,6 +231,50 @@ func GetQuotaDataGroupByCustomer(startTime int64, endTime int64) (quotaData []*Q
 	return quotaDatas, err
 }
 
+// GetQuotaDataGroupByChannel aggregates per (channel_id, hour) for the
+// channel-statistics dashboard. Only rows carrying a channel id are returned.
+// The channel-discounted and customer-discounted stat amounts are summed so the
+// caller can show channel cost, customer-charged amount and the margin between
+// them; the real deducted quota is summed too for reference.
+func GetQuotaDataGroupByChannel(startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
+	var quotaDatas []*QuotaData
+	err = DB.Table("quota_data").
+		Select("channel_id, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, sum(channel_stat_quota) as channel_stat_quota, sum(customer_stat_quota) as customer_stat_quota").
+		Where("created_at >= ? and created_at <= ? and channel_id <> 0", startTime, endTime).
+		Group("channel_id, created_at").
+		Find(&quotaDatas).Error
+	return quotaDatas, err
+}
+
+// ResolveChannelNames maps channel ids to their display names, preferring the
+// in-memory channel cache and falling back to a single bulk query. Unknown ids
+// are omitted so callers can fall back to the id.
+func ResolveChannelNames(channelIDs []int) map[int]string {
+	names := make(map[int]string, len(channelIDs))
+	if len(channelIDs) == 0 {
+		return names
+	}
+	if common.MemoryCacheEnabled {
+		for _, id := range channelIDs {
+			if channel, err := CacheGetChannel(id); err == nil {
+				names[id] = channel.Name
+			}
+		}
+		return names
+	}
+	var channels []struct {
+		Id   int    `gorm:"column:id"`
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Table("channels").Select("id, name").Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+		return names
+	}
+	for _, channel := range channels {
+		names[channel.Id] = channel.Name
+	}
+	return names
+}
+
 func GetAllQuotaDates(startTime int64, endTime int64, username string) (quotaData []*QuotaData, err error) {
 	if username != "" {
 		return GetQuotaDataByUsername(username, startTime, endTime)

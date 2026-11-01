@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -101,6 +102,63 @@ func GetQuotaDatesByCustomer(c *gin.Context) {
 			TokenUsed:          d.TokenUsed,
 			ChannelStatQuota:   d.ChannelStatQuota,
 			CustomerStatQuota:  d.CustomerStatQuota,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    data,
+	})
+}
+
+// channelQuotaDatum is the channel-statistics row: the aggregated quota_data
+// bucket plus the resolved channel name. The frontend ranks/trends channels by
+// channel cost (channel_stat_quota), customer-charged amount (customer_stat_quota)
+// or the margin between them.
+type channelQuotaDatum struct {
+	ChannelId         int    `json:"channel_id"`
+	ChannelName       string `json:"channel_name"`
+	CreatedAt         int64  `json:"created_at"`
+	Count             int    `json:"count"`
+	Quota             int    `json:"quota"`
+	TokenUsed         int    `json:"token_used"`
+	ChannelStatQuota  int    `json:"channel_stat_quota"`
+	CustomerStatQuota int    `json:"customer_stat_quota"`
+}
+
+func GetQuotaDatesByChannel(c *gin.Context) {
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	dates, err := model.GetQuotaDataGroupByChannel(startTimestamp, endTimestamp)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	channelIDSet := make(map[int]struct{}, len(dates))
+	channelIDs := make([]int, 0, len(dates))
+	for _, d := range dates {
+		if _, ok := channelIDSet[d.ChannelID]; ok {
+			continue
+		}
+		channelIDSet[d.ChannelID] = struct{}{}
+		channelIDs = append(channelIDs, d.ChannelID)
+	}
+	names := model.ResolveChannelNames(channelIDs)
+	data := make([]channelQuotaDatum, 0, len(dates))
+	for _, d := range dates {
+		name := names[d.ChannelID]
+		if name == "" {
+			name = fmt.Sprintf("#%d", d.ChannelID)
+		}
+		data = append(data, channelQuotaDatum{
+			ChannelId:         d.ChannelID,
+			ChannelName:       name,
+			CreatedAt:         d.CreatedAt,
+			Count:             d.Count,
+			Quota:             d.Quota,
+			TokenUsed:         d.TokenUsed,
+			ChannelStatQuota:  d.ChannelStatQuota,
+			CustomerStatQuota: d.CustomerStatQuota,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{

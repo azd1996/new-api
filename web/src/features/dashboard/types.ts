@@ -272,6 +272,36 @@ export interface CustomerChartsFilters {
   amountMetric: CustomerAmountMetric
 }
 
+// A channel-statistics row: aggregated per channel with the resolved channel
+// name. Channel cost (channel_stat_quota) and customer-charged amount
+// (customer_stat_quota) come straight from the quota_data bucket; the margin
+// between them is computed in the chart layer.
+export interface ChannelQuotaDataItem {
+  channel_id: number
+  channel_name: string
+  created_at: number
+  token_used?: number
+  count?: number
+  quota?: number
+  channel_stat_quota?: number
+  customer_stat_quota?: number
+}
+
+export type ChannelAmountMetric =
+  | 'channel_stat_quota'
+  | 'customer_stat_quota'
+  | 'profit_quota'
+
+// Channel analytics selections, held by the dashboard parent like the user and
+// customer analytics filters. Channels are always grouped by channel id/name,
+// so there is no groupBy toggle.
+export interface ChannelChartsFilters {
+  timeGranularity: TimeGranularity
+  selectedRange: number
+  topChannelLimit: number
+  amountMetric: ChannelAmountMetric
+}
+
 // ============================================================================
 // API Info Types
 // ============================================================================
@@ -316,6 +346,11 @@ export interface ProcessedUserChartData {
 export interface ProcessedCustomerChartData {
   spec_customer_rank: VChartSpec
   spec_customer_trend: VChartSpec
+}
+
+export interface ProcessedChannelChartData {
+  spec_channel_rank: VChartSpec
+  spec_channel_trend: VChartSpec
 }
 
 // ============================================================================

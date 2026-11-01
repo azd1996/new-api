@@ -90,6 +90,19 @@ export function LogsFilterInput(props: ComponentProps<typeof Input>) {
   )
 }
 
+// LogsFilterRow starts a new row in the advanced filter area. auto-fill keeps
+// the same column tracks in every row, so fields line up across rows.
+export function LogsFilterRow(props: { children: ReactNode }) {
+  return (
+    <div
+      data-slot='logs-filter-row'
+      className='col-span-full grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]'
+    >
+      {props.children}
+    </div>
+  )
+}
+
 export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
   const { t } = useTranslation()
   const [advancedOpen, setAdvancedOpen] = useState(false)
