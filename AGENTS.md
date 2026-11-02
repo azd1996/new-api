@@ -16,6 +16,10 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - **Extensions**: JavaScript task plugins executed by moejs; Electron desktop wrapper
 - **Frontend package manager**: Bun (preferred over npm/yarn/pnpm)
 
+## Local Tool Environment
+
+- If `go`, `gofmt`, or `bun` is not found in a command execution shell, check the user's login shell and its `PATH` before reporting the tool as unavailable. Retry through the configured login shell or use the resolved executable path; do not assume a missing binary from a non-login shell.
+
 ## Architecture
 
 - The Go gateway handles management APIs, upstream relay, billing, and background tasks across `router/`, `middleware/`, `controller/`, `service/`, `model/`, and `relay/`.

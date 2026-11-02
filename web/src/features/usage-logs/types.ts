@@ -805,10 +805,22 @@ export interface SessionCacheAnalysisResponse {
   }
 }
 
+export interface SessionCacheRangeAnalysisResponse {
+  success: boolean
+  message?: string
+  data?: {
+    enabled: boolean
+    summary?: SkeletonRates
+    provider?: string
+    truncated?: boolean
+  }
+}
+
 // One row of the session view: the consume and error logs sharing a
 // session_id. Intervals are seconds between consecutive consume logs.
 export interface LogSession {
   session_id: string
+  customers?: { customer_id: string; name?: string }[]
   request_count: number
   consume_count: number
   error_count: number

@@ -304,6 +304,13 @@ func SetApiRouter(router *gin.Engine) {
 		}
 		handlePermissionRoute(apiRouter.Group("", middleware.AdminAuth()), http.MethodGet, "/task_plugin_options", authz.TaskPluginBind, controller.GetTaskPluginOptions)
 		registerChannelRoutes(apiRouter)
+		resourceTypeRoute := apiRouter.Group("/resource-types")
+		resourceTypeRoute.Use(middleware.AdminAuth())
+		{
+			resourceTypeRoute.GET("/", controller.GetResourceTypes)
+			resourceTypeRoute.POST("/", controller.CreateResourceType)
+			resourceTypeRoute.DELETE("/:id", controller.DeleteResourceType)
+		}
 		registerAuthzRoutes(apiRouter)
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
@@ -372,6 +379,7 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.POST("/sessions/backfill", middleware.RootAuth(), controller.StartLogSessionsBackfill)
 		logRoute.GET("/cache-skeleton", middleware.AdminAuth(), controller.GetCacheSkeleton)
 		logRoute.GET("/cache-skeleton/session", middleware.AdminAuth(), controller.GetCacheSkeletonSession)
+		logRoute.GET("/cache-skeleton/sessions/analysis", middleware.AdminAuth(), controller.GetCacheSkeletonSessionsAnalysis)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/self/sessions", middleware.UserAuth(), controller.GetUserLogSessions)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)

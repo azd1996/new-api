@@ -106,6 +106,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { SecureVerificationDialog } from '@/features/auth/secure-verification'
 import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
+import { ResourceTypePicker } from '@/features/channels/components/resource-type-picker'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
 import {
@@ -2195,6 +2196,23 @@ export function ChannelMutateDrawer({
                 />
               </FormControl>
               <FormDescription>{t(FIELD_DESCRIPTIONS.REMARK)}</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name='resource_type_id'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Resource Type')}</FormLabel>
+              <FormControl>
+                <ResourceTypePicker
+                  value={field.value ?? null}
+                  disabled={sensitiveLocked}
+                  onChange={field.onChange}
+                />
+              </FormControl>
               <FormMessage />
             </FormItem>
           )}

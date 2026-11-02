@@ -38,6 +38,8 @@ type Channel struct {
 	BalanceUpdatedTime int64   `json:"balance_updated_time" gorm:"bigint"`
 	Models             string  `json:"models"`
 	Group              string  `json:"group" gorm:"type:varchar(64);default:'default'"`
+	ResourceTypeID     *int    `json:"resource_type_id" gorm:"index"`
+	ResourceTypeName   string  `json:"resource_type_name" gorm:"-"`
 	UsedQuota          int64   `json:"used_quota" gorm:"bigint;default:0"`
 	ModelMapping       *string `json:"model_mapping" gorm:"type:text"`
 	//MaxInputTokens     *int    `json:"max_input_tokens" gorm:"default:0"`
@@ -422,6 +424,9 @@ func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOpti
 	} else {
 		err = order.Apply(DB).Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
 	}
+	if err == nil {
+		err = attachChannelResourceTypeNames(channels)
+	}
 	return channels, err
 }
 
@@ -433,6 +438,9 @@ func GetChannelsByTag(tag string, idSort bool, selectAll bool, sortOptions ...Ch
 		query = query.Omit("key")
 	}
 	err := query.Find(&channels).Error
+	if err == nil {
+		err = attachChannelResourceTypeNames(channels)
+	}
 	return channels, err
 }
 
@@ -466,6 +474,9 @@ func SearchChannels(keyword string, group string, model string, idSort bool, sor
 	if err != nil {
 		return nil, err
 	}
+	if err := attachChannelResourceTypeNames(channels); err != nil {
+		return nil, err
+	}
 	return channels, nil
 }
 
@@ -489,7 +500,36 @@ func GetChannelById(id int, selectAll bool) (*Channel, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := attachChannelResourceTypeNames([]*Channel{channel}); err != nil {
+		return nil, err
+	}
 	return channel, nil
+}
+
+func attachChannelResourceTypeNames(channels []*Channel) error {
+	ids := make([]int, 0, len(channels))
+	for _, channel := range channels {
+		if channel.ResourceTypeID != nil {
+			ids = append(ids, *channel.ResourceTypeID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var resourceTypes []ResourceType
+	if err := DB.Where("id IN ?", ids).Find(&resourceTypes).Error; err != nil {
+		return err
+	}
+	names := make(map[int]string, len(resourceTypes))
+	for _, resourceType := range resourceTypes {
+		names[resourceType.Id] = resourceType.Name
+	}
+	for _, channel := range channels {
+		if channel.ResourceTypeID != nil {
+			channel.ResourceTypeName = names[*channel.ResourceTypeID]
+		}
+	}
+	return nil
 }
 
 func BatchInsertChannels(channels []Channel) error {
@@ -507,6 +547,12 @@ func BatchInsertChannels(channels []Channel) error {
 	}()
 
 	for _, chunk := range lo.Chunk(channels, 50) {
+		for i := range chunk {
+			if err := chunk[i].validateResourceType(); err != nil {
+				tx.Rollback()
+				return err
+			}
+		}
 		if err := tx.Create(&chunk).Error; err != nil {
 			tx.Rollback()
 			return err
@@ -589,6 +635,9 @@ func (channel *Channel) GetStatusCodeMapping() string {
 }
 
 func (channel *Channel) Insert() error {
+	if err := channel.validateResourceType(); err != nil {
+		return err
+	}
 	var err error
 	err = DB.Create(channel).Error
 	if err != nil {
@@ -599,6 +648,9 @@ func (channel *Channel) Insert() error {
 }
 
 func (channel *Channel) Update() error {
+	if err := channel.validateResourceType(); err != nil {
+		return err
+	}
 	// If this is a multi-key channel, recalculate MultiKeySize based on the current key list to avoid inconsistency after editing keys
 	if channel.ChannelInfo.IsMultiKey {
 		var keyStr string
@@ -640,6 +692,9 @@ func (channel *Channel) Update() error {
 	var err error
 	err = DB.Model(channel).Updates(channel).Error
 	if err != nil {
+		return err
+	}
+	if err := DB.Model(channel).Update("resource_type_id", channel.ResourceTypeID).Error; err != nil {
 		return err
 	}
 	DB.Model(channel).First(channel, "id = ?", channel.Id)
@@ -1148,6 +1203,9 @@ func (channel *Channel) GetHeaderOverride() map[string]any {
 func GetChannelsByIds(ids []int) ([]*Channel, error) {
 	var channels []*Channel
 	err := DB.Where("id in (?)", ids).Find(&channels).Error
+	if err == nil {
+		err = attachChannelResourceTypeNames(channels)
+	}
 	return channels, err
 }
 
@@ -1210,6 +1268,9 @@ func GetChannelsByType(startIdx int, num int, idSort bool, channelType int) ([]*
 		order = "id desc"
 	}
 	err := DB.Where("type = ?", channelType).Order(order).Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
+	if err == nil {
+		err = attachChannelResourceTypeNames(channels)
+	}
 	return channels, err
 }
 

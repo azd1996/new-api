@@ -520,7 +520,7 @@ export function CommonLogsFilterBar<TData>(
   )
 
   const dateRangeFilter = (
-    <LogsFilterField wide>
+    <LogsFilterField className='lg:col-span-3'>
       <CompactDateTimeRangePicker
         start={filters.startTime}
         end={filters.endTime}
@@ -535,7 +535,7 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   )
   const modelFilter = (
-    <LogsFilterField>
+    <LogsFilterField className='lg:col-span-5'>
       <div className='flex min-w-0 gap-1'>
         <MultiSelect
           options={modelOptions}
@@ -557,7 +557,7 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   )
   const groupFilter = (
-    <LogsFilterField>
+    <LogsFilterField className='lg:col-span-3'>
       <div className='flex min-w-0 gap-1'>
         <MultiSelect
           options={groupOptions}
@@ -579,7 +579,7 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   )
   const typeFilter = (
-    <LogsFilterField>
+    <LogsFilterField className='lg:col-span-1'>
       <Select
         items={logTypeItems}
         value={logType}
@@ -653,7 +653,7 @@ export function CommonLogsFilterBar<TData>(
   )
   const advancedFilters = (
     <>
-      <LogsFilterRow>
+      <LogsFilterRow className='lg:grid-cols-12'>
         <LogsFilterField>
           <div className='flex min-w-0 gap-1'>
             <MultiSelect
@@ -750,7 +750,7 @@ export function CommonLogsFilterBar<TData>(
           />
         </LogsFilterField>
       </LogsFilterRow>
-      <LogsFilterRow>
+      <LogsFilterRow className='lg:grid-cols-12'>
         {isAdmin && (
           <LogsFilterField wide>
             <div className='flex min-w-0 gap-1'>
@@ -828,7 +828,7 @@ export function CommonLogsFilterBar<TData>(
         )}
       </LogsFilterRow>
       {isAdmin && (
-        <LogsFilterRow>
+        <LogsFilterRow className='lg:grid-cols-12'>
           <LogsFilterField>
             <CustomerFilterCombobox
               field='name'
@@ -840,7 +840,7 @@ export function CommonLogsFilterBar<TData>(
               className='h-8 min-w-0 text-sm leading-5'
             />
           </LogsFilterField>
-          <LogsFilterField>
+          <LogsFilterField className='lg:col-span-3'>
             <CustomerFilterCombobox
               field='id'
               value={filters.customerId || ''}
@@ -896,7 +896,9 @@ export function CommonLogsFilterBar<TData>(
           {typeFilter}
         </>
       }
+      primaryFiltersClassName='lg:grid-cols-12'
       advancedFilters={advancedFilters}
+      advancedFiltersClassName='lg:grid-cols-12'
       mobilePinnedFilters={dateRangeFilter}
       mobileFilters={
         <>

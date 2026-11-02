@@ -1108,6 +1108,20 @@ export function useChannelsColumns(
 
       // Group column
       {
+        accessorKey: 'resource_type_name',
+        header: t('Resource Type'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) =>
+          isTagAggregateRow(row.original) ? null : (
+            <span className='break-all text-sm'>
+              {row.original.resource_type_name || '-'}
+            </span>
+          ),
+        size: 160,
+        enableSorting: false,
+      },
+      // Group column
+      {
         accessorKey: 'group',
         header: t('Groups'),
         meta: { mobileHidden: true },

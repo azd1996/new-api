@@ -34,6 +34,7 @@ import type {
   GetTaskLogsParams,
   LogAnalysisResponse,
   SessionCacheAnalysisResponse,
+  SessionCacheRangeAnalysisResponse,
   TaskArtifactsResponse,
   UserInfo,
 } from './types'
@@ -134,6 +135,18 @@ export async function getSessionCacheAnalysis(
 ): Promise<SessionCacheAnalysisResponse> {
   const res = await api.get(
     `/api/log/cache-skeleton/session?session_id=${encodeURIComponent(sessionId)}`
+  )
+  return res.data
+}
+
+export async function getSessionCacheRangeAnalysis(
+  params: GetLogsParams
+): Promise<SessionCacheRangeAnalysisResponse> {
+  const queryParams = buildQueryParams(
+    params as unknown as Record<string, unknown>
+  )
+  const res = await api.get(
+    `/api/log/cache-skeleton/sessions/analysis?${queryParams}`
   )
   return res.data
 }

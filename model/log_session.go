@@ -115,52 +115,59 @@ func MigrateLogSessions() error {
 // consecutive consume logs, computed from logs for the listed page only, so
 // error/retry attempts do not shrink them; they are 0 below two consume logs.
 type LogSession struct {
-	SessionId        string       `json:"session_id"`
-	RequestCount     int64        `json:"request_count"`
-	ConsumeCount     int64        `json:"consume_count"`
-	ErrorCount       int64        `json:"error_count"`
-	FirstAt          int64        `json:"first_at"`
-	LastAt           int64        `json:"last_at"`
-	Quota            int64        `json:"quota"`
-	PromptTokens     int64        `json:"prompt_tokens"`
-	CompletionTokens int64        `json:"completion_tokens"`
-	Username         string       `json:"username"`
-	UserCount        int64        `json:"user_count"`
-	TokenName        string       `json:"token_name"`
-	TokenCount       int64        `json:"token_count"`
-	ModelName        string       `json:"model_name"`
-	ModelCount       int64        `json:"model_count"`
-	AvgInterval      float64      `json:"avg_interval"`
-	MinInterval      int64        `json:"min_interval"`
-	MaxInterval      int64        `json:"max_interval"`
-	Cache            LogCacheCell `json:"cache"`
+	SessionId        string               `json:"session_id"`
+	Customers        []LogSessionCustomer `json:"customers"`
+	RequestCount     int64                `json:"request_count"`
+	ConsumeCount     int64                `json:"consume_count"`
+	ErrorCount       int64                `json:"error_count"`
+	FirstAt          int64                `json:"first_at"`
+	LastAt           int64                `json:"last_at"`
+	Quota            int64                `json:"quota"`
+	PromptTokens     int64                `json:"prompt_tokens"`
+	CompletionTokens int64                `json:"completion_tokens"`
+	Username         string               `json:"username"`
+	UserCount        int64                `json:"user_count"`
+	TokenName        string               `json:"token_name"`
+	TokenCount       int64                `json:"token_count"`
+	ModelName        string               `json:"model_name"`
+	ModelCount       int64                `json:"model_count"`
+	AvgInterval      float64              `json:"avg_interval"`
+	MinInterval      int64                `json:"min_interval"`
+	MaxInterval      int64                `json:"max_interval"`
+	Cache            LogCacheCell         `json:"cache"`
 	// Truncated reports that the interval scan hit logSessionScanLimit, so the
 	// intervals of this page cover only part of the sessions.
 	Truncated bool `json:"truncated,omitempty"`
 }
 
+type LogSessionCustomer struct {
+	CustomerId string `json:"customer_id"`
+	Name       string `json:"name,omitempty"`
+}
+
 // logSessionAggRow is one re-aggregated log_sessions row. The s_ aliases keep
 // ClickHouse from resolving an aggregate's argument to its own alias.
 type logSessionAggRow struct {
-	SessionId        string `gorm:"column:session_id"`
-	RequestCount     uint64 `gorm:"column:s_request_count"`
-	ConsumeCount     uint64 `gorm:"column:s_consume_count"`
-	ErrorCount       uint64 `gorm:"column:s_error_count"`
-	FirstAt          int64  `gorm:"column:s_first_at"`
-	LastAt           int64  `gorm:"column:s_last_at"`
-	Quota            int64  `gorm:"column:s_quota"`
-	PromptTokens     int64  `gorm:"column:s_prompt_tokens"`
-	CompletionTokens int64  `gorm:"column:s_completion_tokens"`
-	CacheRead        int64  `gorm:"column:s_cache_read"`
-	CacheInput       int64  `gorm:"column:s_cache_input"`
-	CacheHit         uint64 `gorm:"column:s_cache_hit"`
-	CacheColdWrite   uint64 `gorm:"column:s_cache_cold_write"`
-	UserCount        uint64 `gorm:"column:s_user_count"`
-	Username         string `gorm:"column:s_username"`
-	TokenName        string `gorm:"column:s_token_name"`
-	TokenCount       uint64 `gorm:"column:s_token_count"`
-	ModelName        string `gorm:"column:s_model_name"`
-	ModelCount       uint64 `gorm:"column:s_model_count"`
+	SessionId        string   `gorm:"column:session_id"`
+	RequestCount     uint64   `gorm:"column:s_request_count"`
+	ConsumeCount     uint64   `gorm:"column:s_consume_count"`
+	ErrorCount       uint64   `gorm:"column:s_error_count"`
+	FirstAt          int64    `gorm:"column:s_first_at"`
+	LastAt           int64    `gorm:"column:s_last_at"`
+	Quota            int64    `gorm:"column:s_quota"`
+	PromptTokens     int64    `gorm:"column:s_prompt_tokens"`
+	CompletionTokens int64    `gorm:"column:s_completion_tokens"`
+	CacheRead        int64    `gorm:"column:s_cache_read"`
+	CacheInput       int64    `gorm:"column:s_cache_input"`
+	CacheHit         uint64   `gorm:"column:s_cache_hit"`
+	CacheColdWrite   uint64   `gorm:"column:s_cache_cold_write"`
+	UserCount        uint64   `gorm:"column:s_user_count"`
+	Username         string   `gorm:"column:s_username"`
+	TokenName        string   `gorm:"column:s_token_name"`
+	TokenCount       uint64   `gorm:"column:s_token_count"`
+	ModelName        string   `gorm:"column:s_model_name"`
+	ModelCount       uint64   `gorm:"column:s_model_count"`
+	CustomerIds      []string `gorm:"column:s_customer_ids"`
 }
 
 const logSessionAggSelect = `SELECT
@@ -184,7 +191,7 @@ const logSessionAggSelect = `SELECT
 	groupUniqArrayArray(group_names) AS s_group_names,
 	groupUniqArrayArray(channel_ids) AS s_channel_ids,
 	groupUniqArrayArray(customer_names) AS s_customer_names,
-	groupUniqArrayArray(customer_ids) AS s_customer_ids,
+	arraySort(groupUniqArrayArray(customer_ids)) AS s_customer_ids,
 	arrayElement(s_usernames, 1) AS s_username,
 	arrayElement(s_token_names, 1) AS s_token_name,
 	length(s_token_names) AS s_token_count,
@@ -328,9 +335,33 @@ func GetLogSessions(userId int, filter LogFilter, startIdx int, num int) ([]*Log
 	if err := LOG_DB.Raw(query+" ORDER BY s_last_at DESC, session_id DESC LIMIT ? OFFSET ?", pageArgs...).Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
+	customerIDs := make([]string, 0)
+	for _, row := range rows {
+		customerIDs = append(customerIDs, row.CustomerIds...)
+	}
+	slices.Sort(customerIDs)
+	customerIDs = slices.Compact(customerIDs)
+	customerNames := make(map[string]string)
+	if len(customerIDs) > 0 {
+		var customers []Customer
+		if err := DB.Select("customer_id", "name").Where("customer_id IN ?", customerIDs).Find(&customers).Error; err != nil {
+			return nil, 0, err
+		}
+		for _, customer := range customers {
+			customerNames[customer.CustomerId] = customer.Name
+		}
+	}
 	for _, r := range rows {
+		sessionCustomers := make([]LogSessionCustomer, 0, len(r.CustomerIds))
+		for _, customerID := range r.CustomerIds {
+			sessionCustomers = append(sessionCustomers, LogSessionCustomer{
+				CustomerId: customerID,
+				Name:       customerNames[customerID],
+			})
+		}
 		s := &LogSession{
 			SessionId:        r.SessionId,
+			Customers:        sessionCustomers,
 			RequestCount:     int64(r.RequestCount),
 			ConsumeCount:     int64(r.ConsumeCount),
 			ErrorCount:       int64(r.ErrorCount),

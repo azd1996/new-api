@@ -156,6 +156,34 @@ export function useSessionColumns(
 
     columns.push(
       {
+        id: 'customers',
+        header: t('Customer ID'),
+        accessorFn: (row) =>
+          (row.customers ?? [])
+            .map((customer) => customer.customer_id)
+            .join(', '),
+        cell: ({ row }) => {
+          const customers = row.original.customers ?? []
+          if (customers.length === 0) {
+            return <span className='text-muted-foreground'>-</span>
+          }
+          const customerLabels = customers.map((customer) =>
+            customer.name
+              ? `${customer.customer_id}（${customer.name}）`
+              : customer.customer_id
+          )
+          return (
+            <span
+              className='block max-w-60 truncate'
+              title={customerLabels.join(', ')}
+            >
+              {customerLabels.join(', ')}
+            </span>
+          )
+        },
+        size: 200,
+      },
+      {
         accessorKey: 'token_name',
         header: t('Token'),
         cell: ({ row }) =>

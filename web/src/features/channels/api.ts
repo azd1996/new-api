@@ -108,6 +108,26 @@ export type TaskPluginOption = {
   upstreams?: string[] | null
 }
 
+export type ResourceType = {
+  id: number
+  name: string
+}
+
+export async function getResourceTypes(): Promise<ResourceType[]> {
+  const response = await api.get<{ success: boolean; data: ResourceType[] }>(
+    '/api/resource-types'
+  )
+  return requireServerSuccess(response.data).data
+}
+
+export async function createResourceType(name: string): Promise<ResourceType> {
+  const response = await api.post<{ success: boolean; data: ResourceType }>(
+    '/api/resource-types',
+    { name }
+  )
+  return requireServerSuccess(response.data).data
+}
+
 export async function getTaskPluginOptions(): Promise<TaskPluginOption[]> {
   const response = await api.get<{
     success: boolean

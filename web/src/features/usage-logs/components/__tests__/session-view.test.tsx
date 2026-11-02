@@ -24,7 +24,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 
@@ -51,6 +51,10 @@ const session = {
   token_count: 1,
   model_name: 'claude-x',
   model_count: 1,
+  customers: [
+    { customer_id: 'cust-1', name: 'Acme' },
+    { customer_id: 'cust-2' },
+  ],
   avg_interval: 90,
   min_interval: 90,
   max_interval: 90,
@@ -67,9 +71,32 @@ const session = {
   },
 }
 
-function mockApi(enabled = true) {
+function mockApi(enabled = true, summaryDelay?: Promise<void>) {
   return vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
-    if (url.startsWith('/api/log/self/sessions')) {
+    if (url.startsWith('/api/log/cache-skeleton/sessions/analysis?')) {
+      await summaryDelay
+      return {
+        data: {
+          success: true,
+          data: {
+            enabled: true,
+            provider: 'openai',
+            summary: {
+              total: 1000,
+              actual: 750,
+              current: 763,
+              adjusted: 763,
+              adjusted_1h: 763,
+            },
+            truncated: false,
+          },
+        },
+      }
+    }
+    if (
+      url.startsWith('/api/log/self/sessions') ||
+      url.startsWith('/api/log/sessions?')
+    ) {
       return {
         data: {
           success: true,
@@ -145,15 +172,31 @@ afterEach(() => {
 })
 
 it('lists sessions collapsed and loads no session requests before expanding', async () => {
-  const get = mockApi()
+  let finishSummary!: () => void
+  const summaryDelay = new Promise<void>((resolve) => {
+    finishSummary = resolve
+  })
+  const get = mockApi(true, summaryDelay)
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'admin', role: ROLE.ADMIN })
   await renderSessions()
   const toggle = await screen.findByRole('button', { name: 'Expand session' })
 
   expect(screen.getByText('sess-abc')).toBeVisible()
   expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.getByText('Calculating...')).toBeVisible()
+  expect(screen.getByText('Requests')).toBeVisible()
+  await act(async () => finishSummary())
+  expect(await screen.findByText('Actual hit rate')).toBeVisible()
+  expect(screen.getByText('75.0%')).toBeVisible()
+  expect(screen.getByText('Prefix-match ceiling')).toBeVisible()
+  expect(screen.getByText('With one prompt_cache_key')).toBeVisible()
+  expect(screen.getByText('One key + 24h retention')).toBeVisible()
   expect(
     get.mock.calls.some(([url]) => String(url).startsWith('/api/log/self?'))
   ).toBe(false)
+  expect(screen.getByText('cust-1（Acme）, cust-2')).toBeVisible()
 })
 
 it('expands a session in place and loads all its requests regardless of the time range', async () => {

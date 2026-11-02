@@ -44,6 +44,8 @@ interface LogsFilterToolbarProps<TData> {
   table: Table<TData>
   primaryFilters: ReactNode
   advancedFilters?: ReactNode
+  primaryFiltersClassName?: string
+  advancedFiltersClassName?: string
   compactMobile?: boolean
   mobilePinnedFilters?: ReactNode
   mobileFilters?: ReactNode
@@ -92,11 +94,17 @@ export function LogsFilterInput(props: ComponentProps<typeof Input>) {
 
 // LogsFilterRow starts a new row in the advanced filter area. auto-fill keeps
 // the same column tracks in every row, so fields line up across rows.
-export function LogsFilterRow(props: { children: ReactNode }) {
+export function LogsFilterRow(props: {
+  children: ReactNode
+  className?: string
+}) {
   return (
     <div
       data-slot='logs-filter-row'
-      className='col-span-full grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]'
+      className={cn(
+        'col-span-full grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]',
+        props.className
+      )}
     >
       {props.children}
     </div>
@@ -263,7 +271,12 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
       )}
     >
       <div className='flex flex-wrap items-start gap-2'>
-        <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
+        <div
+          className={cn(
+            'grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]',
+            props.primaryFiltersClassName
+          )}
+        >
           {props.primaryFilters}
         </div>
         {advancedToggle && (
@@ -274,7 +287,12 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
       </div>
 
       {advancedOpen && props.advancedFilters && (
-        <div className='mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
+        <div
+          className={cn(
+            'mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]',
+            props.advancedFiltersClassName
+          )}
+        >
           {props.advancedFilters}
         </div>
       )}

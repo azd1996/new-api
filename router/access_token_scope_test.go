@@ -55,6 +55,11 @@ var accessTokenExemptRoutes = []string{
 	"POST /api/user/auth/refresh",
 	"POST /api/user/auth/logout",
 
+	// AdminAuth-only resource catalog endpoints.
+	"GET /api/resource-types/",
+	"POST /api/resource-types/",
+	"DELETE /api/resource-types/:id",
+
 	// Payment callbacks.
 	"POST /api/stripe/webhook",
 	"POST /api/creem/webhook",

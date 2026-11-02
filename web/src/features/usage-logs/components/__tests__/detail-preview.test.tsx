@@ -91,6 +91,30 @@ function DetailPreview(props: {
   if (!cell) throw new Error('The log must have a content column')
   return flexRender(cell.column.columnDef.cell, cell.getContext())
 }
+
+function CustomerCell(props: {
+  other: LogOtherData
+  customerId?: string
+  customerName?: string
+}) {
+  const table = useReactTable({
+    data: [
+      {
+        ...makeLog(props.other),
+        customer_id: props.customerId,
+        customer_name: props.customerName,
+      },
+    ],
+    columns: useCommonLogsColumns(true, false),
+    getCoreRowModel: getCoreRowModel(),
+  })
+  const cell = table
+    .getRowModel()
+    .rows[0].getAllCells()
+    .find((item) => item.column.id === 'customer')
+  if (!cell) throw new Error('The log must have a customer column')
+  return flexRender(cell.column.columnDef.cell, cell.getContext())
+}
 const plugin = {
   key: 'incho',
   name: 'Incho',
@@ -131,6 +155,24 @@ function renderPreview(other: LogOtherData, isAdmin = true, type?: number) {
   )
   return screen.getByRole('button', { name: /./ })
 }
+
+test('shows customer ID with its name, and only the ID when the name is missing', () => {
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    </I18nextProvider>
+  )
+
+  const { rerender } = render(
+    <CustomerCell other={{}} customerId='cust-1' customerName='Acme' />,
+    { wrapper }
+  )
+  expect(screen.getByText('cust-1（Acme）')).toBeVisible()
+
+  rerender(<CustomerCell other={{}} customerId='cust-2' />)
+  expect(screen.getByText('cust-2')).toBeVisible()
+  expect(screen.queryByText('cust-2（）')).not.toBeInTheDocument()
+})
 
 test('keeps log details open when the parent refreshes with unchanged data', async () => {
   const other = { model_price: 0.25 }

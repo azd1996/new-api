@@ -55,6 +55,8 @@ export const channelSchema = z.object({
   balance_updated_time: z.number(),
   models: z.string().default(''),
   group: z.string().default('default'),
+  resource_type_id: z.number().nullable().optional(),
+  resource_type_name: z.string().default(''),
   used_quota: z.number().default(0),
   model_mapping: z.string().nullish(),
   status_code_mapping: z.string().nullish(),
@@ -405,6 +407,7 @@ export interface TagOperationParams {
 export interface ChannelFormData {
   name: string
   type: number
+  resource_type_id?: number | null
   base_url: string
   key: string
   openai_organization?: string

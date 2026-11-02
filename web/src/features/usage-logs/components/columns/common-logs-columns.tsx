@@ -715,6 +715,39 @@ export function useCommonLogsColumns(
     })
     columns.push(
       {
+        id: 'customer',
+        header: t('Customer ID'),
+        accessorFn: (row) => row.customer_id,
+        cell: ({ row }) => {
+          const log = row.original
+          const other = parseLogOther(log.other)
+          const customerId =
+            log.customer_id ||
+            other?.admin_info?.customer_id ||
+            other?.customer_id ||
+            ''
+          const customerName =
+            log.customer_name ||
+            other?.admin_info?.customer_name ||
+            other?.customer_name ||
+            ''
+          if (!customerId) {
+            return <span className='text-muted-foreground'>-</span>
+          }
+          return (
+            <span
+              className='block max-w-48 truncate'
+              title={
+                customerName ? `${customerId}（${customerName}）` : customerId
+              }
+            >
+              {customerName ? `${customerId}（${customerName}）` : customerId}
+            </span>
+          )
+        },
+        size: 180,
+      },
+      {
         accessorKey: 'model_name',
         header: t('Model'),
         cell: function ModelCell({ row }) {

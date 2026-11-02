@@ -263,7 +263,10 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
                   <FormControl>
                     <Switch
                       checked={field.value}
-                      onCheckedChange={field.onChange}
+                      onCheckedChange={(checked) => {
+                        if (checked) return
+                        field.onChange(false)
+                      }}
                     />
                   </FormControl>
                 </SettingsSwitchItem>
@@ -283,7 +286,10 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
                   <FormControl>
                     <Switch
                       checked={field.value}
-                      onCheckedChange={field.onChange}
+                      onCheckedChange={(checked) => {
+                        if (checked) return
+                        field.onChange(false)
+                      }}
                     />
                   </FormControl>
                 </SettingsSwitchItem>

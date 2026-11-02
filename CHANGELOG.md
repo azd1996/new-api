@@ -7,7 +7,15 @@
 
 ## [2026-11-02]
 
+### 新增 Added
+- **渠道资源类型**：管理员可维护资源类型，并在创建、编辑渠道时关联类型；渠道列表展示类型，删除仍被渠道引用的类型会被拒绝。
+- **会话缓存汇总诊断**：使用日志会话页根据当前筛选条件展示缓存命中率及策略模拟结果；新增客户信息展示，普通日志显示客户标识，会话展示涉及的客户及名称。
+
 ### 优化 Changed
+- **管理访问令牌权限**：为会话缓存汇总分析接口补充 `log:read` 作用域规则，并将资源类型管理接口纳入仅管理员认证路由。
+- **系统行为安全限制**：演示站点模式和自用模式不能从关闭状态开启，但可关闭已开启项；关闭“允许未配置价格的模型”仍需二次确认。
+- **代理池解耦准备**：整理代理健康状态、TTFT 与连接耗时分流相关实现及测试到独立服务目录，当前尚未接入运行调用链。
+
 - **会话缓存诊断：展开轮次补「渠道 / Key」列，汇总行拆分上游损失**：「展开轮次」表在「实际 / 预期」命中率两列之后新增「渠道 / Key」列（展示该轮实际落到的 `channel_id / key_idx`），用于判断某轮缓存丢失是否伴随渠道或密钥切换。缓存诊断汇总行原本只给一个「上游损失」合计，现按归因拆成**本层渠道切换**与**上游未命中**两项分别展示：前者汇总归因为「渠道或密钥切换」的轮次未读到的预期命中 token（新 api 这层换了渠道/Key 导致丢缓存），后者汇总归因为「上游未命中」的轮次（本层渠道/Key 稳定、仍由上游内部切换等原因丢命中），两者均按 `max(0, 预期命中 − 实际命中)` 累加；汇总行其余两段（断点位置不当、TTL 过期）口径不变。实现见 `web/src/features/usage-logs/lib/cache-skeleton.ts`（`skeletonUpstreamSplit`）、`web/src/features/usage-logs/components/session-cache-diagnosis.tsx`，回归用例 `web/src/features/usage-logs/lib/__tests__/cache-skeleton.test.ts`。
 - **TTFT 分流叠加连接耗时维度 + 代理延迟 Prometheus 指标**：在 2026-11-01「代理按首字时延（TTFT）动态分流」基础上增加**连接耗时（dial+TLS 建连耗时）**作为第二个分流信号。原代理池连接耗时只按别名全局采样、不分渠道；现按 **(渠道 × 代理)** 记录（建连耗时模型无关）并接入分流：①与 TTFT **叠加**——头部 TTFT 连续慢**或**头部**正向**代理连接耗时连续 ≥ 阈值（`proxy_setting.ttft_routing.connect_threshold_ms`，默认 1000ms）任一满足即开闸分流，权重按两者**乘积** `1/平均TTFT × 1/连接P90`，两者都恢复才关闸；②**反向代理（tp）固定「第一档」**——其连接耗时只量到网关→代理内网、与正代隧道不可比，故不参与连接加权（权重取最快正向代理的 P90、不被自身连接耗时降权），但 TTFT 照常参与、实测连接百分位照常展示；③只有**正向代理之间**按连接 P90 加权。渠道统计弹窗「代理调度」表在「平均首字延迟」后新增 **连接 P50 / P90(\*) / P99** 三列（\* 标记 P90 为参与调度的档位），反向代理行标注 `(反代)`。另把代理延迟导出为 **Prometheus histogram**（与内存里选路用的环形/闸门统计相互独立、互不影响）：新增 `newapi_proxy_connect_seconds{channel,proxy}`（建连耗时，模型无关），TTFT 侧 `newapi_proxy_ttft_seconds{channel,proxy,model}` 此前已有。连接状态同样为**进程内、按节点各算、重启清零**；仅成功建连（新连接、非复用）产生连接样本。实现见 `service/proxy_ttft.go`（`proxyConnectState`/`buildProxyConnectSnapshot`/合并权重与闸门）、`service/proxy_health.go`（`RecordProxyConnectResult` 成功分支记录）、`setting/system_setting/proxy_setting.go`（`ConnectThresholdMs`）、`pkg/prom_metrics/metrics.go`（`newapi_proxy_connect_seconds`），前端 `web/src/features/channels/components/dialogs/channel-stats-dialog.tsx`、`web/src/features/channels/types.ts`。
 

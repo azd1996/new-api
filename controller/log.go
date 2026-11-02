@@ -481,3 +481,23 @@ func GetCacheSkeletonSession(c *gin.Context) {
 		"truncated": analysis.Truncated,
 	})
 }
+
+// GetCacheSkeletonSessionsAnalysis calculates a token-weighted cache summary
+// across the sessions matching the session-view filters (admin only).
+func GetCacheSkeletonSessionsAnalysis(c *gin.Context) {
+	if !model.CacheSkeletonEnabled() {
+		common.ApiSuccess(c, gin.H{"enabled": false})
+		return
+	}
+	analysis, err := model.GetSessionCacheRangeAnalysis(0, logFilterFromQuery(c, true))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"enabled":   true,
+		"summary":   analysis.Summary,
+		"provider":  analysis.Provider,
+		"truncated": analysis.Truncated,
+	})
+}

@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/binary"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,10 +44,12 @@ const (
 	// OpenAI caches prompts of at least 1024 tokens and reports hits in
 	// 128-token steps. In-memory entries are dropped after 5-10 minutes of
 	// inactivity (the upper bound is used); "24h" retention keeps them a day.
-	openaiCacheMinTokens   = 1024
-	openaiCacheGranularity = 128
-	openaiInMemoryTTL      = 10 * time.Minute
-	openaiExtendedTTL      = 24 * time.Hour
+	openaiCacheMinTokens      = 1024
+	openaiCacheGranularity    = 128
+	openaiInMemoryTTL         = 10 * time.Minute
+	openaiExtendedTTL         = 24 * time.Hour
+	skeletonRangeSessionLimit = 10000
+	skeletonRangeRowLimit     = 500000
 )
 
 // SkeletonSegment is a run of blocks in one turn compared with the previous
@@ -139,6 +142,73 @@ func GetSessionCacheAnalysis(sessionId string) (*SessionCacheAnalysis, error) {
 	analysis := AnalyzeCacheSkeletons(rows)
 	analysis.Truncated = truncated
 	return analysis, nil
+}
+
+type SessionCacheRangeAnalysis struct {
+	Summary   SkeletonRates `json:"summary"`
+	Provider  string        `json:"provider"`
+	Truncated bool          `json:"truncated"`
+}
+
+// GetSessionCacheRangeAnalysis replays skeletons for sessions matching the
+// session-list filters. It is called independently from the paginated list.
+func GetSessionCacheRangeAnalysis(userId int, filter LogFilter) (*SessionCacheRangeAnalysis, error) {
+	query, args, err := logSessionQuery(userId, filter)
+	if err != nil {
+		return nil, err
+	}
+	sessionIDs := make([]string, 0)
+	sessionArgs := append(slices.Clone(args), skeletonRangeSessionLimit+1)
+	if err := LOG_DB.Raw("SELECT session_id FROM ("+query+") ORDER BY s_last_at DESC, session_id DESC LIMIT ?", sessionArgs...).Scan(&sessionIDs).Error; err != nil {
+		return nil, err
+	}
+	result := &SessionCacheRangeAnalysis{}
+	if len(sessionIDs) > skeletonRangeSessionLimit {
+		sessionIDs = sessionIDs[:skeletonRangeSessionLimit]
+		result.Truncated = true
+	}
+	if len(sessionIDs) == 0 {
+		return result, nil
+	}
+
+	rows := make([]*CacheSkeleton, 0)
+	if err := LOG_DB.Where("session_id IN ?", sessionIDs).
+		Order("session_id ASC").
+		Order("ts ASC").
+		Limit(skeletonRangeRowLimit + 1).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) > skeletonRangeRowLimit {
+		rows = rows[:skeletonRangeRowLimit]
+		result.Truncated = true
+	}
+
+	bySession := make(map[string][]*CacheSkeleton, len(sessionIDs))
+	providers := make(map[string]struct{})
+	for _, row := range rows {
+		bySession[row.SessionId] = append(bySession[row.SessionId], row)
+		providers[row.Provider] = struct{}{}
+	}
+	for _, sessionID := range sessionIDs {
+		sessionRows := bySession[sessionID]
+		if len(sessionRows) > skeletonSessionRowLimit {
+			sessionRows = sessionRows[:skeletonSessionRowLimit]
+			result.Truncated = true
+		}
+		result.Summary.add(AnalyzeCacheSkeletons(sessionRows).Summary)
+	}
+	for provider := range providers {
+		if result.Provider == "" {
+			result.Provider = provider
+			continue
+		}
+		if result.Provider != provider {
+			result.Provider = "mixed"
+			break
+		}
+	}
+	return result, nil
 }
 
 // AnalyzeCacheSkeletons groups time-ordered skeletons by lane and replays

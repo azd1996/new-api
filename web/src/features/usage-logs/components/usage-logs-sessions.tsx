@@ -31,9 +31,13 @@ import { TableCell, TableRow } from '@/components/ui/table'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { createServerError } from '@/lib/server-error-message'
 
-import { getLogSessions } from '../api'
+import {
+  getLogSessions,
+  getSessionCacheRangeAnalysis,
+} from '../api'
 import { buildApiParams } from '../lib/utils'
 import type { LogSession } from '../types'
+import { skeletonRate, skeletonTierLabels } from '../lib/cache-skeleton'
 import { useSessionColumns } from './columns/session-columns'
 import { SessionCacheDiagnosis } from './session-cache-diagnosis'
 import { SessionRequestsTable } from './session-requests-table'
@@ -107,7 +111,36 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
   })
 
   const sessionsEnabled = data?.enabled ?? true
+  const cacheSummaryQuery = useQuery({
+    queryKey: ['logs', 'sessions', 'cache-summary', viewAccess, searchParams],
+    queryFn: async () => {
+      const params = buildApiParams({
+        page: 1,
+        pageSize: 1,
+        searchParams,
+        isAdmin: true,
+      })
+      const result = await getSessionCacheRangeAnalysis(params)
+      if (!result?.success) {
+        throw createServerError(result, t('Failed to load sessions'))
+      }
+      return result.data
+    },
+    enabled: isAdminView && sessionsEnabled,
+    meta: { errorToast: false },
+    retry: false,
+  })
   const columns = useSessionColumns(isAdminView, expanded, toggleSession)
+  const cacheSummary = cacheSummaryQuery.data
+  const cacheSummaryRates = cacheSummary?.summary
+  const cacheSummaryLabels =
+    cacheSummary?.provider === 'mixed'
+      ? {
+          current: 'Current strategy upper bound',
+          adjusted: 'After strategy adjustment',
+          adjusted1h: 'After extended retention',
+        }
+      : skeletonTierLabels(cacheSummary?.provider ?? '')
   const { table } = useDataTable({
     data: data?.items || [],
     columns: columns as ColumnDef<LogSession, unknown>[],
@@ -145,6 +178,64 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
         <div className='flex flex-col gap-2'>
           {props.toolbar}
           {isRootView && sessionsEnabled && <SessionsBackfillButton />}
+          {isAdminView &&
+            sessionsEnabled &&
+            cacheSummary?.enabled !== false && (
+            <section
+              aria-label={t('Cache diagnosis')}
+              aria-live='polite'
+              className='flex flex-wrap items-center gap-x-4 gap-y-1 border-b py-2 text-xs'
+            >
+              <span className='font-semibold'>{t('Summary')}</span>
+              {cacheSummaryQuery.isLoading && <span>{t('Calculating...')}</span>}
+              {cacheSummaryQuery.data?.enabled &&
+                cacheSummaryRates && (
+                  <>
+                    <span>
+                      {t('Actual hit rate')}{' '}
+                      <b>
+                        {skeletonRate(
+                          cacheSummaryRates.actual,
+                          cacheSummaryRates.total
+                        )}
+                      </b>
+                    </span>
+                    <span>
+                      {t(cacheSummaryLabels.current)}{' '}
+                      <b>
+                        {skeletonRate(
+                          cacheSummaryRates.current,
+                          cacheSummaryRates.total
+                        )}
+                      </b>
+                    </span>
+                    <span>
+                      {t(cacheSummaryLabels.adjusted)}{' '}
+                      <b>
+                        {skeletonRate(
+                          cacheSummaryRates.adjusted,
+                          cacheSummaryRates.total
+                        )}
+                      </b>
+                    </span>
+                    <span>
+                      {t(cacheSummaryLabels.adjusted1h)}{' '}
+                      <b>
+                        {skeletonRate(
+                          cacheSummaryRates.adjusted_1h,
+                          cacheSummaryRates.total
+                        )}
+                      </b>
+                    </span>
+                    {cacheSummaryQuery.data.truncated && (
+                      <span className='text-warning'>
+                        {t('partial sample (scan limit reached)')}
+                      </span>
+                    )}
+                  </>
+                )}
+            </section>
+          )}
           <p className='text-muted-foreground text-xs'>
             {t(
               'Sessions are listed when their lifetime overlaps the time range. Only user, token, model, group, channel, customer and session ID filters apply.'

@@ -375,6 +375,7 @@ func migrateDB() error {
 		&TaskPlugin{},
 		&Model{},
 		&Vendor{},
+		&ResourceType{},
 		&PrefillGroup{},
 		&Setup{},
 		&TwoFA{},
