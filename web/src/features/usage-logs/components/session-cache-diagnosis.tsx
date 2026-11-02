@@ -41,8 +41,9 @@ import {
   skeletonLosses,
   skeletonRate,
   skeletonTierLabels,
+  skeletonUpstreamSplit,
 } from '../lib/cache-skeleton'
-import type { SkeletonLane, SkeletonRates } from '../types'
+import type { SkeletonLane, SkeletonRates, SkeletonTurn } from '../types'
 import { CacheSkeletonDialog } from './dialogs/cache-skeleton-dialog'
 
 const SEGMENT_CLASSES: Record<string, string> = {
@@ -51,10 +52,15 @@ const SEGMENT_CLASSES: Record<string, string> = {
   new: 'bg-success/70',
 }
 
-function RatesLine(props: { rates: SkeletonRates; provider: string }) {
+function RatesLine(props: {
+  rates: SkeletonRates
+  turns: SkeletonTurn[]
+  provider: string
+}) {
   const { t } = useTranslation()
   const rates = props.rates
   const losses = skeletonLosses(rates)
+  const upstream = skeletonUpstreamSplit(props.turns)
   const labels = skeletonTierLabels(props.provider)
   return (
     <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
@@ -78,7 +84,8 @@ function RatesLine(props: { rates: SkeletonRates; provider: string }) {
         <b>{skeletonRate(rates.adjusted_1h, rates.total)}</b>
       </span>
       <span className='text-muted-foreground'>
-        {t('Upstream loss')} {formatTokens(losses.upstream)} ·{' '}
+        {t('Gateway channel switch')} {formatTokens(upstream.channelSwitch)} ·{' '}
+        {t('Upstream miss')} {formatTokens(upstream.upstreamMiss)} ·{' '}
         {t(labels.adjustedLoss)} {formatTokens(losses.adjusted)} ·{' '}
         {t('TTL expired')} {formatTokens(losses.ttl)}
       </span>
@@ -101,6 +108,7 @@ function LaneTurns(props: {
           <TableHead className='h-7 w-[40%]'>{t('Prompt prefix')}</TableHead>
           <TableHead className='h-7 text-right'>{t('Actual')}</TableHead>
           <TableHead className='h-7 text-right'>{t('Expected')}</TableHead>
+          <TableHead className='h-7'>{t('Channel / key')}</TableHead>
           <TableHead className='h-7'>{t('Reason')}</TableHead>
           <TableHead className='h-7' />
         </TableRow>
@@ -143,6 +151,9 @@ function LaneTurns(props: {
                 {skeletonRate(turn.expected_current, turn.total_tokens)}
                 {turn.expected_adjusted > turn.expected_current &&
                   ` → ${skeletonRate(turn.expected_adjusted, turn.total_tokens)}`}
+              </TableCell>
+              <TableCell className='text-muted-foreground py-1'>
+                {turn.channel_id} / {turn.key_idx}
               </TableCell>
               <TableCell className='space-x-1 py-1'>
                 <StatusBadge
@@ -214,7 +225,11 @@ export function SessionCacheDiagnosis(props: { sessionId: string }) {
     >
       <div className='flex items-center gap-3'>
         <span className='font-semibold'>{t('Cache diagnosis')}</span>
-        <RatesLine rates={data.summary} provider={lanes[0].provider} />
+        <RatesLine
+          rates={data.summary}
+          turns={lanes.flatMap((l) => l.turns)}
+          provider={lanes[0].provider}
+        />
         <Button
           variant='ghost'
           size='sm'
@@ -239,7 +254,11 @@ export function SessionCacheDiagnosis(props: { sessionId: string }) {
                   lane {lane.lane.slice(0, 8)} · {lane.model} ·{' '}
                   {lane.turns.length} {t('turns')}
                 </span>
-                <RatesLine rates={lane.summary} provider={lane.provider} />
+                <RatesLine
+                  rates={lane.summary}
+                  turns={lane.turns}
+                  provider={lane.provider}
+                />
               </div>
             )}
             <LaneTurns lane={lane} onOpenSkeleton={setSkeletonRequestId} />

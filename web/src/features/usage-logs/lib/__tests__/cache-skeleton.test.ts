@@ -27,6 +27,7 @@ import {
   skeletonLosses,
   skeletonRate,
   skeletonTierLabels,
+  skeletonUpstreamSplit,
 } from '../cache-skeleton'
 
 function skeleton(overrides: Partial<CacheSkeleton>): CacheSkeleton {
@@ -232,5 +233,31 @@ describe('session cache diagnosis', () => {
       'After breakpoint adjustment'
     )
     assert.equal(skeletonTierLabels('').adjustedLoss, 'Breakpoint misplaced')
+  })
+
+  test('upstream split attributes unread ceiling by turn reason', () => {
+    const split = skeletonUpstreamSplit([
+      turn({
+        reason: 'channel_switch',
+        expected_current: 500,
+        actual_read: 100,
+      }),
+      turn({ reason: 'upstream_miss', expected_current: 400, actual_read: 50 }),
+      turn({ reason: 'hit', expected_current: 300, actual_read: 300 }),
+    ])
+
+    assert.deepEqual(split, { channelSwitch: 400, upstreamMiss: 350 })
+  })
+
+  test('upstream split never counts a turn that read above its ceiling', () => {
+    const split = skeletonUpstreamSplit([
+      turn({
+        reason: 'upstream_miss',
+        expected_current: 200,
+        actual_read: 400,
+      }),
+    ])
+
+    assert.equal(split.upstreamMiss, 0)
   })
 })

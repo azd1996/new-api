@@ -5,6 +5,14 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-11-02]
+
+### 优化 Changed
+- **会话缓存诊断：展开轮次补「渠道 / Key」列，汇总行拆分上游损失**：「展开轮次」表在「实际 / 预期」命中率两列之后新增「渠道 / Key」列（展示该轮实际落到的 `channel_id / key_idx`），用于判断某轮缓存丢失是否伴随渠道或密钥切换。缓存诊断汇总行原本只给一个「上游损失」合计，现按归因拆成**本层渠道切换**与**上游未命中**两项分别展示：前者汇总归因为「渠道或密钥切换」的轮次未读到的预期命中 token（新 api 这层换了渠道/Key 导致丢缓存），后者汇总归因为「上游未命中」的轮次（本层渠道/Key 稳定、仍由上游内部切换等原因丢命中），两者均按 `max(0, 预期命中 − 实际命中)` 累加；汇总行其余两段（断点位置不当、TTL 过期）口径不变。实现见 `web/src/features/usage-logs/lib/cache-skeleton.ts`（`skeletonUpstreamSplit`）、`web/src/features/usage-logs/components/session-cache-diagnosis.tsx`，回归用例 `web/src/features/usage-logs/lib/__tests__/cache-skeleton.test.ts`。
+
+### 修复 Fixed
+- **明细错误统计读不到签名导致页面为空（LogOther 重构兼容）**：错误日志写入改走强类型 `LogOther` 后，`error_signature` / `error_signature_hash` / `customer_id` 被收进 `other.admin_info`（经 `SetAdmin` 写入），而明细错误统计的读取路径仍只认 `other` 顶层的扁平字段，导致每条错误行都被判为「无签名」而跳过，明细错误页在仍有错误日志写入的情况下显示为空。现 `errorSignatureOther` 优先从 `admin_info` 段读取这三个字段，读不到再回退旧版顶层写法（LogOther 重构之前的历史日志），签名哈希、签名原文与客户归因均按此优先级解析。`GetErrorSignatureStats` 与 `GetErrorStatsGrouped` 两条聚合路径一并修正。实现见 `model/error_stats.go`，回归用例 `model/error_stats_test.go`（`TestErrorSignatureOtherReadsLogOtherAdminInfo` 锁 LogOther 写入格式、`TestErrorSignatureOtherLegacyTopLevel` 锁旧版顶层兼容）。
+
 ## [2026-11-01]
 
 ### 新增 Added

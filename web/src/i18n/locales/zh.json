@@ -5577,6 +5577,8 @@
     "Request rules apply on top of this amount.": "请求规则会在此金额之上继续应用。",
     "Request simulation": "请求模拟",
     "Request Skeleton": "请求骨架",
+    "Gateway channel switch": "本层渠道切换",
+    "Channel / key": "渠道 / Key",
     "Fix Misplaced Cache Breakpoints": "修正错位的缓存断点",
     "For the listed group and model combinations (Claude), move a prompt-cache breakpoint placed on a volatile trailing reminder (such as <total_tokens>) onto the last stable block before it. Leave empty to disable.": "对列出的分组与模型组合（Claude），把打在末尾易变提醒（如 <total_tokens>）上的缓存断点移到它前面最后一个稳定块上。留空表示不启用。",
     "Inject prompt_cache_key": "注入 prompt_cache_key",

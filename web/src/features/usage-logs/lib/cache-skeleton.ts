@@ -201,6 +201,28 @@ export function skeletonLosses(rates: SkeletonRates): SkeletonLossBreakdown {
   }
 }
 
+export interface SkeletonUpstreamSplit {
+  // Loss on turns where new-api itself switched channel or key.
+  channelSwitch: number
+  // Loss on turns whose channel and key held but upstream still missed.
+  upstreamMiss: number
+}
+
+// skeletonUpstreamSplit divides the combined upstream loss into the gateway's
+// own channel/key switches and genuine upstream misses, by summing each
+// turn's unread ceiling tokens under its attributed reason.
+export function skeletonUpstreamSplit(
+  turns: SkeletonTurn[]
+): SkeletonUpstreamSplit {
+  const split: SkeletonUpstreamSplit = { channelSwitch: 0, upstreamMiss: 0 }
+  for (const turn of turns) {
+    const loss = Math.max(0, turn.expected_current - turn.actual_read)
+    if (turn.reason === 'channel_switch') split.channelSwitch += loss
+    else if (turn.reason === 'upstream_miss') split.upstreamMiss += loss
+  }
+  return split
+}
+
 export interface TimelineBar {
   segments: { state: string; widthPct: number }[]
   breakpoints: { leftPct: number; ttl: string }[]

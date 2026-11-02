@@ -5577,6 +5577,8 @@
     "Request rules apply on top of this amount.": "Request rules apply on top of this amount.",
     "Request simulation": "Request simulation",
     "Request Skeleton": "Request Skeleton",
+    "Gateway channel switch": "Gateway channel switch",
+    "Channel / key": "Channel / key",
     "Fix Misplaced Cache Breakpoints": "Fix Misplaced Cache Breakpoints",
     "For the listed group and model combinations (Claude), move a prompt-cache breakpoint placed on a volatile trailing reminder (such as <total_tokens>) onto the last stable block before it. Leave empty to disable.": "For the listed group and model combinations (Claude), move a prompt-cache breakpoint placed on a volatile trailing reminder (such as <total_tokens>) onto the last stable block before it. Leave empty to disable.",
     "Inject prompt_cache_key": "Inject prompt_cache_key",

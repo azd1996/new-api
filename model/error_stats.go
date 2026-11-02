@@ -116,10 +116,42 @@ type errorStatScanRow struct {
 	Other     string `gorm:"column:other"`
 }
 
+// errorSignatureOther reads the signature, its hash, and the decoded customer
+// out of an error log's Other JSON. The strongly-typed LogOther stores these
+// admin-tier fields under its "admin_info" section (see RecordErrorLog /
+// LogOther.SetAdmin), so they are read from there first. The flat top-level
+// fields are a fallback for error logs written before the LogOther
+// restructure, which stored the same keys at the root.
 type errorSignatureOther struct {
-	ErrorSignature     string `json:"error_signature"`
-	ErrorSignatureHash string `json:"error_signature_hash"`
-	CustomerId         string `json:"customer_id"`
+	AdminInfo struct {
+		ErrorSignature     string `json:"error_signature"`
+		ErrorSignatureHash string `json:"error_signature_hash"`
+		CustomerId         string `json:"customer_id"`
+	} `json:"admin_info"`
+	LegacyErrorSignature     string `json:"error_signature"`
+	LegacyErrorSignatureHash string `json:"error_signature_hash"`
+	LegacyCustomerId         string `json:"customer_id"`
+}
+
+func (o errorSignatureOther) signature() string {
+	if o.AdminInfo.ErrorSignature != "" {
+		return o.AdminInfo.ErrorSignature
+	}
+	return o.LegacyErrorSignature
+}
+
+func (o errorSignatureOther) signatureHash() string {
+	if o.AdminInfo.ErrorSignatureHash != "" {
+		return o.AdminInfo.ErrorSignatureHash
+	}
+	return o.LegacyErrorSignatureHash
+}
+
+func (o errorSignatureOther) customerId() string {
+	if o.AdminInfo.CustomerId != "" {
+		return o.AdminInfo.CustomerId
+	}
+	return o.LegacyCustomerId
 }
 
 // scanErrorStatRows pulls the capped error-log window for the filter, newest
@@ -153,21 +185,22 @@ func GetErrorSignatureStats(f ErrorStatFilter, limit int) ([]*ErrorSignatureStat
 			continue
 		}
 		var o errorSignatureOther
-		if common.Unmarshal([]byte(r.Other), &o) != nil || o.ErrorSignatureHash == "" {
+		if common.Unmarshal([]byte(r.Other), &o) != nil || o.signatureHash() == "" {
 			continue
 		}
-		s := agg[o.ErrorSignatureHash]
+		hash := o.signatureHash()
+		s := agg[hash]
 		if s == nil {
 			s = &ErrorSignatureStat{
-				SignatureHash: o.ErrorSignatureHash,
-				Signature:     o.ErrorSignature,
+				SignatureHash: hash,
+				Signature:     o.signature(),
 				FirstSeen:     r.CreatedAt,
 				LastSeen:      r.CreatedAt,
 				Models:        make(map[string]int64),
 				Channels:      make(map[int]int64),
 				Customers:     make(map[string]int64),
 			}
-			agg[o.ErrorSignatureHash] = s
+			agg[hash] = s
 		}
 		s.Count++
 		if r.CreatedAt < s.FirstSeen {
@@ -182,8 +215,8 @@ func GetErrorSignatureStats(f ErrorStatFilter, limit int) ([]*ErrorSignatureStat
 		if r.ChannelId != 0 {
 			s.Channels[r.ChannelId]++
 		}
-		if o.CustomerId != "" {
-			s.Customers[o.CustomerId]++
+		if cid := o.customerId(); cid != "" {
+			s.Customers[cid]++
 		}
 	}
 
@@ -271,15 +304,16 @@ func GetErrorStatsGrouped(f ErrorStatFilter, groupBy string, limit int) ([]*Erro
 			continue
 		}
 		var o errorSignatureOther
-		if common.Unmarshal([]byte(r.Other), &o) != nil || o.ErrorSignatureHash == "" {
+		if common.Unmarshal([]byte(r.Other), &o) != nil || o.signatureHash() == "" {
 			continue
 		}
-		if !matchesErrorCategoryFilter(f, o.ErrorSignatureHash) {
+		hash := o.signatureHash()
+		if !matchesErrorCategoryFilter(f, hash) {
 			continue
 		}
-		key := ResolveErrorShortName(o.ErrorSignatureHash)
+		key := ResolveErrorShortName(hash)
 		if groupBy == ErrorStatGroupByAttribution {
-			key = ResolveErrorAttribution(o.ErrorSignatureHash)
+			key = ResolveErrorAttribution(hash)
 		}
 		s := agg[key]
 		if s == nil {
@@ -312,8 +346,8 @@ func GetErrorStatsGrouped(f ErrorStatFilter, groupBy string, limit int) ([]*Erro
 		if r.ChannelId != 0 {
 			s.Channels[r.ChannelId]++
 		}
-		if o.CustomerId != "" {
-			s.Customers[o.CustomerId]++
+		if cid := o.customerId(); cid != "" {
+			s.Customers[cid]++
 		}
 	}
 
