@@ -409,6 +409,14 @@ func InitResources() error {
 	}
 	model.InitOptionMap()
 
+	// Compile the admin-persisted error-signature normalization rules now that
+	// the option map is loaded, so error logs are fingerprinted with the
+	// operator's rule set from the first request rather than the built-in
+	// defaults. Non-fatal: on failure the defaults stay in effect.
+	if err := service.ApplyPersistedErrorSignatureRules(); err != nil {
+		common.SysError(common.LogText("failed to apply persisted error signature rules: %s", err.Error()))
+	}
+
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()
 

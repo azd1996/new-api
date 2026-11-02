@@ -3,6 +3,8 @@ package service
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -146,4 +148,35 @@ func TestApplyErrorSignatureRulesJSON(t *testing.T) {
 	assert.Len(t, GetEffectiveErrorSignatureRules(), 1)
 
 	require.NoError(t, SetErrorSignatureRules(DefaultErrorSignatureRules()))
+}
+
+// TestApplyPersistedErrorSignatureRules locks the startup contract: the admin's
+// persisted ErrorSignatureRules option is compiled into the active rule set, so
+// error logs are fingerprinted with the operator's rules (and their 明细错误类型 /
+// 错误归因 labels keep matching) from the first request. An empty option falls
+// back to the built-in defaults.
+func TestApplyPersistedErrorSignatureRules(t *testing.T) {
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	common.OptionMap[errorSignatureRulesOptionKey] = `[{"name":"mask-digits","pattern":"[0-9]+","replacement":"#","enabled":true}]`
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		delete(common.OptionMap, errorSignatureRulesOptionKey)
+		common.OptionMapRWMutex.Unlock()
+		_ = SetErrorSignatureRules(DefaultErrorSignatureRules())
+	})
+
+	require.NoError(t, ApplyPersistedErrorSignatureRules())
+	assert.Equal(t, "code=#", NormalizeErrorSignature("code=4096"))
+
+	// Clearing the option falls back to the built-in defaults, which leave a
+	// plain numeric body untouched.
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap[errorSignatureRulesOptionKey] = ""
+	common.OptionMapRWMutex.Unlock()
+	require.NoError(t, ApplyPersistedErrorSignatureRules())
+	assert.Equal(t, "code=4096", NormalizeErrorSignature("code=4096"))
 }

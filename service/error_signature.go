@@ -165,6 +165,24 @@ func ApplyErrorSignatureRulesJSON(jsonStr string) error {
 	return SetErrorSignatureRules(rules)
 }
 
+// ApplyPersistedErrorSignatureRules compiles the admin-persisted rule set from
+// the ErrorSignatureRules option, falling back to the built-in defaults when it
+// is empty. Call once at startup after InitOptionMap so error logs are
+// fingerprinted with the operator's rules from the very first request. Without
+// it the compiled rules stay at the defaults until SyncErrorSignatureRules
+// first polls — and never advance when SYNC_FREQUENCY disables that poller,
+// which silently shifts every signature hash and unlinks the admin-configured
+// 明细错误类型 / 错误归因 labels.
+func ApplyPersistedErrorSignatureRules() error {
+	common.OptionMapRWMutex.RLock()
+	jsonStr := common.OptionMap[errorSignatureRulesOptionKey]
+	common.OptionMapRWMutex.RUnlock()
+	if strings.TrimSpace(jsonStr) == "" {
+		return SetErrorSignatureRules(DefaultErrorSignatureRules())
+	}
+	return ApplyErrorSignatureRulesJSON(jsonStr)
+}
+
 var (
 	rulesSyncMu          sync.Mutex
 	lastAppliedRulesJSON string
