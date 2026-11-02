@@ -29,6 +29,7 @@ import type {
   Channel,
   ChannelBalanceResponse,
   ChannelOpsResponse,
+  ChannelStats,
   ChannelTestResponse,
   CopyBehindCdnAigwParams,
   CopyChannelParams,
@@ -77,6 +78,17 @@ export async function getInferenceStatus(
 ): Promise<InferenceStatus> {
   const response = await api.get<{ success: boolean; data: InferenceStatus }>(
     `/api/channel/${channelId}/${provider}/status`,
+    { signal, disableDuplicate: true }
+  )
+  return requireServerSuccess(response.data).data
+}
+
+export async function getChannelStats(
+  channelId: number,
+  signal?: AbortSignal
+): Promise<ChannelStats> {
+  const response = await api.get<{ success: boolean; data: ChannelStats }>(
+    `/api/channel/${channelId}/stats`,
     { signal, disableDuplicate: true }
   )
   return requireServerSuccess(response.data).data

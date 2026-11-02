@@ -43,6 +43,10 @@ type ProxyAliasStatus struct {
 	P99Ms           float64 `json:"p99_ms"`
 	Samples         int     `json:"samples"`
 	LastCheckedUnix int64   `json:"last_checked_unix"`
+	// TTFT aggregate across every (channel, model) that used this alias. Zero
+	// samples means TTFT routing has not observed this alias yet.
+	TtftAvgMs   float64 `json:"ttft_avg_ms"`
+	TtftSamples int     `json:"ttft_samples"`
 }
 
 type proxyHealth struct {
@@ -81,6 +85,20 @@ func init() {
 // listed proxies is currently eligible. The returned alias is "" when the
 // direct fallback was used (so the caller skips health recording).
 func ResolveChannelProxy(channelID int, aliases []string, fallback string) (string, string) {
+	return resolveChannelProxy(channelID, aliases, fallback, "", false)
+}
+
+// ResolveChannelProxyWeighted resolves the channel proxy with optional
+// TTFT-aware weighted selection. When ttftEnabled is false it behaves exactly
+// like ResolveChannelProxy (strict priority). When true and more than one alias
+// is eligible, selection may divert from the head based on recorded TTFT for the
+// given model (see proxy_ttft.go). Connection-failure cooldown always applies
+// first, so an unhealthy proxy is never picked regardless of TTFT.
+func ResolveChannelProxyWeighted(channelID int, aliases []string, fallback, model string, ttftEnabled bool) (string, string) {
+	return resolveChannelProxy(channelID, aliases, fallback, model, ttftEnabled)
+}
+
+func resolveChannelProxy(channelID int, aliases []string, fallback, model string, ttftEnabled bool) (string, string) {
 	cleaned := normalizeProxyAliases(aliases)
 	if len(cleaned) == 0 {
 		return fallback, ""
@@ -89,8 +107,11 @@ func ResolveChannelProxy(channelID int, aliases []string, fallback string) (stri
 	table := proxyAliasURLMap()
 	now := time.Now()
 
+	// Eligible aliases in priority order: present in the table and not in
+	// connection-failure cooldown.
+	type eligibleProxy struct{ alias, url string }
+	eligible := make([]eligibleProxy, 0, len(order))
 	proxyHealthMu.Lock()
-	defer proxyHealthMu.Unlock()
 	for _, alias := range order {
 		url, ok := table[alias]
 		if !ok || url == "" {
@@ -99,9 +120,29 @@ func ResolveChannelProxy(channelID int, aliases []string, fallback string) (stri
 		if h := proxyHealthState[alias]; h != nil && h.cooldownUntil.After(now) {
 			continue // currently unhealthy (in cooldown)
 		}
-		return url, alias
+		eligible = append(eligible, eligibleProxy{alias: alias, url: url})
 	}
-	return fallback, ""
+	proxyHealthMu.Unlock()
+
+	if len(eligible) == 0 {
+		return fallback, ""
+	}
+	if ttftEnabled && len(eligible) > 1 {
+		order := make([]string, len(eligible))
+		for i, e := range eligible {
+			order[i] = e.alias
+		}
+		if chosen := pickProxyByTtft(channelID, model, order); chosen != "" {
+			for _, e := range eligible {
+				if e.alias == chosen {
+					recordProxyPick(channelID, model, e.alias)
+					return e.url, e.alias
+				}
+			}
+		}
+	}
+	recordProxyPick(channelID, model, eligible[0].alias)
+	return eligible[0].url, eligible[0].alias
 }
 
 // RecordProxyConnectResult feeds one real request's connection-level outcome
@@ -157,6 +198,7 @@ func RecordProxyConnectResult(channelID int, alias string, connectLatency time.D
 func ProxyHealthSnapshot() []ProxyAliasStatus {
 	proxies := system_setting.GetProxySetting().Proxies
 	now := time.Now()
+	ttftByAlias := proxyTtftAliasSummaries()
 
 	proxyHealthMu.Lock()
 	defer proxyHealthMu.Unlock()
@@ -179,6 +221,10 @@ func ProxyHealthSnapshot() []ProxyAliasStatus {
 			if !h.lastChecked.IsZero() {
 				s.LastCheckedUnix = h.lastChecked.Unix()
 			}
+		}
+		if t, ok := ttftByAlias[alias]; ok {
+			s.TtftAvgMs = t.AvgMs
+			s.TtftSamples = t.Samples
 		}
 		out = append(out, s)
 	}

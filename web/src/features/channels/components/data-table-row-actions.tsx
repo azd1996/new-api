@@ -24,6 +24,7 @@ import {
   Pencil,
   PlugZap,
   Gauge,
+  ChartColumn,
   DollarSign,
   Download,
   Copy,
@@ -143,6 +144,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     setOpen('multi-key-manage')
   }
 
+  const handleViewStats = () => {
+    setCurrentRow(channel)
+    setOpen('channel-stats')
+  }
+
   const handleToggleStatus = async (
     e?: React.MouseEvent<HTMLButtonElement>
   ) => {
@@ -204,6 +210,25 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           )}
         </TooltipTrigger>
         <TooltipContent>{t('Test Connection')}</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              onClick={(e) => {
+                e.stopPropagation()
+                handleViewStats()
+              }}
+              aria-label={t('Channel statistics')}
+            />
+          }
+        >
+          <ChartColumn className='size-4' />
+        </TooltipTrigger>
+        <TooltipContent>{t('Channel statistics')}</TooltipContent>
       </Tooltip>
 
       {layout === 'card' && (

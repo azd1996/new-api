@@ -921,6 +921,32 @@ func DeleteDisabledChannel(c *gin.Context) {
 	return
 }
 
+// GetChannelStats returns read-only per-channel statistics for the channel stats
+// panel. Currently it exposes the TTFT-aware proxy routing picture (per model:
+// gate state, each proxy's next-request probability and cumulative pick count on
+// this node). More stat sections can be added to the data object later.
+func GetChannelStats(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	channel, err := model.GetChannelById(id, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	settings := channel.GetSetting()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"proxy_ttft_routing_enabled": settings.ProxyTtftRoutingEnabled,
+			"proxy_routing":              service.ProxyTtftChannelStats(id, settings.ProxyAliases, settings.ProxyTtftRoutingEnabled),
+		},
+	})
+}
+
 type ChannelTag struct {
 	Tag            string  `json:"tag"`
 	NewTag         *string `json:"new_tag"`

@@ -157,7 +157,10 @@ const MODELS_SECTIONS = [
     titleKey: 'Proxy Pool',
     build: (settings: ModelSettings) => (
       <ProxyPoolSection
-        defaultValues={{ proxies: settings['proxy_setting.proxies'] }}
+        defaultValues={{
+          proxies: settings['proxy_setting.proxies'],
+          ttftRouting: settings['proxy_setting.ttft_routing'],
+        }}
       />
     ),
   },

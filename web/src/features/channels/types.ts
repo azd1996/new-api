@@ -96,6 +96,8 @@ export interface ChannelSettings {
   retry_override?: Array<Record<string, unknown>>
   // Named proxy-pool aliases consulted in order before the proxy address.
   proxy_aliases?: string[]
+  // Opt-in TTFT-aware weighted selection among proxy_aliases.
+  proxy_ttft_routing_enabled?: boolean
   upstream_request_id_header?: string
   response_filter?: string[]
   // Reporting-only ratio for the stat amount of free pass-through channels.
@@ -239,6 +241,30 @@ export interface CopyChannelResponse {
   data?: {
     id: number
   }
+}
+
+// ============================================================================
+// Channel Statistics (read-only)
+// ============================================================================
+
+export type ProxyAliasRoutingStat = {
+  alias: string
+  eligible: boolean
+  probability: number
+  picks: number
+  samples: number
+  avg_ttft_ms: number
+}
+
+export type ProxyModelRoutingStat = {
+  model: string
+  gate_active: boolean
+  aliases: ProxyAliasRoutingStat[]
+}
+
+export type ChannelStats = {
+  proxy_ttft_routing_enabled: boolean
+  proxy_routing: ProxyModelRoutingStat[]
 }
 
 // ============================================================================

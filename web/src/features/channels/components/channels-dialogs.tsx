@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { CHANNEL_TYPE_VLLM, CHANNEL_TYPE_SGLANG } from '../constants'
 import { useChannels } from './channels-provider'
 import { BalanceQueryDialog } from './dialogs/balance-query-dialog'
+import { ChannelStatsDialog } from './dialogs/channel-stats-dialog'
 import { ChannelTestDialog } from './dialogs/channel-test-dialog'
 import { CopyChannelDialog } from './dialogs/copy-channel-dialog'
 import { EditTagDialog } from './dialogs/edit-tag-dialog'
@@ -107,6 +108,16 @@ export function ChannelsDialogs() {
 
       {/* Upstream Model Update Dialog */}
       <UpstreamUpdateDialog upstream={upstream} />
+
+      {/* Channel Statistics Dialog */}
+      {open === 'channel-stats' && currentRow && (
+        <ChannelStatsDialog
+          key={currentRow.id}
+          channelId={currentRow.id}
+          channelName={currentRow.name}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </>
   )
 }

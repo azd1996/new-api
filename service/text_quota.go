@@ -680,6 +680,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
 		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota,
 		relayInfo.FirstResponseSeconds())
+	// Feed per-proxy TTFT (keyed by the upstream model used for selection) into
+	// the TTFT-aware proxy router and the per-proxy histogram. No-op for direct
+	// requests and non-streaming/no-first-token responses.
+	RecordProxyTTFT(relayInfo.ChannelId, relayInfo.UpstreamModelName, relayInfo.UsedProxyAlias, relayInfo.FirstResponseSeconds())
 	// Reporting-only amounts (never affect billing): channel-discounted,
 	// customer-discounted and profit, mirroring the per-log stat fields.
 	prommetrics.RecordStatAmounts(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId),

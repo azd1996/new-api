@@ -69,6 +69,7 @@ const defaultModelSettings: ModelSettings = {
   'override_template_setting.param_templates': '[]',
   'override_template_setting.retry_templates': '[]',
   'proxy_setting.proxies': [],
+  'proxy_setting.ttft_routing': {},
 }
 
 export function ModelSettings() {

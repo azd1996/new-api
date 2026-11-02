@@ -271,6 +271,7 @@ export type ModelSettings = {
   'model_deployment.ionet.api_key': string
   'model_deployment.ionet.enabled': boolean
   'proxy_setting.proxies': ProxyPoolEntry[]
+  'proxy_setting.ttft_routing': ProxyTtftRoutingConfig
 }
 
 export type BillingSettings = {
@@ -379,6 +380,17 @@ export type ProxyPoolEntry = {
 
 export type ProxyHealthStatus = 'healthy' | 'unknown' | 'unhealthy'
 
+// ProxyTtftRoutingConfig holds the global thresholds for TTFT-aware weighted
+// proxy selection. A channel opts in with its own toggle; these parameters are
+// shared. Empty/zero values fall back to backend defaults.
+export type ProxyTtftRoutingConfig = {
+  threshold_ms?: number
+  consecutive_bad?: number
+  min_explore_ratio?: number
+  max_divert_ratio?: number
+  sample_window?: number
+}
+
 export type ProxyHealthEntry = {
   alias: string
   status: ProxyHealthStatus
@@ -387,6 +399,9 @@ export type ProxyHealthEntry = {
   p99_ms: number
   samples: number
   last_checked_unix: number
+  // Aggregate TTFT across every channel/model that used this alias.
+  ttft_avg_ms: number
+  ttft_samples: number
 }
 
 export type ProxyHealthResponse = {

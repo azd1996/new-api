@@ -42,6 +42,7 @@ import {
   FormControl,
   FormField,
   FormItem,
+  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
@@ -55,7 +56,12 @@ import { SettingsForm } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
-import type { ProxyHealthEntry, ProxyPoolEntry, ProxyType } from '../types'
+import type {
+  ProxyHealthEntry,
+  ProxyPoolEntry,
+  ProxyTtftRoutingConfig,
+  ProxyType,
+} from '../types'
 
 const PROXY_SCHEME_REGEX = /^(https?|socks5h?):\/\//i
 
@@ -107,9 +113,54 @@ const proxyPoolSchema = z.object({
 
 type ProxyPoolFormValues = z.infer<typeof proxyPoolSchema>
 
+const ttftRoutingSchema = z.object({
+  threshold_ms: z.coerce.number().int().min(1),
+  consecutive_bad: z.coerce.number().int().min(1),
+  min_explore_ratio: z.coerce.number().gt(0).lt(1),
+  max_divert_ratio: z.coerce.number().gt(0).max(1),
+  sample_window: z.coerce.number().int().min(1),
+})
+
+type TtftRoutingFormValues = z.infer<typeof ttftRoutingSchema>
+
+const TTFT_ROUTING_DEFAULTS: TtftRoutingFormValues = {
+  threshold_ms: 3000,
+  consecutive_bad: 3,
+  min_explore_ratio: 0.2,
+  max_divert_ratio: 0.8,
+  sample_window: 50,
+}
+
+const seedTtftRouting = (
+  cfg: ProxyTtftRoutingConfig | undefined
+): TtftRoutingFormValues => ({
+  threshold_ms: cfg?.threshold_ms || TTFT_ROUTING_DEFAULTS.threshold_ms,
+  consecutive_bad:
+    cfg?.consecutive_bad || TTFT_ROUTING_DEFAULTS.consecutive_bad,
+  min_explore_ratio:
+    cfg?.min_explore_ratio || TTFT_ROUTING_DEFAULTS.min_explore_ratio,
+  max_divert_ratio:
+    cfg?.max_divert_ratio || TTFT_ROUTING_DEFAULTS.max_divert_ratio,
+  sample_window: cfg?.sample_window || TTFT_ROUTING_DEFAULTS.sample_window,
+})
+
+// Field metadata for the TTFT routing config inputs (name, i18n label, step).
+const TTFT_ROUTING_FIELDS: Array<{
+  name: keyof TtftRoutingFormValues
+  label: string
+  step: string
+}> = [
+  { name: 'threshold_ms', label: 'Slow TTFT threshold (ms)', step: '1' },
+  { name: 'consecutive_bad', label: 'Consecutive slow samples', step: '1' },
+  { name: 'min_explore_ratio', label: 'Min explore ratio', step: '0.05' },
+  { name: 'max_divert_ratio', label: 'Max divert ratio', step: '0.05' },
+  { name: 'sample_window', label: 'Sample window', step: '1' },
+]
+
 type ProxyPoolSectionProps = {
   defaultValues: {
     proxies: ProxyPoolEntry[]
+    ttftRouting: ProxyTtftRoutingConfig
   }
 }
 
@@ -205,6 +256,21 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
     baselineRef.current = normalized
   }
 
+  const ttftForm = useForm<TtftRoutingFormValues>({
+    resolver: zodResolver(ttftRoutingSchema),
+    defaultValues: seedTtftRouting(props.defaultValues.ttftRouting),
+  })
+  useEffect(() => {
+    ttftForm.reset(seedTtftRouting(props.defaultValues.ttftRouting))
+  }, [props.defaultValues, ttftForm])
+
+  const onSubmitTtft = async (data: TtftRoutingFormValues) => {
+    await updateOption.mutateAsync({
+      key: 'proxy_setting.ttft_routing',
+      value: JSON.stringify(data),
+    })
+  }
+
   return (
     <SettingsSection title={t('Proxy Pool')}>
       <Form {...form}>
@@ -297,6 +363,13 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
                                   ? `P50/P90/P99: ${Math.round(health.p50_ms)}/${Math.round(health.p90_ms)}/${Math.round(health.p99_ms)} ms`
                                   : t('No samples yet')}
                               </span>
+                              {health && health.ttft_samples > 0 && (
+                                <span className='text-muted-foreground'>
+                                  {t('Avg TTFT')}:{' '}
+                                  {Math.round(health.ttft_avg_ms)} ms (
+                                  {health.ttft_samples})
+                                </span>
+                              )}
                             </>
                           )
                         })()}
@@ -411,6 +484,49 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
             >
               <Plus className='mr-2 h-4 w-4' />
               {t('Add proxy')}
+            </Button>
+          </div>
+        </SettingsForm>
+      </Form>
+
+      <Form {...ttftForm}>
+        <SettingsForm onSubmit={ttftForm.handleSubmit(onSubmitTtft)}>
+          <div className='border-t pt-4'>
+            <h4 className='text-sm font-medium'>
+              {t('TTFT-aware routing defaults')}
+            </h4>
+            <p className='text-muted-foreground mt-1 text-sm'>
+              {t(
+                'Global thresholds for TTFT-aware weighted proxy selection. They apply to channels that enable it in channel settings.'
+              )}
+            </p>
+          </div>
+          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+            {TTFT_ROUTING_FIELDS.map((f) => (
+              <FormField
+                key={f.name}
+                control={ttftForm.control}
+                name={f.name}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t(f.label)}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        step={f.step}
+                        {...field}
+                        value={field.value ?? ''}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            ))}
+          </div>
+          <div>
+            <Button type='submit' disabled={updateOption.isPending}>
+              {t('Save TTFT routing')}
             </Button>
           </div>
         </SettingsForm>

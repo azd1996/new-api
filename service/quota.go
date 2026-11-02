@@ -407,6 +407,8 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
 		usage.PromptTokens, usage.CompletionTokens, float64(useTimeSeconds), quota,
 		relayInfo.FirstResponseSeconds())
+	// Per-proxy TTFT for TTFT-aware proxy routing; no-op for direct/non-streaming.
+	RecordProxyTTFT(relayInfo.ChannelId, relayInfo.UpstreamModelName, relayInfo.UsedProxyAlias, relayInfo.FirstResponseSeconds())
 }
 
 func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {

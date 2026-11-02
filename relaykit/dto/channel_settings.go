@@ -22,11 +22,18 @@ type ChannelSettings struct {
 	// proxy is currently eligible (not in failure cooldown) is used; if the
 	// list is empty or none is eligible, it falls back to Proxy. See
 	// service.ResolveChannelProxy.
-	ProxyAliases              []string `json:"proxy_aliases,omitempty"`
-	PassThroughBodyEnabled    bool     `json:"pass_through_body_enabled,omitempty"`
-	ResponsesWebSocketEnabled bool     `json:"responses_websocket_enabled,omitempty"`
-	SystemPrompt              string   `json:"system_prompt,omitempty"`
-	SystemPromptOverride      bool     `json:"system_prompt_override,omitempty"`
+	ProxyAliases []string `json:"proxy_aliases,omitempty"`
+	// ProxyTtftRoutingEnabled turns on TTFT-aware weighted selection among this
+	// channel's ProxyAliases. When off (default) the first eligible alias is used
+	// in strict priority order (legacy failover). When on, once the head proxy's
+	// TTFT is consistently slow, requests are probabilistically diverted to other
+	// aliases and the split is tuned by observed TTFT. Thresholds are global
+	// (system_setting.ProxyTtftRoutingConfig); see service.ResolveChannelProxyWeighted.
+	ProxyTtftRoutingEnabled   bool   `json:"proxy_ttft_routing_enabled,omitempty"`
+	PassThroughBodyEnabled    bool   `json:"pass_through_body_enabled,omitempty"`
+	ResponsesWebSocketEnabled bool   `json:"responses_websocket_enabled,omitempty"`
+	SystemPrompt              string `json:"system_prompt,omitempty"`
+	SystemPromptOverride      bool   `json:"system_prompt_override,omitempty"`
 	// UpstreamRequestIdHeader is the upstream response header to read as the
 	// upstream request ID for logging. Empty falls back to common.RequestIdKey
 	// (X-Oneapi-Request-Id). Matched case-insensitively via http.Header.Get.

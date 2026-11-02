@@ -1866,6 +1866,31 @@ export function ChannelMutateDrawer({
     />
   )
 
+  const proxyTtftRoutingFields = (
+    <FormField
+      control={form.control}
+      name='proxy_ttft_routing_enabled'
+      render={({ field }) => (
+        <FormItem className='flex items-center justify-between px-4 py-3'>
+          <div className='space-y-0.5'>
+            <FormLabel>{t('TTFT-aware proxy routing')}</FormLabel>
+            <FormDescription>
+              {t(
+                'When a proxy alias is consistently slow to first token, probabilistically shift traffic to other aliases and tune the split by observed TTFT. Thresholds are set in the proxy pool (System Settings - Models).'
+              )}
+            </FormDescription>
+          </div>
+          <FormControl>
+            <Switch
+              checked={field.value ?? false}
+              onCheckedChange={field.onChange}
+            />
+          </FormControl>
+        </FormItem>
+      )}
+    />
+  )
+
   const proxyFields = (
     <FormField
       control={form.control}
@@ -5001,6 +5026,7 @@ export function ChannelMutateDrawer({
               >
                 {taskPollingFields}
                 {proxyAliasesFields}
+                {proxyTtftRoutingFields}
                 {proxyFields}
                 {httpProtocolFields}
                 {httpShardsFields}

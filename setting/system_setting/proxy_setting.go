@@ -34,9 +34,41 @@ type ProxyEntry struct {
 	Locked bool `json:"locked,omitempty"`
 }
 
+// ProxyTtftRoutingConfig holds the global thresholds for TTFT-aware weighted
+// proxy selection. A channel opts in with ChannelSettings.ProxyTtftRoutingEnabled;
+// these parameters are shared across all channels. All values fall back to the
+// defaults below via GetProxyTtftRoutingConfig when unset/invalid.
+type ProxyTtftRoutingConfig struct {
+	// ThresholdMs is the head proxy's "slow" TTFT threshold in milliseconds. A
+	// recorded TTFT at or above it counts as a slow sample.
+	ThresholdMs int `json:"threshold_ms,omitempty"`
+	// ConsecutiveBad is how many consecutive slow samples on the head proxy
+	// activate diversion (and how many consecutive fast samples deactivate it).
+	ConsecutiveBad int `json:"consecutive_bad,omitempty"`
+	// MinExploreRatio is the minimum fraction of traffic diverted away from the
+	// head once diversion is active, so backup proxies keep producing TTFT data.
+	MinExploreRatio float64 `json:"min_explore_ratio,omitempty"`
+	// MaxDivertRatio caps the total fraction diverted away from the head, so the
+	// head always keeps at least (1 - MaxDivertRatio) of the traffic.
+	MaxDivertRatio float64 `json:"max_divert_ratio,omitempty"`
+	// SampleWindow bounds the per (channel, model, alias) TTFT sample ring.
+	SampleWindow int `json:"sample_window,omitempty"`
+}
+
+// Defaults for TTFT-aware proxy routing, applied by GetProxyTtftRoutingConfig.
+const (
+	defaultProxyTtftThresholdMs     = 3000
+	defaultProxyTtftConsecutiveBad  = 3
+	defaultProxyTtftMinExploreRatio = 0.2
+	defaultProxyTtftMaxDivertRatio  = 0.8
+	defaultProxyTtftSampleWindow    = 50
+)
+
 // ProxySetting 存储全局代理表，供各渠道按别名引用。
 type ProxySetting struct {
 	Proxies []ProxyEntry `json:"proxies"`
+	// TtftRouting holds the global thresholds for TTFT-aware weighted selection.
+	TtftRouting ProxyTtftRoutingConfig `json:"ttft_routing,omitempty"`
 }
 
 var defaultProxySetting = ProxySetting{
@@ -50,6 +82,33 @@ func init() {
 
 func GetProxySetting() *ProxySetting {
 	return &defaultProxySetting
+}
+
+// GetProxyTtftRoutingConfig returns the global TTFT routing parameters with
+// defaults applied for any unset or out-of-range field. Ratios are clamped to
+// a sane order (0 < MinExplore <= MaxDivert <= 1) so the weighting math stays
+// well-formed regardless of how the admin filled the form.
+func GetProxyTtftRoutingConfig() ProxyTtftRoutingConfig {
+	c := defaultProxySetting.TtftRouting
+	if c.ThresholdMs <= 0 {
+		c.ThresholdMs = defaultProxyTtftThresholdMs
+	}
+	if c.ConsecutiveBad <= 0 {
+		c.ConsecutiveBad = defaultProxyTtftConsecutiveBad
+	}
+	if c.SampleWindow <= 0 {
+		c.SampleWindow = defaultProxyTtftSampleWindow
+	}
+	if c.MinExploreRatio <= 0 || c.MinExploreRatio >= 1 {
+		c.MinExploreRatio = defaultProxyTtftMinExploreRatio
+	}
+	if c.MaxDivertRatio <= 0 || c.MaxDivertRatio > 1 {
+		c.MaxDivertRatio = defaultProxyTtftMaxDivertRatio
+	}
+	if c.MaxDivertRatio < c.MinExploreRatio {
+		c.MaxDivertRatio = c.MinExploreRatio
+	}
+	return c
 }
 
 // onProxyPoolChanged is fired after the global proxy table changes so other

@@ -19,6 +19,7 @@ var (
 	completionTokens *prometheus.CounterVec
 	relayDuration    *prometheus.HistogramVec
 	relayTtft        *prometheus.HistogramVec
+	proxyTtft        *prometheus.HistogramVec
 	quotaUsed        *prometheus.CounterVec
 	quotaPerUnit     prometheus.Gauge
 	errorsTotal      *prometheus.CounterVec
@@ -72,6 +73,11 @@ func Init() {
 			Help:    "Upstream relay time-to-first-token in seconds (streaming responses only).",
 			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60},
 		}, []string{"model", "group", "channel"})
+		proxyTtft = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "newapi_proxy_ttft_seconds",
+			Help:    "Streaming time-to-first-token in seconds per outbound proxy alias, for TTFT-aware proxy routing.",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60},
+		}, []string{"channel", "proxy", "model"})
 		quotaUsed = prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "newapi_relay_quota_used_total",
 			Help: "Total quota (internal unit) consumed by relay requests.",
@@ -97,7 +103,7 @@ func Init() {
 			Help: "Reporting-only cumulative profit in quota units (customer-discounted minus channel-discounted) over customer-bearing requests; may decrease and resets on restart.",
 		}, []string{"model", "group", "channel"})
 		registry.MustRegister(httpRequests, httpDuration, relayRequests,
-			promptTokens, completionTokens, relayDuration, relayTtft, quotaUsed, quotaPerUnit, errorsTotal,
+			promptTokens, completionTokens, relayDuration, relayTtft, proxyTtft, quotaUsed, quotaPerUnit, errorsTotal,
 			channelStatQuota, customerStatQuota, profitQuota)
 	})
 }
@@ -175,6 +181,16 @@ func RecordRelay(model, group, channel, result string,
 	if quota > 0 {
 		quotaUsed.WithLabelValues(model, group, channel).Add(float64(quota))
 	}
+}
+
+// RecordProxyTtft records one streaming TTFT sample attributed to the outbound
+// proxy alias that served the request, for TTFT-aware proxy routing dashboards.
+// ttftSeconds must be positive. No-op when metrics are disabled.
+func RecordProxyTtft(channel, proxy, model string, ttftSeconds float64) {
+	if registry == nil || ttftSeconds <= 0 {
+		return
+	}
+	proxyTtft.WithLabelValues(channel, proxy, model).Observe(ttftSeconds)
 }
 
 // RecordStatAmounts records the reporting-only settlement amounts (quota units)

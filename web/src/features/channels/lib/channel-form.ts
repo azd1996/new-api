@@ -277,6 +277,8 @@ export const channelFormSchema = z
     // Named proxy-pool aliases (stored in setting JSON as string[]). Consulted
     // in order; the first healthy proxy wins, else fall back to `proxy`.
     proxy_aliases: z.array(z.string()).optional(),
+    // Opt-in TTFT-aware weighted proxy selection among proxy_aliases.
+    proxy_ttft_routing_enabled: z.boolean().optional(),
     // Retry override (stored in setting JSON as an array of four-phase rules).
     // Kept as a pretty-printed JSON string in the form, edited as multiline text.
     retry_override: z.string().optional(),
@@ -484,6 +486,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   system_prompt: '',
   system_prompt_override: false,
   proxy_aliases: [],
+  proxy_ttft_routing_enabled: false,
   retry_override: '',
   upstream_request_id_header: '',
   response_filter: '',
@@ -538,6 +541,7 @@ export function transformChannelToFormDefaults(
     system_prompt: '',
     system_prompt_override: false,
     proxy_aliases: [] as string[],
+    proxy_ttft_routing_enabled: false,
     retry_override: '',
     upstream_request_id_header: '',
     response_filter: '',
@@ -572,6 +576,7 @@ export function transformChannelToFormDefaults(
               (alias: unknown): alias is string => typeof alias === 'string'
             )
           : [],
+        proxy_ttft_routing_enabled: parsed.proxy_ttft_routing_enabled === true,
         retry_override: Array.isArray(parsed.retry_override)
           ? JSON.stringify(parsed.retry_override, null, 2)
           : '',
@@ -746,6 +751,9 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   const proxyAliases = trimNonEmpty(formData.proxy_aliases)
   if (proxyAliases.length > 0) {
     settingObj.proxy_aliases = proxyAliases
+  }
+  if (formData.proxy_ttft_routing_enabled) {
+    settingObj.proxy_ttft_routing_enabled = true
   }
 
   if (formData.retry_override && formData.retry_override.trim() !== '') {
