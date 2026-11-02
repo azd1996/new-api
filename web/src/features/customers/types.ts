@@ -22,6 +22,29 @@ import { z } from 'zod'
 // Customer Schema & Types
 // ============================================================================
 
+const cacheOptimizationRuleSchema = z.object({
+  enabled: z.boolean(),
+  model_prefixes: z
+    .array(z.string())
+    .nullable()
+    .transform((value) => value ?? []),
+})
+
+export const claudeCacheOptimizationSchema = z.object({
+  force_extended_ttl: cacheOptimizationRuleSchema,
+  fix_volatile_breakpoint: cacheOptimizationRuleSchema,
+  retain_previous_breakpoint: cacheOptimizationRuleSchema,
+  stable_base_breakpoint: cacheOptimizationRuleSchema,
+  fallback_cache_breakpoint: cacheOptimizationRuleSchema.default({
+    enabled: false,
+    model_prefixes: [],
+  }),
+})
+
+export type ClaudeCacheOptimization = z.infer<
+  typeof claudeCacheOptimizationSchema
+>
+
 export const customerSchema = z.object({
   id: z.number(),
   customer_id: z.string(), // unique business id (the downstream api_key_id)
@@ -30,6 +53,7 @@ export const customerSchema = z.object({
   prefix_discounts: z.record(z.string(), z.number()), // model-name prefix -> multiplier
   created_time: z.number(),
   updated_time: z.number(),
+  claude_cache_optimization: claudeCacheOptimizationSchema.nullish(),
 })
 
 export type Customer = z.infer<typeof customerSchema>
@@ -72,10 +96,11 @@ export interface CustomerFormData {
   name: string
   remark: string
   prefix_discounts: Record<string, number>
+  claude_cache_optimization?: ClaudeCacheOptimization
 }
 
 // ============================================================================
 // Dialog Types
 // ============================================================================
 
-export type CustomersDialogType = 'create' | 'update' | 'delete'
+export type CustomersDialogType = 'create' | 'update' | 'delete' | 'stats'

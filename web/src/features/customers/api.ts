@@ -1,3 +1,7 @@
+import type {
+  LogAnalysisResult,
+  SessionCacheRangeAnalysisResponse,
+} from '@/features/usage-logs/types'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,6 +21,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import {
+  createServerError,
+  requireServerSuccess,
+} from '@/lib/server-error-message'
 
 import type {
   ApiResponse,
@@ -79,4 +87,36 @@ export async function updateCustomer(
 export async function deleteCustomer(id: number): Promise<ApiResponse> {
   const res = await api.delete(`/api/customer/${id}`)
   return res.data
+}
+
+export type CustomerStatisticsParams = {
+  customer_id: string
+  start_timestamp: number
+  end_timestamp: number
+}
+
+export async function getCustomerLogAnalysis(
+  params: CustomerStatisticsParams,
+  signal?: AbortSignal
+) {
+  const response = await api.get<ApiResponse<LogAnalysisResult>>(
+    '/api/log/analysis',
+    { params, signal }
+  )
+  const result = requireServerSuccess(response.data)
+  if (!result.data) throw createServerError(result, 'Failed to load analysis')
+  return result.data
+}
+
+export async function getCustomerCacheAnalysis(
+  params: CustomerStatisticsParams,
+  signal?: AbortSignal
+) {
+  const response = await api.get<SessionCacheRangeAnalysisResponse>(
+    '/api/log/cache-skeleton/sessions/analysis',
+    { params, signal }
+  )
+  const result = requireServerSuccess(response.data)
+  if (!result.data) throw createServerError(result, 'Failed to load analysis')
+  return result.data
 }

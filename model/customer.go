@@ -10,8 +10,8 @@ import (
 
 // Customer maps a downstream customer id (the api_key_id decoded from the
 // x-bce-aigw-trace-tag header) to a human-readable name plus per-model-series
-// stat discounts. It is admin-managed and used only for log display /
-// reconciliation (reporting-only amounts); it never changes actual billing.
+// stat discounts and optional Claude cache optimization overrides. Discounts
+// are reporting-only and never change actual billing.
 type Customer struct {
 	Id         int    `json:"id"`
 	CustomerId string `json:"customer_id" gorm:"type:varchar(64);uniqueIndex"`
@@ -22,11 +22,72 @@ type Customer struct {
 	// gpt / gemini / grok) to its discount; a model takes the longest matching
 	// prefix. PrefixDiscounts is the serialized JSON persisted to the DB and
 	// PrefixDiscountMap its decoded form used by the API and cache.
-	DefaultDiscount   float64            `json:"default_discount"`
-	PrefixDiscounts   string             `json:"-" gorm:"type:text"`
-	PrefixDiscountMap map[string]float64 `json:"prefix_discounts" gorm:"-"`
-	CreatedTime       int64              `json:"created_time" gorm:"bigint"`
-	UpdatedTime       int64              `json:"updated_time" gorm:"bigint"`
+	DefaultDiscount             float64                          `json:"default_discount"`
+	PrefixDiscounts             string                           `json:"-" gorm:"type:text"`
+	PrefixDiscountMap           map[string]float64               `json:"prefix_discounts" gorm:"-"`
+	CreatedTime                 int64                            `json:"created_time" gorm:"bigint"`
+	UpdatedTime                 int64                            `json:"updated_time" gorm:"bigint"`
+	ClaudeCacheOptimizationJSON string                           `json:"-" gorm:"column:claude_cache_optimization_json;type:text"`
+	ClaudeCacheOptimization     *CustomerClaudeCacheOptimization `json:"claude_cache_optimization" gorm:"-"`
+}
+
+// CustomerClaudeCacheOptimization overrides all five global rules when non-nil.
+// A nil configuration inherits legacy global behavior; disabled rules never do.
+type CustomerClaudeCacheOptimization struct {
+	ForceExtendedTTL         CustomerClaudeCacheOptimizationRule `json:"force_extended_ttl"`
+	FixVolatileBreakpoint    CustomerClaudeCacheOptimizationRule `json:"fix_volatile_breakpoint"`
+	RetainPreviousBreakpoint CustomerClaudeCacheOptimizationRule `json:"retain_previous_breakpoint"`
+	StableBaseBreakpoint     CustomerClaudeCacheOptimizationRule `json:"stable_base_breakpoint"`
+	FallbackCacheBreakpoint  CustomerClaudeCacheOptimizationRule `json:"fallback_cache_breakpoint"`
+}
+
+type CustomerClaudeCacheOptimizationRule struct {
+	Enabled       bool     `json:"enabled"`
+	ModelPrefixes []string `json:"model_prefixes"`
+}
+
+// Matches applies only within Claude relay paths. Empty prefixes mean every
+// model on those paths, including aliases; prefixes are literal, case-insensitive.
+func (r CustomerClaudeCacheOptimizationRule) Matches(model string) bool {
+	if !r.Enabled {
+		return false
+	}
+	if len(r.ModelPrefixes) == 0 {
+		return true
+	}
+	for _, prefix := range r.ModelPrefixes {
+		prefix = strings.TrimSpace(prefix)
+		if prefix != "" && strings.HasPrefix(strings.ToLower(model), strings.ToLower(prefix)) {
+			return true
+		}
+	}
+	return false
+}
+
+// clone normalizes prefixes without sharing writable slices with the source.
+func (o *CustomerClaudeCacheOptimization) clone() *CustomerClaudeCacheOptimization {
+	if o == nil {
+		return nil
+	}
+	result := *o
+	for _, rule := range []*CustomerClaudeCacheOptimizationRule{
+		&result.ForceExtendedTTL, &result.FixVolatileBreakpoint,
+		&result.RetainPreviousBreakpoint, &result.StableBaseBreakpoint,
+		&result.FallbackCacheBreakpoint,
+	} {
+		prefixes := make([]string, 0, len(rule.ModelPrefixes))
+		seen := make(map[string]bool, len(rule.ModelPrefixes))
+		for _, prefix := range rule.ModelPrefixes {
+			prefix = strings.TrimSpace(prefix)
+			key := strings.ToLower(prefix)
+			if prefix != "" && !seen[key] {
+				prefixes = append(prefixes, prefix)
+				seen[key] = true
+			}
+		}
+		rule.ModelPrefixes = prefixes
+	}
+	return &result
 }
 
 // normalizeDiscount coerces any non-positive, NaN or Inf discount to 1 (no
@@ -38,9 +99,19 @@ func normalizeDiscount(d float64) float64 {
 	return d
 }
 
-// hydrate decodes the stored PrefixDiscounts JSON into PrefixDiscountMap,
-// dropping any non-positive / invalid entries.
+// hydrate decodes the independent configuration columns. Invalid discount
+// entries are dropped; corrupt cache optimization overrides disable all rules.
 func (c *Customer) hydrate() {
+	c.ClaudeCacheOptimization = nil
+	if strings.TrimSpace(c.ClaudeCacheOptimizationJSON) != "" {
+		var config *CustomerClaudeCacheOptimization
+		if err := common.UnmarshalJsonStr(c.ClaudeCacheOptimizationJSON, &config); err != nil {
+			common.SysError("failed to parse customer Claude cache optimization: " + err.Error())
+			// Corrupt explicit configuration must not fall back to global enablement.
+			config = &CustomerClaudeCacheOptimization{}
+		}
+		c.ClaudeCacheOptimization = config.clone()
+	}
 	c.PrefixDiscountMap = map[string]float64{}
 	if strings.TrimSpace(c.PrefixDiscounts) == "" {
 		return
@@ -61,6 +132,15 @@ func (c *Customer) hydrate() {
 // serialize normalizes the API-facing map and writes it back to the stored
 // string column, keeping only valid positive entries.
 func (c *Customer) serialize() error {
+	c.ClaudeCacheOptimizationJSON = ""
+	if c.ClaudeCacheOptimization != nil {
+		c.ClaudeCacheOptimization = c.ClaudeCacheOptimization.clone()
+		b, err := common.Marshal(c.ClaudeCacheOptimization)
+		if err != nil {
+			return err
+		}
+		c.ClaudeCacheOptimizationJSON = string(b)
+	}
 	clean := map[string]float64{}
 	for prefix, d := range c.PrefixDiscountMap {
 		prefix = strings.TrimSpace(prefix)
@@ -155,8 +235,14 @@ func (c *Customer) Update() error {
 	c.UpdatedTime = common.GetTimestamp()
 	// Select the columns explicitly so clearing Name/Remark/discounts persists
 	// (GORM's Updates skips zero values otherwise).
+	columns := []string{"customer_id", "name", "remark", "default_discount", "prefix_discounts", "updated_time"}
+	// Legacy clients omit this field. Only an explicit object replaces the
+	// persisted override; an empty object explicitly disables every rule.
+	if c.ClaudeCacheOptimization != nil {
+		columns = append(columns, "claude_cache_optimization_json")
+	}
 	err := DB.Model(c).Where("id = ?", c.Id).
-		Select("customer_id", "name", "remark", "default_discount", "prefix_discounts", "updated_time").
+		Select(columns).
 		Updates(c).Error
 	if err != nil {
 		return err

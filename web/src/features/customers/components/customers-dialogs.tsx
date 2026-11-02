@@ -16,9 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { lazy, Suspense } from 'react'
+
 import { CustomersDeleteDialog } from './customers-delete-dialog'
 import { CustomersMutateDrawer } from './customers-mutate-drawer'
 import { useCustomers } from './customers-provider'
+
+const CustomerStatsDialog = lazy(() =>
+  import('./customer-stats-dialog').then((module) => ({
+    default: module.CustomerStatsDialog,
+  }))
+)
 
 export function CustomersDialogs() {
   const { open, setOpen, currentRow } = useCustomers()
@@ -32,6 +40,15 @@ export function CustomersDialogs() {
         currentRow={isUpdate ? currentRow || undefined : undefined}
       />
       <CustomersDeleteDialog />
+      {open === 'stats' && currentRow && (
+        <Suspense fallback={null}>
+          <CustomerStatsDialog
+            key={currentRow.customer_id}
+            customer={currentRow}
+            onClose={() => setOpen(null)}
+          />
+        </Suspense>
+      )}
     </>
   )
 }

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -94,9 +95,20 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	// recorded once the attempt ends, success or not.
 	var cacheSkeleton *model.CacheSkeleton
 	var cacheSkeletonUsage *dto.Usage
+	var retainPreviousBreakpoint bool
+	_, _, cacheCustomerID, customerDecoded := common.TraceTagFromContext(c)
+	if !customerDecoded {
+		cacheCustomerID = ""
+	}
 	defer func() {
 		if cacheSkeleton != nil {
 			finishCacheSkeleton(c, info, cacheSkeleton, cacheSkeletonUsage, newAPIError)
+			if retainPreviousBreakpoint {
+				key := claudeCacheBreakpointStateKey(info, cacheSkeleton)
+				if key != "" {
+					rememberClaudeCacheBreakpointState(cacheCustomerID+"\x1f"+key, cacheSkeleton)
+				}
+			}
 		}
 	}()
 
@@ -163,14 +175,66 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
+		// Resolve cache policies against the final model and prompt after channel
+		// and retry rewrites, so retained anchors describe what is actually sent.
+		if len(info.ParamOverride) > 0 || len(info.PendingRetryRewrite) > 0 {
+			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+			if err != nil {
+				return newAPIErrorFromParamOverride(err)
+			}
+		}
+		claudeModel = gjson.GetBytes(jsonData, "model").String()
+		cachePolicy := resolveClaudeCacheOptimization(
+			model.GetCustomerClaudeCacheOptimization(cacheCustomerID), claudeGroup, claudeModel)
+		retainPreviousBreakpoint = cachePolicy.RetainPreviousBreakpoint.Enabled
+
 		// For configured (group, model) rules, move a breakpoint that sits on a
 		// volatile trailing reminder onto the last stable block before it. Runs
 		// before the forced TTL so a new breakpoint is raised to 1h as well.
 		cacheBreakpointFix := ""
-		if operation_setting.ShouldFixCacheBreakpoints(claudeGroup, claudeModel) {
-			jsonData, cacheBreakpointFix, err = fixClaudeCacheBreakpoints(jsonData)
+		if cachePolicy.FallbackCacheBreakpoint.Enabled {
+			var fallbackAdded bool
+			jsonData, fallbackAdded, err = addClaudeFallbackCacheBreakpoint(jsonData)
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if fallbackAdded {
+				cacheBreakpointFix = cacheBreakpointAdded
+			}
+		}
+		if cachePolicy.FixVolatileBreakpoint.Enabled {
+			var volatileFix string
+			jsonData, volatileFix, err = fixClaudeCacheBreakpoints(jsonData)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if volatileFix != "" {
+				cacheBreakpointFix = volatileFix
+			}
+		}
+		if cachePolicy.StableBaseBreakpoint.Enabled {
+			var baseAdded bool
+			jsonData, baseAdded, err = addClaudeStableBaseBreakpoint(jsonData)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if baseAdded && cacheBreakpointFix == "" {
+				cacheBreakpointFix = cacheBreakpointAdded
+			}
+		}
+		if retainPreviousBreakpoint {
+			currentSkeleton := buildClaudeCacheSkeleton(jsonData)
+			currentSkeleton.SessionId = claudeSessionID(jsonData)
+			key := claudeCacheBreakpointStateKey(info, currentSkeleton)
+			if key != "" {
+				key = cacheCustomerID + "\x1f" + key
+			}
+			previous := getClaudeCacheBreakpointState(key, time.Now())
+			if previous != nil {
+				jsonData, _, err = retainClaudeCacheBreakpoints(jsonData, previous)
+				if err != nil {
+					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+				}
 			}
 		}
 		// clear_at messages need their beta header and no cache_control on a
@@ -187,20 +251,12 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		// rewrite every existing cache_control breakpoint to ttl=1h and append the
 		// extended cache TTL beta header. Only list models that support 1h, else
 		// Bedrock returns ValidationException.
-		if operation_setting.ShouldForceExtendedCacheTTL(claudeGroup, claudeModel) {
+		if cachePolicy.ForceExtendedTTL.Enabled {
 			jsonData, err = forceClaudeCacheControlTTL(jsonData, claudeExtendedCacheTTL)
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}
 			c.Request.Header.Set("anthropic-beta", mergeAnthropicBeta(c.Request.Header.Get("anthropic-beta"), claudeExtendedCacheBeta))
-		}
-
-		// apply param override
-		if len(info.ParamOverride) > 0 || len(info.PendingRetryRewrite) > 0 {
-			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
-			if err != nil {
-				return newAPIErrorFromParamOverride(err)
-			}
 		}
 
 		// Record the final outbound session after param and retry overrides.
@@ -213,9 +269,10 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 		recordRequestSessionID(c, claudeSID, claudeSource)
-		if model.CacheSkeletonEnabled() {
+		if model.CacheSkeletonEnabled() || retainPreviousBreakpoint {
 			cacheSkeleton = buildClaudeCacheSkeleton(jsonData)
 			cacheSkeleton.Fixed = cacheBreakpointFix
+			cacheSkeleton.SessionId = claudeSID
 		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
@@ -256,6 +313,27 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	cacheSkeletonUsage, _ = usage.(*dto.Usage)
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
 	return nil
+}
+
+// resolveClaudeCacheOptimization turns the customer's complete override into
+// independent decisions for this model. Only an absent override inherits globals.
+func resolveClaudeCacheOptimization(config *model.CustomerClaudeCacheOptimization, group, modelName string) model.CustomerClaudeCacheOptimization {
+	if config == nil {
+		fix := operation_setting.ShouldFixCacheBreakpoints(group, modelName)
+		return model.CustomerClaudeCacheOptimization{
+			ForceExtendedTTL:         model.CustomerClaudeCacheOptimizationRule{Enabled: operation_setting.ShouldForceExtendedCacheTTL(group, modelName)},
+			FixVolatileBreakpoint:    model.CustomerClaudeCacheOptimizationRule{Enabled: fix},
+			StableBaseBreakpoint:     model.CustomerClaudeCacheOptimizationRule{Enabled: fix},
+			RetainPreviousBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: model.CacheSkeletonEnabled()},
+		}
+	}
+	return model.CustomerClaudeCacheOptimization{
+		ForceExtendedTTL:         model.CustomerClaudeCacheOptimizationRule{Enabled: config.ForceExtendedTTL.Matches(modelName)},
+		FixVolatileBreakpoint:    model.CustomerClaudeCacheOptimizationRule{Enabled: config.FixVolatileBreakpoint.Matches(modelName)},
+		StableBaseBreakpoint:     model.CustomerClaudeCacheOptimizationRule{Enabled: config.StableBaseBreakpoint.Matches(modelName)},
+		RetainPreviousBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: config.RetainPreviousBreakpoint.Matches(modelName)},
+		FallbackCacheBreakpoint:  model.CustomerClaudeCacheOptimizationRule{Enabled: config.FallbackCacheBreakpoint.Matches(modelName)},
+	}
 }
 
 // claudeDerivedDeviceIDLen is the number of trailing API-key characters used as
@@ -421,7 +499,11 @@ const (
 // untouched. The block's existing "type" (ephemeral) is preserved.
 func forceClaudeCacheControlTTL(jsonData []byte, ttl string) ([]byte, error) {
 	var err error
-	for _, path := range claudeCacheControlPaths(jsonData) {
+	paths := claudeCacheControlPaths(jsonData)
+	if gjson.GetBytes(jsonData, "cache_control").IsObject() {
+		paths = append(paths, "cache_control")
+	}
+	for _, path := range paths {
 		jsonData, err = sjson.SetBytes(jsonData, path+".ttl", ttl)
 		if err != nil {
 			return jsonData, err

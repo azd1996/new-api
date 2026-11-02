@@ -44,6 +44,7 @@ import {
   skeletonUpstreamSplit,
 } from '../lib/cache-skeleton'
 import type { SkeletonLane, SkeletonRates, SkeletonTurn } from '../types'
+import { CacheLossBreakdown } from './cache-loss-breakdown'
 import { CacheSkeletonDialog } from './dialogs/cache-skeleton-dialog'
 
 const SEGMENT_CLASSES: Record<string, string> = {
@@ -245,6 +246,7 @@ export function SessionCacheDiagnosis(props: { sessionId: string }) {
           {t('Only the first 2000 attempts of this session are analyzed')}
         </div>
       )}
+      <CacheLossBreakdown summary={data.loss_summary} />
       {showTurns &&
         lanes.map((lane) => (
           <div key={lane.lane} className='space-y-1'>

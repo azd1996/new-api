@@ -25,6 +25,8 @@ const (
 	SkeletonReasonChannelSwitch = "channel_switch"
 	SkeletonReasonUpstreamMiss  = "upstream_miss"
 	SkeletonReasonHit           = "hit"
+	SkeletonReasonLookback      = "lookback_exceeded"
+	SkeletonReasonNewContent    = "new_content"
 	// OpenAI only: a changed prompt_cache_key routes the turn away from the
 	// machine holding its prefix; previous_response_id hides the prefix.
 	SkeletonReasonCacheKeyChanged  = "cache_key_changed"
@@ -93,6 +95,7 @@ type SkeletonTurn struct {
 	TotalBytes         uint64                   `json:"total_bytes"`
 	Segments           []SkeletonSegment        `json:"segments"`
 	Breakpoints        []SkeletonBreakpointMark `json:"breakpoints"`
+	Losses             []SkeletonLossAmount     `json:"losses,omitempty"`
 }
 
 // SkeletonRates sums tokens of successful turns: Actual is what upstream
@@ -115,17 +118,19 @@ func (r *SkeletonRates) add(o SkeletonRates) {
 }
 
 type SkeletonLane struct {
-	Lane     string         `json:"lane"`
-	Model    string         `json:"model"`
-	Provider string         `json:"provider"`
-	Turns    []SkeletonTurn `json:"turns"`
-	Summary  SkeletonRates  `json:"summary"`
+	Lane        string              `json:"lane"`
+	Model       string              `json:"model"`
+	Provider    string              `json:"provider"`
+	Turns       []SkeletonTurn      `json:"turns"`
+	Summary     SkeletonRates       `json:"summary"`
+	LossSummary SkeletonLossSummary `json:"loss_summary"`
 }
 
 type SessionCacheAnalysis struct {
-	Lanes     []SkeletonLane `json:"lanes"`
-	Summary   SkeletonRates  `json:"summary"`
-	Truncated bool           `json:"truncated"`
+	Lanes       []SkeletonLane      `json:"lanes"`
+	Summary     SkeletonRates       `json:"summary"`
+	Truncated   bool                `json:"truncated"`
+	LossSummary SkeletonLossSummary `json:"loss_summary"`
 }
 
 // GetSessionCacheAnalysis loads a session's skeletons and simulates them.
@@ -145,9 +150,10 @@ func GetSessionCacheAnalysis(sessionId string) (*SessionCacheAnalysis, error) {
 }
 
 type SessionCacheRangeAnalysis struct {
-	Summary   SkeletonRates `json:"summary"`
-	Provider  string        `json:"provider"`
-	Truncated bool          `json:"truncated"`
+	Summary     SkeletonRates       `json:"summary"`
+	Provider    string              `json:"provider"`
+	Truncated   bool                `json:"truncated"`
+	LossSummary SkeletonLossSummary `json:"loss_summary"`
 }
 
 // GetSessionCacheRangeAnalysis replays skeletons for sessions matching the
@@ -196,7 +202,9 @@ func GetSessionCacheRangeAnalysis(userId int, filter LogFilter) (*SessionCacheRa
 			sessionRows = sessionRows[:skeletonSessionRowLimit]
 			result.Truncated = true
 		}
-		result.Summary.add(AnalyzeCacheSkeletons(sessionRows).Summary)
+		analysis := AnalyzeCacheSkeletons(sessionRows)
+		result.Summary.add(analysis.Summary)
+		result.LossSummary.add(analysis.LossSummary)
 	}
 	for provider := range providers {
 		if result.Provider == "" {
@@ -229,6 +237,7 @@ func AnalyzeCacheSkeletons(rows []*CacheSkeleton) *SessionCacheAnalysis {
 	for _, lr := range laneRows {
 		lane := analyzeSkeletonLane(lr)
 		result.Summary.add(lane.Summary)
+		result.LossSummary.add(lane.LossSummary)
 		result.Lanes = append(result.Lanes, lane)
 	}
 	return result
@@ -264,7 +273,7 @@ func newSkeletonCacheSim(ignoreTTL bool, lookback int) *skeletonCacheSim {
 func (s *skeletonCacheSim) lookup(prefix []uint64, cumTokens []int64, bps []skeletonBreakpoint, at time.Time) int64 {
 	var best int64
 	for _, bp := range bps {
-		for k := bp.idx; k >= 0 && k >= bp.idx-s.lookback; k-- {
+		for k := bp.idx; k >= 0 && k > bp.idx-s.lookback; k-- {
 			e := s.entries[prefix[k]]
 			if e == nil || at.Before(e.availableAt) || (!s.ignoreTTL && at.After(e.expireAt)) {
 				continue
@@ -393,6 +402,7 @@ func withSkeletonTTL(bps []skeletonBreakpoint, ttl time.Duration) []skeletonBrea
 type skeletonExpectation struct {
 	current, adjusted, adjusted1h int64
 	losses                        []skeletonLoss
+	lookback, pending, fallback   int64
 }
 
 type skeletonLoss struct {
@@ -412,6 +422,7 @@ type skeletonLaneSim interface {
 type claudeLaneSim struct {
 	minTokens                            int64
 	current, noTTL, adjusted, adjusted1h *skeletonCacheSim
+	fallback                             *skeletonCacheSim
 }
 
 func newClaudeLaneSim(modelName string) *claudeLaneSim {
@@ -421,6 +432,7 @@ func newClaudeLaneSim(modelName string) *claudeLaneSim {
 		noTTL:      newSkeletonCacheSim(true, skeletonLookback),
 		adjusted:   newSkeletonCacheSim(false, skeletonLookback),
 		adjusted1h: newSkeletonCacheSim(false, skeletonLookback),
+		fallback:   newSkeletonCacheSim(false, skeletonLookback),
 	}
 }
 
@@ -430,6 +442,21 @@ func (s *claudeLaneSim) replay(row *CacheSkeleton, cumTokens []int64) skeletonEx
 	adjusted := adjustSkeletonBreakpoints(row, bps)
 	adjusted1h := withSkeletonTTL(adjusted, time.Hour)
 	var e skeletonExpectation
+	// Probes do not refresh entries: these are independent diagnostic
+	// counterfactuals, not reads that actually happened.
+	e.lookback = s.current.probe(prefix, cumTokens, bps, row.Ts, false, true)
+	e.pending = s.current.probe(prefix, cumTokens, bps, row.Ts, true, false)
+	fallback := bps
+	if len(fallback) == 0 {
+		for i := len(row.BlkKind) - 1; i >= 0; i-- {
+			if strings.HasSuffix(row.BlkKind[i], ".thinking") || strings.HasSuffix(row.BlkKind[i], ".redacted_thinking") || row.BlkLen[i] == 0 {
+				continue
+			}
+			fallback = []skeletonBreakpoint{{idx: i, ttl: 5 * time.Minute}}
+			break
+		}
+		e.fallback = s.fallback.lookup(prefix, cumTokens, fallback, row.Ts)
+	}
 	e.current = s.current.lookup(prefix, cumTokens, bps, row.Ts)
 	noTTL := s.noTTL.lookup(prefix, cumTokens, bps, row.Ts)
 	e.adjusted = max(s.adjusted.lookup(prefix, cumTokens, adjusted, row.Ts), e.current)
@@ -438,9 +465,12 @@ func (s *claudeLaneSim) replay(row *CacheSkeleton, cumTokens []int64) skeletonEx
 	s.noTTL.write(prefix, cumTokens, bps, row.EndTs, s.minTokens)
 	s.adjusted.write(prefix, cumTokens, adjusted, row.EndTs, s.minTokens)
 	s.adjusted1h.write(prefix, cumTokens, adjusted1h, row.EndTs, s.minTokens)
+	s.fallback.write(prefix, cumTokens, fallback, row.EndTs, s.minTokens)
 	e.losses = []skeletonLoss{
 		{SkeletonReasonTTLExpired, noTTL - e.current},
 		{SkeletonReasonMisplaced, e.adjusted - e.current},
+		{SkeletonReasonLookback, e.lookback - e.current},
+		{SkeletonReasonConcurrent, e.pending - e.current},
 	}
 	return e
 }
@@ -584,6 +614,13 @@ func analyzeSkeletonLane(rows []*CacheSkeleton) SkeletonLane {
 		turn.ExpectedAdjusted1h = expect.adjusted1h
 
 		turn.Reason = classifySkeletonTurn(row, prev, &turn, openAI || len(bps) > 0, minTokens, expect.losses)
+		if !openAI {
+			turn.Losses = skeletonTurnLosses(row, prev, &turn, minTokens, expect)
+			lane.LossSummary.add(SkeletonLossSummary{
+				AnalyzedTurns: 1, TotalTokens: turn.TotalTokens, ActualRead: turn.ActualRead,
+				UncachedTokens: max(0, turn.TotalTokens-turn.ActualRead), Items: turn.Losses,
+			})
+		}
 		lane.Summary.add(SkeletonRates{
 			Total:      turn.TotalTokens,
 			Actual:     turn.ActualRead,

@@ -24,7 +24,14 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 
@@ -32,6 +39,10 @@ import { api } from '@/lib/api'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
+import type {
+  SessionCacheAnalysisResponse,
+  SkeletonLossSummary,
+} from '../../types'
 import { UsageLogsProvider } from '../usage-logs-provider'
 import { UsageLogsSessions } from '../usage-logs-sessions'
 
@@ -71,8 +82,30 @@ const session = {
   },
 }
 
-function mockApi(enabled = true, summaryDelay?: Promise<void>) {
+const lossSummary: SkeletonLossSummary = {
+  analyzed_turns: 2,
+  total_tokens: 1000,
+  actual_read: 400,
+  uncached_tokens: 600,
+  items: [
+    { reason: 'new_content', tokens: 150, turns: 1 },
+    { reason: 'prefix_changed', tokens: 450, turns: 2 },
+  ],
+}
+
+function mockApi(
+  enabled = true,
+  summaryDelay?: Promise<void>,
+  options?: {
+    provider?: string
+    lossSummary?: SkeletonLossSummary
+    detail?: SessionCacheAnalysisResponse['data']
+  }
+) {
   return vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
+    if (url.startsWith('/api/log/cache-skeleton/session?')) {
+      return { data: { success: true, data: options?.detail ?? {} } }
+    }
     if (url.startsWith('/api/log/cache-skeleton/sessions/analysis?')) {
       await summaryDelay
       return {
@@ -80,7 +113,8 @@ function mockApi(enabled = true, summaryDelay?: Promise<void>) {
           success: true,
           data: {
             enabled: true,
-            provider: 'openai',
+            provider: options?.provider ?? 'openai',
+            loss_summary: options?.lossSummary,
             summary: {
               total: 1000,
               actual: 750,
@@ -187,6 +221,9 @@ it('lists sessions collapsed and loads no session requests before expanding', as
   expect(toggle).toHaveAttribute('aria-expanded', 'false')
   expect(screen.getByText('Calculating...')).toBeVisible()
   expect(screen.getByText('Requests')).toBeVisible()
+  expect(
+    screen.getByRole('table').closest('[class*="space-y-2.5"]')
+  ).not.toBeNull()
   await act(async () => finishSummary())
   expect(await screen.findByText('Actual hit rate')).toBeVisible()
   expect(screen.getByText('75.0%')).toBeVisible()
@@ -194,10 +231,106 @@ it('lists sessions collapsed and loads no session requests before expanding', as
   expect(screen.getByText('With one prompt_cache_key')).toBeVisible()
   expect(screen.getByText('One key + 24h retention')).toBeVisible()
   expect(
+    screen.queryByRole('region', { name: 'Cache loss breakdown' })
+  ).not.toBeInTheDocument()
+  expect(
     get.mock.calls.some(([url]) => String(url).startsWith('/api/log/self?'))
   ).toBe(false)
   expect(screen.getByText('cust-1（Acme）, cust-2')).toBeVisible()
 })
+
+it('shows the Claude-only loss denominator in a mixed-provider filtered summary', async () => {
+  const get = mockApi(true, undefined, { provider: 'mixed', lossSummary })
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'admin', role: ROLE.ADMIN })
+  await renderSessions('&model_name=claude-x&channel=5')
+
+  const breakdown = await screen.findByRole('region', {
+    name: 'Cache loss breakdown',
+  })
+  expect(
+    within(breakdown).getByText('Uncached tokens: 600 (60.0%)')
+  ).toBeVisible()
+  const rows = within(breakdown).getAllByRole('row')
+  expect(rows[1]).toHaveTextContent('Prefix or message history changed')
+  expect(
+    within(rows[1])
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent)
+  ).toEqual(['Prefix or message history changed', '2', '450', '75.0%'])
+  expect(rows[2]).toHaveTextContent('New content / residual')
+  expect(screen.getByText('Current strategy upper bound')).toBeVisible()
+  const call = get.mock.calls.find(([url]) =>
+    String(url).startsWith('/api/log/cache-skeleton/sessions/analysis?')
+  )
+  expect(String(call?.[0])).toContain('channel=5')
+  expect(lossSummary.items[0].reason).toBe('new_content')
+})
+
+it('hides losses in a mixed range with no analyzable Claude attempts while keeping rates', async () => {
+  mockApi(true, undefined, {
+    provider: 'mixed',
+    lossSummary: { ...lossSummary, analyzed_turns: 0, items: [] },
+  })
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'admin', role: ROLE.ADMIN })
+  await renderSessions()
+
+  expect(await screen.findByText('Actual hit rate')).toBeVisible()
+  expect(
+    screen.queryByRole('region', { name: 'Cache loss breakdown' })
+  ).not.toBeInTheDocument()
+})
+
+it.each([true, false])(
+  'renders session detail with optional losses present=%s and preserves all four rates',
+  async (withLosses) => {
+    const rates = {
+      total: 1000,
+      actual: 400,
+      current: 600,
+      adjusted: 800,
+      adjusted_1h: 900,
+    }
+    mockApi(true, undefined, {
+      detail: {
+        enabled: true,
+        summary: rates,
+        loss_summary: withLosses ? lossSummary : undefined,
+        lanes: [
+          {
+            lane: 'claude-lane',
+            provider: 'claude',
+            model: 'claude-x',
+            turns: [],
+            summary: rates,
+          },
+        ],
+      },
+    })
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 1, username: 'admin', role: ROLE.ADMIN })
+    await renderSessions()
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Expand session' })
+    )
+
+    const showTurns = await screen.findByRole('button', { name: 'Show turns' })
+    const diagnosis = showTurns.closest('section')
+    if (!diagnosis) throw new Error('Cache diagnosis section not found')
+    for (const rate of ['40.0%', '60.0%', '80.0%', '90.0%']) {
+      expect(within(diagnosis).getByText(rate)).toBeVisible()
+    }
+    expect(
+      within(diagnosis).queryByRole('region', {
+        name: 'Cache loss breakdown',
+      }) !== null
+    ).toBe(withLosses)
+  }
+)
 
 it('expands a session in place and loads all its requests regardless of the time range', async () => {
   const get = mockApi()

@@ -20,7 +20,11 @@ import type { TFunction } from 'i18next'
 import { z } from 'zod'
 
 import { CUSTOMER_VALIDATION, getCustomerFormErrorMessages } from '../constants'
-import type { Customer, CustomerFormData } from '../types'
+import {
+  claudeCacheOptimizationSchema,
+  type Customer,
+  type CustomerFormData,
+} from '../types'
 
 // ============================================================================
 // Model Discount Row
@@ -37,6 +41,10 @@ export type PrefixDiscountRow = {
 
 export function getCustomerFormSchema(t: TFunction) {
   const msg = getCustomerFormErrorMessages(t)
+  const rule = z.object({
+    enabled: z.boolean(),
+    model_prefixes: z.array(z.string()),
+  })
   return z.object({
     customer_id: z
       .string()
@@ -53,15 +61,21 @@ export function getCustomerFormSchema(t: TFunction) {
       })
     ),
     remark: z.string(),
+    claude_cache_optimization: z
+      .object({
+        force_extended_ttl: rule,
+        fix_volatile_breakpoint: rule,
+        retain_previous_breakpoint: rule,
+        stable_base_breakpoint: rule,
+        fallback_cache_breakpoint: rule,
+      })
+      .nullable(),
   })
 }
 
-export type CustomerFormValues = {
-  customer_id: string
-  name: string
-  prefix_discounts: PrefixDiscountRow[]
-  remark: string
-}
+export type CustomerFormValues = z.infer<
+  ReturnType<typeof getCustomerFormSchema>
+>
 
 // ============================================================================
 // Form Defaults
@@ -72,6 +86,7 @@ export const CUSTOMER_FORM_DEFAULT_VALUES: CustomerFormValues = {
   name: '',
   prefix_discounts: [],
   remark: '',
+  claude_cache_optimization: null,
 }
 
 // ============================================================================
@@ -98,6 +113,9 @@ export function transformFormDataToPayload(
     name: data.name,
     remark: data.remark,
     prefix_discounts: prefixDiscounts,
+    ...(data.claude_cache_optimization
+      ? { claude_cache_optimization: data.claude_cache_optimization }
+      : {}),
   }
 }
 
@@ -117,5 +135,8 @@ export function transformCustomerToFormDefaults(
     name: customer.name,
     prefix_discounts: prefixDiscounts,
     remark: customer.remark,
+    claude_cache_optimization: customer.claude_cache_optimization
+      ? claudeCacheOptimizationSchema.parse(customer.claude_cache_optimization)
+      : null,
   }
 }

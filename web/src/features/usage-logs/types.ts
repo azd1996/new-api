@@ -754,6 +754,7 @@ export interface CacheSkeletonResponse {
 // prefix-match ceiling, with one prompt_cache_key, and that plus 24h
 // retention.
 export interface SkeletonTurn {
+  losses?: SkeletonLossItem[]
   request_id: string
   ts: string
   status: string
@@ -787,6 +788,7 @@ export interface SkeletonRates {
 }
 
 export interface SkeletonLane {
+  loss_summary?: SkeletonLossSummary
   lane: string
   model: string
   provider: string
@@ -800,6 +802,7 @@ export interface SessionCacheAnalysisResponse {
   data?: {
     enabled: boolean
     lanes?: SkeletonLane[]
+    loss_summary?: SkeletonLossSummary
     summary?: SkeletonRates
     truncated?: boolean
   }
@@ -812,8 +815,24 @@ export interface SessionCacheRangeAnalysisResponse {
     enabled: boolean
     summary?: SkeletonRates
     provider?: string
+    loss_summary?: SkeletonLossSummary
     truncated?: boolean
   }
+}
+
+export interface SkeletonLossItem {
+  reason: string
+  tokens: number
+  turns: number
+}
+
+// Claude-only, successful analyzable attempts; items partition uncached tokens.
+export interface SkeletonLossSummary {
+  analyzed_turns: number
+  total_tokens: number
+  actual_read: number
+  uncached_tokens: number
+  items: SkeletonLossItem[]
 }
 
 // One row of the session view: the consume and error logs sharing a

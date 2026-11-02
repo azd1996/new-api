@@ -294,5 +294,7 @@ func finishCacheSkeleton(c *gin.Context, info *relaycommon.RelayInfo, row *model
 		row.CacheCreation = uint32(cacheCreation)
 		row.Input = uint32(max(input, 0))
 	}
-	model.EnqueueCacheSkeleton(row)
+	if model.CacheSkeletonEnabled() {
+		model.EnqueueCacheSkeleton(row)
+	}
 }

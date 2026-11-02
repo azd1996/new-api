@@ -50,6 +50,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { handleServerError } from '@/lib/handle-server-error'
+import { createServerError } from '@/lib/server-error-message'
 
 import { createCustomer, getCustomer, updateCustomer } from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
@@ -61,6 +63,7 @@ import {
   transformFormDataToPayload,
 } from '../lib'
 import type { Customer } from '../types'
+import { CustomerCachePolicy } from './customer-cache-policy'
 import { useCustomers } from './customers-provider'
 
 type CustomersMutateDrawerProps = {
@@ -74,6 +77,8 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
   const isUpdate = !!props.currentRow
   const { triggerRefresh } = useCustomers()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoading, setIsLoading] = useState(isUpdate)
+  const [loadFailed, setLoadFailed] = useState(false)
 
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(getCustomerFormSchema(t)),
@@ -86,18 +91,36 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
   })
 
   useEffect(() => {
+    let active = true
     if (props.open && isUpdate && props.currentRow) {
-      void getCustomer(props.currentRow.id).then((result) => {
-        if (result.success && result.data) {
+      setIsLoading(true)
+      setLoadFailed(false)
+      void getCustomer(props.currentRow.id)
+        .then((result) => {
+          if (!active) return
+          if (!result.success || !result.data) throw createServerError(result)
           form.reset(transformCustomerToFormDefaults(result.data))
-        }
-      })
+        })
+        .catch((error: unknown) => {
+          if (!active) return
+          setLoadFailed(true)
+          handleServerError(error)
+        })
+        .finally(() => {
+          if (active) setIsLoading(false)
+        })
     } else if (props.open && !isUpdate) {
+      setIsLoading(false)
+      setLoadFailed(false)
       form.reset(CUSTOMER_FORM_DEFAULT_VALUES)
+    }
+    return () => {
+      active = false
     }
   }, [props.open, isUpdate, props.currentRow, form])
 
   const onSubmit = async (data: CustomerFormValues) => {
+    if (isLoading || loadFailed) return
     setIsSubmitting(true)
     try {
       const payload = transformFormDataToPayload(data)
@@ -126,6 +149,8 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
             )
         )
       }
+    } catch (error) {
+      handleServerError(error)
     } finally {
       setIsSubmitting(false)
     }
@@ -155,134 +180,147 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
             onSubmit={(event) => void form.handleSubmit(onSubmit)(event)}
             className={sideDrawerFormClassName()}
           >
-            <SideDrawerSection>
-              <FormField
-                control={form.control}
-                name='customer_id'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Customer ID')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder={t('Enter customer ID')} />
-                    </FormControl>
-                    <FormDescription>
-                      {t('Unique identifier (the downstream api_key_id)')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='name'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Customer Name')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder={t('Enter a name')} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormItem>
-                <FormLabel>{t('Series Discounts')}</FormLabel>
-                <FormDescription>
-                  {t(
-                    'Per-series discounts by model-name prefix (e.g. claude / gpt / gemini / grok); the longest matching prefix wins.'
+            <fieldset
+              disabled={isLoading || loadFailed || isSubmitting}
+              className='contents'
+            >
+              <SideDrawerSection>
+                <FormField
+                  control={form.control}
+                  name='customer_id'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Customer ID')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          placeholder={t('Enter customer ID')}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('Unique identifier (the downstream api_key_id)')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
                   )}
-                </FormDescription>
-                <div className='space-y-2'>
-                  {prefixDiscounts.fields.map((row, index) => (
-                    <div key={row.id} className='flex items-start gap-2'>
-                      <FormField
-                        control={form.control}
-                        name={`prefix_discounts.${index}.prefix`}
-                        render={({ field }) => (
-                          <FormItem className='flex-1'>
-                            <FormControl>
-                              <Input
-                                {...field}
-                                placeholder={t(
-                                  'Model name prefix (e.g. claude)'
-                                )}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name={`prefix_discounts.${index}.discount`}
-                        render={({ field }) => (
-                          <FormItem className='w-28'>
-                            <FormControl>
-                              <Input
-                                {...field}
-                                type='number'
-                                step={0.01}
-                                min={0}
-                                placeholder={t('Discount')}
-                                onChange={(e) =>
-                                  field.onChange(
-                                    Number.parseFloat(e.target.value) || 0
-                                  )
-                                }
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <Button
-                        type='button'
-                        variant='ghost'
-                        size='icon'
-                        onClick={() => prefixDiscounts.remove(index)}
-                        aria-label={t('Remove')}
-                      >
-                        <Trash2 className='text-destructive h-4 w-4' />
-                      </Button>
-                    </div>
-                  ))}
-                  <Button
-                    type='button'
-                    variant='outline'
-                    size='sm'
-                    onClick={() =>
-                      prefixDiscounts.append({ prefix: '', discount: 1 })
-                    }
-                  >
-                    <Plus className='h-4 w-4' />
-                    {t('Add series discount')}
-                  </Button>
-                </div>
-              </FormItem>
+                />
 
-              <FormField
-                control={form.control}
-                name='remark'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Remark')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder={t('Optional note')} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </SideDrawerSection>
+                <FormField
+                  control={form.control}
+                  name='name'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Customer Name')}</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder={t('Enter a name')} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormItem>
+                  <FormLabel>{t('Series Discounts')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Per-series discounts by model-name prefix (e.g. claude / gpt / gemini / grok); the longest matching prefix wins.'
+                    )}
+                  </FormDescription>
+                  <div className='space-y-2'>
+                    {prefixDiscounts.fields.map((row, index) => (
+                      <div key={row.id} className='flex items-start gap-2'>
+                        <FormField
+                          control={form.control}
+                          name={`prefix_discounts.${index}.prefix`}
+                          render={({ field }) => (
+                            <FormItem className='flex-1'>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  placeholder={t(
+                                    'Model name prefix (e.g. claude)'
+                                  )}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`prefix_discounts.${index}.discount`}
+                          render={({ field }) => (
+                            <FormItem className='w-28'>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  type='number'
+                                  step={0.01}
+                                  min={0}
+                                  placeholder={t('Discount')}
+                                  onChange={(e) =>
+                                    field.onChange(
+                                      Number.parseFloat(e.target.value) || 0
+                                    )
+                                  }
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='icon'
+                          onClick={() => prefixDiscounts.remove(index)}
+                          aria-label={t('Remove')}
+                        >
+                          <Trash2 className='text-destructive h-4 w-4' />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() =>
+                        prefixDiscounts.append({ prefix: '', discount: 1 })
+                      }
+                    >
+                      <Plus className='h-4 w-4' />
+                      {t('Add series discount')}
+                    </Button>
+                  </div>
+                </FormItem>
+
+                <FormField
+                  control={form.control}
+                  name='remark'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Remark')}</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder={t('Optional note')} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </SideDrawerSection>
+              <CustomerCachePolicy />
+            </fieldset>
           </form>
         </Form>
         <SheetFooter className={sideDrawerFooterClassName()}>
           <SheetClose render={<Button variant='outline' />}>
             {t('Close')}
           </SheetClose>
-          <Button form='customer-form' type='submit' disabled={isSubmitting}>
+          <Button
+            form='customer-form'
+            type='submit'
+            disabled={isSubmitting || isLoading || loadFailed}
+          >
             {isSubmitting ? t('Saving...') : t('Save changes')}
           </Button>
         </SheetFooter>

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { Row } from '@tanstack/react-table'
-import { Trash2, Edit } from 'lucide-react'
+import { Trash2, Edit, ChartColumn } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
@@ -67,6 +67,24 @@ export function DataTableRowActions<TData>(
         <TooltipContent>{t('Edit')}</TooltipContent>
       </Tooltip>
 
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              aria-label={t('Customer statistics')}
+              onClick={() => {
+                setCurrentRow(customer)
+                setOpen('stats')
+              }}
+            />
+          }
+        >
+          <ChartColumn className='size-4' />
+        </TooltipTrigger>
+        <TooltipContent>{t('Customer statistics')}</TooltipContent>
+      </Tooltip>
       <DataTableRowActionMenu ariaLabel={t('Open menu')} modal={false}>
         <DropdownMenuItem
           onClick={() => {

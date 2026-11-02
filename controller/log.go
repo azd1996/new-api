@@ -475,10 +475,11 @@ func GetCacheSkeletonSession(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, gin.H{
-		"enabled":   true,
-		"lanes":     analysis.Lanes,
-		"summary":   analysis.Summary,
-		"truncated": analysis.Truncated,
+		"enabled":      true,
+		"lanes":        analysis.Lanes,
+		"summary":      analysis.Summary,
+		"loss_summary": analysis.LossSummary,
+		"truncated":    analysis.Truncated,
 	})
 }
 
@@ -495,9 +496,10 @@ func GetCacheSkeletonSessionsAnalysis(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, gin.H{
-		"enabled":   true,
-		"summary":   analysis.Summary,
-		"provider":  analysis.Provider,
-		"truncated": analysis.Truncated,
+		"enabled":      true,
+		"summary":      analysis.Summary,
+		"provider":     analysis.Provider,
+		"loss_summary": analysis.LossSummary,
+		"truncated":    analysis.Truncated,
 	})
 }

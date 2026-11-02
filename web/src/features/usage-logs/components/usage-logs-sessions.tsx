@@ -31,13 +31,11 @@ import { TableCell, TableRow } from '@/components/ui/table'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { createServerError } from '@/lib/server-error-message'
 
-import {
-  getLogSessions,
-  getSessionCacheRangeAnalysis,
-} from '../api'
+import { getLogSessions, getSessionCacheRangeAnalysis } from '../api'
+import { skeletonRate, skeletonTierLabels } from '../lib/cache-skeleton'
 import { buildApiParams } from '../lib/utils'
 import type { LogSession } from '../types'
-import { skeletonRate, skeletonTierLabels } from '../lib/cache-skeleton'
+import { CacheLossBreakdown } from './cache-loss-breakdown'
 import { useSessionColumns } from './columns/session-columns'
 import { SessionCacheDiagnosis } from './session-cache-diagnosis'
 import { SessionRequestsTable } from './session-requests-table'
@@ -173,6 +171,7 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
       skeletonKeyPrefix='usage-log-session-skeleton'
       applyHeaderSize
       hideMobile
+      fixedHeight={false}
       tableClassName='[&_[data-slot=table]]:text-[13px] [&_[data-slot=table]_td]:text-[13px] [&_[data-slot=table]_th]:text-[13px]'
       toolbar={
         <div className='flex flex-col gap-2'>
@@ -181,15 +180,16 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
           {isAdminView &&
             sessionsEnabled &&
             cacheSummary?.enabled !== false && (
-            <section
-              aria-label={t('Cache diagnosis')}
-              aria-live='polite'
-              className='flex flex-wrap items-center gap-x-4 gap-y-1 border-b py-2 text-xs'
-            >
-              <span className='font-semibold'>{t('Summary')}</span>
-              {cacheSummaryQuery.isLoading && <span>{t('Calculating...')}</span>}
-              {cacheSummaryQuery.data?.enabled &&
-                cacheSummaryRates && (
+              <section
+                aria-label={t('Cache diagnosis')}
+                aria-live='polite'
+                className='flex flex-wrap items-center gap-x-4 gap-y-1 border-b py-2 text-xs'
+              >
+                <span className='font-semibold'>{t('Summary')}</span>
+                {cacheSummaryQuery.isLoading && (
+                  <span>{t('Calculating...')}</span>
+                )}
+                {cacheSummaryQuery.data?.enabled && cacheSummaryRates && (
                   <>
                     <span>
                       {t('Actual hit rate')}{' '}
@@ -234,8 +234,11 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                     )}
                   </>
                 )}
-            </section>
-          )}
+                {cacheSummary?.enabled && (
+                  <CacheLossBreakdown summary={cacheSummary.loss_summary} />
+                )}
+              </section>
+            )}
           <p className='text-muted-foreground text-xs'>
             {t(
               'Sessions are listed when their lifetime overlaps the time range. Only user, token, model, group, channel, customer and session ID filters apply.'

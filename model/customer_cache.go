@@ -76,6 +76,15 @@ func CustomerName(customerID string) string {
 	return ""
 }
 
+// GetCustomerClaudeCacheOptimization returns a private copy of the customer's
+// override, or nil when legacy global behavior should be inherited.
+func GetCustomerClaudeCacheOptimization(customerID string) *CustomerClaudeCacheOptimization {
+	if c, ok := getCachedCustomer(customerID); ok {
+		return c.ClaudeCacheOptimization.clone()
+	}
+	return nil
+}
+
 // CustomerConfigured reports whether a customer id has an admin-managed mapping
 // (name + discounts). The customer-statistics dashboard uses this to decide
 // whether the per-customer discounted amount is meaningful or should fall back
