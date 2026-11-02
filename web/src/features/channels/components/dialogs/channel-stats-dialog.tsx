@@ -130,6 +130,11 @@ export function ChannelStatsDialog(props: ChannelStatsDialogProps) {
                   'Probability is the live per-node selection chance; picks are cumulative per-node selections. Stats reset on restart and are per cluster node.'
                 )}
               </p>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Connect latency is per-node and model-independent; forward proxies are weighted by Connect P90 (*), while reverse (tp) proxies are excluded from connect comparison and pinned to tier 1.'
+                )}
+              </p>
             </>
           )}
         </section>
@@ -162,6 +167,9 @@ function ProxyRoutingModelBlock(props: ProxyRoutingModelBlockProps) {
             <TableHead>{t('Picks')}</TableHead>
             <TableHead>{t('Samples')}</TableHead>
             <TableHead>{t('Avg TTFT')}</TableHead>
+            <TableHead>{t('Connect P50')}</TableHead>
+            <TableHead>{`${t('Connect P90')} *`}</TableHead>
+            <TableHead>{t('Connect P99')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -174,6 +182,7 @@ function ProxyRoutingModelBlock(props: ProxyRoutingModelBlockProps) {
                 {alias.eligible
                   ? alias.alias
                   : `${alias.alias} (${t('cooling')})`}
+                {alias.is_tp && ` (${t('tp')})`}
               </TableCell>
               <TableCell>{props.percent.format(alias.probability)}</TableCell>
               <TableCell>{props.integer.format(alias.picks)}</TableCell>
@@ -182,6 +191,21 @@ function ProxyRoutingModelBlock(props: ProxyRoutingModelBlockProps) {
                 {alias.samples === 0
                   ? '-'
                   : `${Math.round(alias.avg_ttft_ms)} ms`}
+              </TableCell>
+              <TableCell>
+                {alias.connect_p50_ms > 0
+                  ? `${Math.round(alias.connect_p50_ms)} ms`
+                  : '-'}
+              </TableCell>
+              <TableCell>
+                {alias.connect_p90_ms > 0
+                  ? `${Math.round(alias.connect_p90_ms)} ms`
+                  : '-'}
+              </TableCell>
+              <TableCell>
+                {alias.connect_p99_ms > 0
+                  ? `${Math.round(alias.connect_p99_ms)} ms`
+                  : '-'}
               </TableCell>
             </TableRow>
           ))}

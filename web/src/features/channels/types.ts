@@ -254,6 +254,10 @@ export type ProxyAliasRoutingStat = {
   picks: number
   samples: number
   avg_ttft_ms: number
+  is_tp: boolean
+  connect_p50_ms: number
+  connect_p90_ms: number
+  connect_p99_ms: number
 }
 
 export type ProxyModelRoutingStat = {

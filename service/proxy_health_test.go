@@ -25,6 +25,9 @@ func resetProxyHealthStateForTest(t *testing.T, proxies []system_setting.ProxyEn
 	proxyTtftMu.Lock()
 	proxyTtftState = make(map[proxyRoutingKey]*proxyModelRouting)
 	proxyTtftMu.Unlock()
+	proxyConnectMu.Lock()
+	proxyConnectState = make(map[proxyConnKey]*proxyConnectStat)
+	proxyConnectMu.Unlock()
 	origRand := proxyTtftRandFloat
 	t.Cleanup(func() {
 		ps.Proxies = orig
@@ -37,6 +40,9 @@ func resetProxyHealthStateForTest(t *testing.T, proxies []system_setting.ProxyEn
 		proxyTtftMu.Lock()
 		proxyTtftState = make(map[proxyRoutingKey]*proxyModelRouting)
 		proxyTtftMu.Unlock()
+		proxyConnectMu.Lock()
+		proxyConnectState = make(map[proxyConnKey]*proxyConnectStat)
+		proxyConnectMu.Unlock()
 		proxyTtftRandFloat = origRand
 	})
 }
@@ -180,7 +186,7 @@ func TestProxyTtftWeights(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			weights := computeProxyTtftWeightsLocked(routingWithMeans(tc.means), tc.eligible, cfg)
+			weights := computeProxyTtftWeightsLocked(routingWithMeans(tc.means), tc.eligible, cfg, nil)
 			var sum float64
 			for _, alias := range tc.eligible {
 				assert.InDelta(t, tc.expect[alias], weights[alias], 0.01, "weight for %s", alias)
@@ -234,7 +240,56 @@ func TestProxyTtftGateTriggerDivertRecover(t *testing.T) {
 	require.Equal(t, "A", alias, "recovered head returns to strict priority")
 }
 
-// TestProxyTtftChannelStats verifies the per-channel stats expose gate state,
+// TestProxyConnectLatencyRouting verifies the connect-latency dimension: a slow
+// head forward proxy opens diversion, forward proxies are weighted by connect
+// latency, and a tp (reverse) proxy is pinned to tier 1 (never penalized by its
+// own connect latency) while still displaying its measured percentiles.
+func TestProxyConnectLatencyRouting(t *testing.T) {
+	resetProxyHealthStateForTest(t, []system_setting.ProxyEntry{
+		{Alias: "A", URL: "http://a:1"},
+		{Alias: "B", URL: "http://b:1"},
+		{Alias: "T", URL: "http://t:1", ProxyType: system_setting.ProxyTypeTp},
+	})
+	const ch = 30
+	const model = "m"
+	aliases := []string{"A", "B", "T"}
+	cfg := system_setting.GetProxyTtftRoutingConfig()
+	fastTtft := float64(cfg.ThresholdMs)/1000 - 1
+	slowConn := float64(cfg.ConnectThresholdMs) + 500
+
+	// TTFT fine and equal for all (so TTFT does not drive the gate or the split).
+	for i := 0; i < cfg.ConsecutiveBad; i++ {
+		RecordProxyTTFT(ch, model, "A", fastTtft)
+		RecordProxyTTFT(ch, model, "B", fastTtft)
+		RecordProxyTTFT(ch, model, "T", fastTtft)
+	}
+	// Connect: head A slow, forward B fast, tp T slow-measured (should be ignored).
+	for i := 0; i < cfg.ConsecutiveBad; i++ {
+		recordProxyConnectLatency(ch, "A", slowConn)
+		recordProxyConnectLatency(ch, "B", 100)
+		recordProxyConnectLatency(ch, "T", slowConn)
+	}
+
+	// Slow forward head opens the gate; a high random draw lands off the head.
+	proxyTtftRandFloat = func() float64 { return 0.99 }
+	_, alias := ResolveChannelProxyWeighted(ch, aliases, "", model, true)
+	require.NotEqual(t, "A", alias, "slow head forward proxy is diverted away from")
+
+	stats := ProxyTtftChannelStats(ch, aliases, true)
+	require.Len(t, stats, 1)
+	require.True(t, stats[0].GateActive, "connect-latency gate open on slow head forward")
+	byAlias := map[string]ProxyAliasRoutingStat{}
+	for _, a := range stats[0].Aliases {
+		byAlias[a.Alias] = a
+	}
+	assert.Greater(t, byAlias["B"].Probability, byAlias["A"].Probability, "fast forward B beats slow forward A")
+	assert.Greater(t, byAlias["T"].Probability, byAlias["A"].Probability, "tp T is tier 1, not penalized by its own slow connect latency")
+	assert.GreaterOrEqual(t, byAlias["A"].ConnectP90Ms, 1000.0, "A connect P90 shown")
+	assert.GreaterOrEqual(t, byAlias["T"].ConnectP90Ms, 1000.0, "T measured connect P90 still displayed")
+	assert.Less(t, byAlias["B"].ConnectP90Ms, 1000.0, "B connect P90 is fast")
+	assert.True(t, byAlias["T"].IsTp, "T flagged as tp")
+}
+
 // per-alias selection probability, and cumulative pick counts per model.
 func TestProxyTtftChannelStats(t *testing.T) {
 	resetProxyHealthStateForTest(t, []system_setting.ProxyEntry{

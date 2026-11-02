@@ -185,6 +185,13 @@ func RecordProxyConnectResult(channelID int, alias string, connectLatency time.D
 	}
 	proxyHealthMu.Unlock()
 
+	// Record per (channel, alias) connect latency for TTFT-aware routing's
+	// connect-latency dimension and the per-channel stats view (done outside the
+	// health lock to avoid nesting proxyHealthMu -> proxyConnectMu).
+	if !connErr && connectLatency > 0 {
+		recordProxyConnectLatency(channelID, alias, float64(connectLatency)/float64(time.Millisecond))
+	}
+
 	if demote {
 		demoteProxyAlias(alias)
 		common.SysLog(fmt.Sprintf(

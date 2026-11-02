@@ -91,6 +91,142 @@ func proxyModelRoutingLocked(channelID int, model string) *proxyModelRouting {
 	return r
 }
 
+// minConnectMs floors a connect-latency weight divisor.
+const minConnectMs = 1.0
+
+// proxyConnectStat is one (channel, alias)'s recent connect-latency history. It
+// is model-independent (establishing the connection does not depend on the
+// model). Only forward proxies feed the routing weight; tp (reverse) proxies
+// still get samples recorded for display but are excluded from comparison.
+type proxyConnectStat struct {
+	samples []float64 // connect latency ms, bounded ring
+	badRun  int       // consecutive samples at or above ConnectThresholdMs
+	goodRun int       // consecutive samples below ConnectThresholdMs
+}
+
+type proxyConnKey struct {
+	channelID int
+	alias     string
+}
+
+var (
+	proxyConnectMu    sync.Mutex
+	proxyConnectState = make(map[proxyConnKey]*proxyConnectStat)
+)
+
+// recordProxyConnectLatency feeds one successful connection's establish latency
+// (dial + TLS, ms) into the per (channel, alias) tracker. Called from
+// RecordProxyConnectResult on the success path.
+func recordProxyConnectLatency(channelID int, alias string, latencyMs float64) {
+	alias = strings.TrimSpace(alias)
+	if alias == "" || latencyMs <= 0 {
+		return
+	}
+	cfg := system_setting.GetProxyTtftRoutingConfig()
+	threshold := float64(cfg.ConnectThresholdMs)
+
+	proxyConnectMu.Lock()
+	key := proxyConnKey{channelID: channelID, alias: alias}
+	st := proxyConnectState[key]
+	if st == nil {
+		st = &proxyConnectStat{}
+		proxyConnectState[key] = st
+	}
+	st.samples = append(st.samples, latencyMs)
+	if len(st.samples) > cfg.SampleWindow {
+		st.samples = st.samples[len(st.samples)-cfg.SampleWindow:]
+	}
+	if latencyMs >= threshold {
+		st.badRun++
+		st.goodRun = 0
+	} else {
+		st.goodRun++
+		st.badRun = 0
+	}
+	proxyConnectMu.Unlock()
+
+	prommetrics.RecordProxyConnect(strconv.Itoa(channelID), alias, latencyMs/1000)
+}
+
+// proxyConnectSnapshot is a model-independent view of connect latency used for
+// both the stats page (percentiles per alias) and routing (weightVal per
+// eligible alias + the head forward proxy's gate signal).
+type proxyConnectSnapshot struct {
+	p50       map[string]float64 // per requested alias
+	p90       map[string]float64
+	p99       map[string]float64
+	weightVal map[string]float64 // per eligible alias; empty when the connect dimension is inactive
+	headBad   bool               // eligible[0] is a forward proxy and its connect latency is consistently slow
+	headGood  bool               // eligible[0] is not a slow forward (recovered / tp / no samples)
+}
+
+// buildProxyConnectSnapshot reads per (channel, alias) connect latency. It
+// computes percentiles for every alias in percentileAliases (for display) and,
+// for the eligible list (priority order, head first), the weighting value per
+// alias plus the head gate signal. Forward proxies weight by P90 connect
+// latency; tp (reverse) proxies are pinned to tier 1 (the fastest forward's
+// P90) and never penalized. The connect dimension is inactive (weightVal empty)
+// until at least one eligible forward proxy has samples.
+func buildProxyConnectSnapshot(channelID int, percentileAliases, eligible []string, cfg system_setting.ProxyTtftRoutingConfig) proxyConnectSnapshot {
+	snap := proxyConnectSnapshot{
+		p50:       make(map[string]float64, len(percentileAliases)),
+		p90:       make(map[string]float64, len(percentileAliases)),
+		p99:       make(map[string]float64, len(percentileAliases)),
+		weightVal: make(map[string]float64, len(eligible)),
+		headGood:  true,
+	}
+
+	proxyConnectMu.Lock()
+	for _, alias := range percentileAliases {
+		if st := proxyConnectState[proxyConnKey{channelID: channelID, alias: alias}]; st != nil {
+			snap.p50[alias], snap.p90[alias], snap.p99[alias] = proxyLatencyPercentiles(st.samples)
+		}
+	}
+
+	// Forward P90s among eligible aliases, and the fastest forward P90 (tier 1).
+	minForwardP90 := 0.0
+	forwardP90 := make(map[string]float64, len(eligible))
+	for _, alias := range eligible {
+		if IsTpProxyAlias(alias) {
+			continue
+		}
+		if p90, ok := snap.p90[alias]; ok && p90 > 0 {
+			forwardP90[alias] = p90
+			if minForwardP90 == 0 || p90 < minForwardP90 {
+				minForwardP90 = p90
+			}
+		}
+	}
+
+	// Head gate signal: only a slow forward head drives the connect gate.
+	if len(eligible) > 0 {
+		head := eligible[0]
+		if !IsTpProxyAlias(head) {
+			if st := proxyConnectState[proxyConnKey{channelID: channelID, alias: head}]; st != nil && len(st.samples) > 0 {
+				snap.headBad = st.badRun >= cfg.ConsecutiveBad
+				snap.headGood = st.goodRun >= cfg.ConsecutiveBad
+			}
+		}
+	}
+	proxyConnectMu.Unlock()
+
+	// weightVal only when at least one eligible forward has data.
+	if minForwardP90 > 0 {
+		for _, alias := range eligible {
+			if IsTpProxyAlias(alias) {
+				snap.weightVal[alias] = minForwardP90 // tier 1: never penalized on connect latency
+				continue
+			}
+			if p90, ok := forwardP90[alias]; ok {
+				snap.weightVal[alias] = p90
+			} else {
+				snap.weightVal[alias] = minForwardP90 // unknown forward: optimistic so it gets explored
+			}
+		}
+	}
+	return snap
+}
+
 // RecordProxyTTFT feeds one request's streaming TTFT into the per
 // (channel, model, alias) tracker and the Prometheus histogram. ttftSeconds <= 0
 // (non-streaming or no first token observed) and an empty alias are ignored.
@@ -132,15 +268,21 @@ func RecordProxyTTFT(channelID int, model, alias string, ttftSeconds float64) {
 func pickProxyByTtft(channelID int, model string, eligible []string) string {
 	cfg := system_setting.GetProxyTtftRoutingConfig()
 	head := eligible[0]
+	// Connect-latency snapshot (model-independent) feeds the combined gate/weights.
+	conn := buildProxyConnectSnapshot(channelID, eligible, eligible, cfg)
 
 	proxyTtftMu.Lock()
 	r := proxyModelRoutingLocked(channelID, model)
 	headStat := r.aliases[head]
 	wasActive := r.gateActive
+	ttftBad := headStat != nil && headStat.badRun >= cfg.ConsecutiveBad
+	ttftGood := headStat == nil || headStat.goodRun >= cfg.ConsecutiveBad
+	// Either the head's TTFT or the head forward proxy's connect latency being
+	// consistently slow opens diversion; it closes only when both have recovered.
 	switch {
-	case headStat != nil && headStat.badRun >= cfg.ConsecutiveBad:
+	case ttftBad || conn.headBad:
 		r.gateActive = true
-	case r.gateActive && headStat != nil && headStat.goodRun >= cfg.ConsecutiveBad:
+	case r.gateActive && ttftGood && conn.headGood:
 		r.gateActive = false
 	}
 	gateChanged := r.gateActive != wasActive
@@ -152,7 +294,7 @@ func pickProxyByTtft(channelID int, model string, eligible []string) string {
 		}
 		return ""
 	}
-	weights := computeProxyTtftWeightsLocked(r, eligible, cfg)
+	weights := computeProxyTtftWeightsLocked(r, eligible, cfg, conn.weightVal)
 	proxyTtftMu.Unlock()
 	if gateChanged {
 		logProxyTtftGateChange(channelID, model, active)
@@ -170,11 +312,14 @@ func pickProxyByTtft(channelID int, model string, eligible []string) string {
 }
 
 // computeProxyTtftWeightsLocked returns the selection probability of each
-// eligible alias. Weight is inverse to mean TTFT; an alias with no samples is
-// treated as being as slow as the head so it still gets explored. The head's
-// share is clamped so at least MinExploreRatio is diverted and at most
-// MaxDivertRatio leaves the head. Caller holds proxyTtftMu.
-func computeProxyTtftWeightsLocked(r *proxyModelRouting, eligible []string, cfg system_setting.ProxyTtftRoutingConfig) map[string]float64 {
+// eligible alias. The base weight is inverse to mean TTFT; an alias with no
+// samples is treated as being as slow as the head so it still gets explored.
+// When connVal is non-empty the connect-latency dimension is folded in
+// multiplicatively (weight also inverse to each alias's connect value), so a
+// proxy slow in either dimension is down-weighted. The head's share is clamped
+// so at least MinExploreRatio is diverted and at most MaxDivertRatio leaves the
+// head. Caller holds proxyTtftMu.
+func computeProxyTtftWeightsLocked(r *proxyModelRouting, eligible []string, cfg system_setting.ProxyTtftRoutingConfig, connVal map[string]float64) map[string]float64 {
 	head := eligible[0]
 	headMean := minProxyTtftSeconds
 	if st := r.aliases[head]; st != nil && st.mean() > 0 {
@@ -192,6 +337,13 @@ func computeProxyTtftWeightsLocked(r *proxyModelRouting, eligible []string, cfg 
 			mean = minProxyTtftSeconds
 		}
 		w := 1 / mean
+		if len(connVal) > 0 {
+			cv := connVal[alias]
+			if cv < minConnectMs {
+				cv = minConnectMs
+			}
+			w *= 1 / cv
+		}
 		raw[alias] = w
 		total += w
 	}
@@ -315,10 +467,16 @@ func recordProxyPick(channelID int, model, alias string) {
 type ProxyAliasRoutingStat struct {
 	Alias       string  `json:"alias"`
 	Eligible    bool    `json:"eligible"`
+	IsTp        bool    `json:"is_tp"`
 	Probability float64 `json:"probability"`
 	Picks       int64   `json:"picks"`
 	Samples     int     `json:"samples"`
 	AvgTtftMs   float64 `json:"avg_ttft_ms"`
+	// Connect-latency percentiles (ms) for this (channel, alias), model-independent.
+	// Forward proxies weight by P90; tp proxies are excluded from comparison.
+	ConnectP50Ms float64 `json:"connect_p50_ms"`
+	ConnectP90Ms float64 `json:"connect_p90_ms"`
+	ConnectP99Ms float64 `json:"connect_p99_ms"`
 }
 
 // ProxyModelRoutingStat groups one model's per-alias routing stats for a channel.
@@ -358,6 +516,10 @@ func ProxyTtftChannelStats(channelID int, configuredAliases []string, ttftEnable
 	}
 	proxyHealthMu.Unlock()
 
+	// Connect-latency percentiles for every configured alias (display) and the
+	// weighting values for eligible aliases (model-independent).
+	conn := buildProxyConnectSnapshot(channelID, order, eligible, cfg)
+
 	proxyTtftMu.Lock()
 	defer proxyTtftMu.Unlock()
 	out := make([]ProxyModelRoutingStat, 0)
@@ -368,7 +530,7 @@ func ProxyTtftChannelStats(channelID int, configuredAliases []string, ttftEnable
 		useWeighted := ttftEnabled && len(eligible) >= 2 && entry.gateActive
 		var weights map[string]float64
 		if useWeighted {
-			weights = computeProxyTtftWeightsLocked(entry, eligible, cfg)
+			weights = computeProxyTtftWeightsLocked(entry, eligible, cfg, conn.weightVal)
 		}
 		rows := make([]ProxyAliasRoutingStat, 0, len(order))
 		for _, alias := range order {
@@ -380,7 +542,15 @@ func ProxyTtftChannelStats(channelID int, configuredAliases []string, ttftEnable
 			case isEligible && alias == eligible[0]:
 				prob = 1 // strict head
 			}
-			row := ProxyAliasRoutingStat{Alias: alias, Eligible: isEligible, Probability: prob}
+			row := ProxyAliasRoutingStat{
+				Alias:        alias,
+				Eligible:     isEligible,
+				IsTp:         IsTpProxyAlias(alias),
+				Probability:  prob,
+				ConnectP50Ms: conn.p50[alias],
+				ConnectP90Ms: conn.p90[alias],
+				ConnectP99Ms: conn.p99[alias],
+			}
 			if st := entry.aliases[alias]; st != nil {
 				row.Picks = st.picks
 				row.Samples = len(st.samples)

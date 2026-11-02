@@ -53,6 +53,12 @@ type ProxyTtftRoutingConfig struct {
 	MaxDivertRatio float64 `json:"max_divert_ratio,omitempty"`
 	// SampleWindow bounds the per (channel, model, alias) TTFT sample ring.
 	SampleWindow int `json:"sample_window,omitempty"`
+	// ConnectThresholdMs is the forward-proxy connect-latency "slow" threshold in
+	// milliseconds. A head forward proxy whose connect latency is at or above it
+	// for ConsecutiveBad samples opens diversion; forward proxies are then weighted
+	// by connect latency. Reverse (tp) proxies are excluded from connect-latency
+	// comparison (their latency is only the intranet hop to the proxy entry).
+	ConnectThresholdMs int `json:"connect_threshold_ms,omitempty"`
 }
 
 // Defaults for TTFT-aware proxy routing, applied by GetProxyTtftRoutingConfig.
@@ -62,6 +68,7 @@ const (
 	defaultProxyTtftMinExploreRatio = 0.2
 	defaultProxyTtftMaxDivertRatio  = 0.8
 	defaultProxyTtftSampleWindow    = 50
+	defaultProxyTtftConnectThreshMs = 1000
 )
 
 // ProxySetting 存储全局代理表，供各渠道按别名引用。
@@ -98,6 +105,9 @@ func GetProxyTtftRoutingConfig() ProxyTtftRoutingConfig {
 	}
 	if c.SampleWindow <= 0 {
 		c.SampleWindow = defaultProxyTtftSampleWindow
+	}
+	if c.ConnectThresholdMs <= 0 {
+		c.ConnectThresholdMs = defaultProxyTtftConnectThreshMs
 	}
 	if c.MinExploreRatio <= 0 || c.MinExploreRatio >= 1 {
 		c.MinExploreRatio = defaultProxyTtftMinExploreRatio
