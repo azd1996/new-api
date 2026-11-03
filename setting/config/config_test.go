@@ -73,6 +73,42 @@ func TestUpdateConfigFromMap_EmptyMapClearsAll(t *testing.T) {
 	}
 }
 
+type testProxyEntry struct {
+	Alias     string `json:"alias"`
+	URL       string `json:"url"`
+	ProxyType string `json:"proxy_type,omitempty"`
+}
+
+type testConfigWithSliceOfStruct struct {
+	Proxies []testProxyEntry `json:"proxies"`
+}
+
+// TestUpdateConfigFromMap_SliceOmitemptyFieldCleared guards against a bug where
+// switching a proxy-pool entry (or any []struct field with omitempty members)
+// from "tp" back to the default "normal" type did not take effect without a
+// process restart: json.Unmarshal into an already-populated slice reuses the
+// existing elements and leaves fields absent from the new JSON (like an
+// omitempty ProxyType) at their old value instead of clearing them.
+func TestUpdateConfigFromMap_SliceOmitemptyFieldCleared(t *testing.T) {
+	cfg := &testConfigWithSliceOfStruct{
+		Proxies: []testProxyEntry{
+			{Alias: "gost-1", URL: "http://10.0.0.1:1080", ProxyType: "tp"},
+		},
+	}
+
+	// Simulate saving the entry back as "normal" (proxy_type omitted).
+	err := UpdateConfigFromMap(cfg, map[string]string{
+		"proxies": `[{"alias":"gost-1","url":"http://10.0.0.1:1080"}]`,
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfigFromMap failed: %v", err)
+	}
+
+	if got := cfg.Proxies[0].ProxyType; got != "" {
+		t.Errorf("ProxyType = %q, want empty (normal) after it was omitted from the update", got)
+	}
+}
+
 func TestUpdateConfigFromMap_ScalarFieldsUnchanged(t *testing.T) {
 	cfg := &testConfigWithMap{
 		Modes: map[string]string{"m": "v"},

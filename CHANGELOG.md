@@ -26,6 +26,7 @@
 - **会话页面滚动**：会话列表随页面自然展开，容器支持整体纵向滚动，避免缓存统计区域挤压下方日志表格。
 - **缓存断点边界**：修正 20 块回查窗口边界，补充顶层自动缓存的槽位计算与 TTL 覆盖，并防止较早请求晚完成时覆盖较新的成功锚点。
 - **通用日志错误关键字筛选失效**：`LogFilter.apply` 此前要求「类型=错误」才应用错误关键字过滤，但前端「错误关键字」输入框与「类型」下拉框相互独立，填关键字时不会自动把类型切到「错误」，导致类型留在「全部」或其它值时关键字条件被静默忽略。改为只要填写了关键字即按日志内容匹配，不再要求类型必须为错误。
+- **代理池别名改回「普通类型」不重启不生效**：`ConfigManager.updateConfigFromMap` 对 `[]struct`/`struct` 字段改配置时直接在已有值上 `json.Unmarshal`，新 JSON 里缺失的字段（如 `omitempty` 的 `proxy_type`）不会被清空、沿用旧值，行为与此前已修过的 `map` 字段不一致。代理池别名先存为 `tp`/`force_http` 再改回「普通类型」保存后，已加载过该别名的进程（含周期 `SyncOptions` 重载）内存里 `ProxyType` 仍残留旧值，继续按旧类型把请求的 `https` 目标强制降级为 `http` 转发给正向代理，导致代理端或上游返回 `308`，且仅重启进程才会恢复正常；数据库本身的值是正确的。现 `Slice`/`Struct` 分支改为和 `Map` 分支一样先建全新零值再反序列化整体替换，热更新即时生效、无需重启。实现见 `setting/config/config.go`（`updateConfigFromMap`），回归用例 `setting/config/config_test.go`（`TestUpdateConfigFromMap_SliceOmitemptyFieldCleared`）。
 
 ## [2026-11-02]
 

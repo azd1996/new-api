@@ -252,20 +252,18 @@ func updateConfigFromMap(config any, configMap map[string]string) error {
 					continue
 				}
 			}
-		case reflect.Map:
-			// json.Unmarshal merges into existing maps (keeps old keys that are
-			// absent from the new JSON). Allocate a fresh map so removed keys
-			// are properly cleared.
+		case reflect.Map, reflect.Slice, reflect.Struct:
+			// json.Unmarshal merges into an existing map, slice element, or
+			// struct (keys/fields absent from the new JSON keep their old
+			// value instead of being cleared) rather than replacing it
+			// outright. Allocate a fresh zero value so removed map keys,
+			// shrunk slices, and omitempty struct fields are properly
+			// cleared instead of leaking stale data from the previous value.
 			fresh := reflect.New(field.Type())
 			if err := json.Unmarshal([]byte(strValue), fresh.Interface()); err != nil {
 				continue
 			}
 			field.Set(fresh.Elem())
-		case reflect.Slice, reflect.Struct:
-			err := json.Unmarshal([]byte(strValue), field.Addr().Interface())
-			if err != nil {
-				continue
-			}
 		}
 	}
 
