@@ -102,6 +102,11 @@ export interface ChannelSettings {
   proxy_ttft_routing_enabled?: boolean
   upstream_request_id_header?: string
   response_filter?: string[]
+  // Request body key rename rules applied before parsing; omitted path is root.
+  request_key_rename?: Array<{ path?: string; keys: Record<string, string> }>
+  request_key_rename_template_refs?: string[]
+  // Models the rename applies to; empty means every model.
+  request_key_rename_models?: string[]
   // Reporting-only ratio for the stat amount of free pass-through channels.
   stat_group_ratio?: number
   param_override_template_refs?: string[]

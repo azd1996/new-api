@@ -147,6 +147,8 @@ const MODELS_SECTIONS = [
             settings['override_template_setting.param_templates'],
           'override_template_setting.retry_templates':
             settings['override_template_setting.retry_templates'],
+          'override_template_setting.request_key_rename_templates':
+            settings['override_template_setting.request_key_rename_templates'],
         }}
       />
     ),

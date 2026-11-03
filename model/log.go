@@ -176,6 +176,18 @@ func otherFieldAbsentCondition(column, key string) (string, string) {
 	return column + " NOT LIKE ? ESCAPE '!'", "%" + esc + "%"
 }
 
+// otherFieldPresentCondition is the counterpart of otherFieldAbsentCondition:
+// it matches logs whose Other JSON contains the given top-level key.
+func otherFieldPresentCondition(column, key string) (string, string) {
+	literal := fmt.Sprintf(`"%s":`, key)
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(literal)
+		return column + " LIKE ?", "%" + esc + "%"
+	}
+	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(literal)
+	return column + " LIKE ? ESCAPE '!'", "%" + esc + "%"
+}
+
 func sanitizeClickHouseLikePattern(input string) (string, error) {
 	input = strings.ReplaceAll(input, `\`, `\\`)
 	input = strings.ReplaceAll(input, `_`, `\_`)
@@ -872,6 +884,11 @@ type LogFilter struct {
 	// RetryTriggered, when set, restricts to error logs whose attempt did (true)
 	// or did not (false) fire an error-triggered retry-override. Admin-only.
 	RetryTriggered *bool
+	// RequestKeyRenamed restricts to consume and error logs whose request body
+	// had keys renamed by the channel's request body field rename rules (Other
+	// carries "request_key_rename"). Matches the unindexed Other blob, so pair
+	// it with a time range.
+	RequestKeyRenamed bool
 }
 
 // HasIndexedIdentifier reports whether the filter targets logs by an indexed
@@ -953,6 +970,10 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	}
 	if f.RetryTriggered != nil {
 		tx = tx.Where("logs.type = ? AND logs.retry_triggered = ?", LogTypeError, *f.RetryTriggered)
+	}
+	if f.RequestKeyRenamed {
+		cond, pat := otherFieldPresentCondition("logs.other", "request_key_rename")
+		tx = tx.Where("logs.type IN ?", []int{LogTypeConsume, LogTypeError}).Where(cond, pat)
 	}
 	if f.StartTimestamp != 0 {
 		tx = tx.Where("logs.created_at >= ?", f.StartTimestamp)
@@ -1130,11 +1151,20 @@ type Stat struct {
 	Tpm   int `json:"tpm"`
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName LogFieldFilter, username LogFieldFilter, tokenName LogFieldFilter, channel LogChannelFilter, group LogFieldFilter) (stat Stat, err error) {
+// SumUsedQuota optionally restricts both quota and recent consume rates to logs
+// carrying the request-key rename audit. An omitted or false flag preserves
+// the existing consume-only totals.
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName LogFieldFilter, username LogFieldFilter, tokenName LogFieldFilter, channel LogChannelFilter, group LogFieldFilter, requestKeyRenamed ...bool) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
+
+	if len(requestKeyRenamed) > 0 && requestKeyRenamed[0] {
+		cond, pat := otherFieldPresentCondition("logs.other", "request_key_rename")
+		tx = tx.Where(cond, pat)
+		rpmTpmQuery = rpmTpmQuery.Where(cond, pat)
+	}
 
 	if tx, err = applyLogFieldFilter(tx, "username", username, true); err != nil {
 		return stat, err

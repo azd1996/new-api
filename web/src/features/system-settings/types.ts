@@ -268,6 +268,7 @@ export type ModelSettings = {
   'group_ratio_setting.group_special_usable_group': string
   'override_template_setting.param_templates': string
   'override_template_setting.retry_templates': string
+  'override_template_setting.request_key_rename_templates': string
   'model_deployment.ionet.api_key': string
   'model_deployment.ionet.enabled': boolean
   'proxy_setting.proxies': ProxyPoolEntry[]

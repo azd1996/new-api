@@ -37,6 +37,7 @@ const PARAM_OVERRIDE_ACTION_MAP: Record<string, string> = {
   delete: 'Delete',
   copy: 'Copy',
   move: 'Move',
+  rename: 'Rename',
   append: 'Append',
   prepend: 'Prepend',
   trim_prefix: 'Trim Prefix',
@@ -260,7 +261,9 @@ export function getStreamThroughput(
   latMs?: number
 ): StreamThroughput {
   const total =
-    useTimeSec > 0 && completionTokens > 0 ? completionTokens / useTimeSec : null
+    useTimeSec > 0 && completionTokens > 0
+      ? completionTokens / useTimeSec
+      : null
 
   let generation: number | null = null
   if (isStream && completionTokens > 0 && frtMs != null && frtMs > 0) {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -65,6 +66,38 @@ func ResolveRetryOverrideTemplates(refs []string) []dto.RetryRule {
 		}
 	}
 	return out
+}
+
+// ResolveRequestKeyRenameRules returns a channel's effective request key
+// rename rules for a request of modelName: none when the channel limits
+// renaming to other models, otherwise the rules of its referenced templates in
+// selection order, then the channel's own rules. Later rules win when two of them rename the same key
+// at the same path, so the channel's own rules override its templates. Missing
+// or unparseable references are skipped silently.
+func ResolveRequestKeyRenameRules(setting dto.ChannelSettings, modelName string) []dto.RequestKeyRenameRule {
+	if len(setting.RequestKeyRenameModels) > 0 && !slices.Contains(setting.RequestKeyRenameModels, modelName) {
+		return nil
+	}
+	if len(setting.RequestKeyRenameTemplateRefs) == 0 {
+		return setting.RequestKeyRename
+	}
+	byName := make(map[string][]dto.RequestKeyRenameRule)
+	for _, item := range operation_setting.GetOverrideTemplateSetting().RequestKeyRenameTemplates {
+		name := strings.TrimSpace(item.Name)
+		if name == "" || len(item.Content) == 0 {
+			continue
+		}
+		var rules []dto.RequestKeyRenameRule
+		if err := common.Unmarshal(item.Content, &rules); err != nil {
+			continue
+		}
+		byName[name] = rules
+	}
+	var out []dto.RequestKeyRenameRule
+	for _, ref := range setting.RequestKeyRenameTemplateRefs {
+		out = append(out, byName[strings.TrimSpace(ref)]...)
+	}
+	return append(out, setting.RequestKeyRename...)
 }
 
 func paramOverrideTemplatesByName() map[string]map[string]interface{} {

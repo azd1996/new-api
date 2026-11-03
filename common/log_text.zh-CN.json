@@ -703,6 +703,8 @@
   "relay max idle conns per host: %d": "转发连接池每个主机的最大空闲连接数: %d",
   "relay max idle conns: %d": "转发连接池的最大空闲连接数: %d",
   "relay timeout seconds: %d": "转发超时: %d 秒",
+  "request key rename applied for channel #%d": "渠道 #%d 已应用请求体字段重命名",
+  "request key rename skipped: %s": "请求体字段重命名已跳过: %s",
   "reranker response body: %s": "重排序响应体: %s",
   "reserve adjusted task billing error: %s": "按调整后的任务费用补扣预扣费失败: %s",
   "responses stream failed after output was delivered, billing the delivered output: %s": "Responses 流中途失败，已输出的内容照常计费: %s",

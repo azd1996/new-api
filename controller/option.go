@@ -183,7 +183,8 @@ func writePasskeyDomainSettingsError(c *gin.Context, err error) {
 }
 
 // validateOverrideTemplatesJSON validates an override-template library blob
-// (override_template_setting.param_templates / .retry_templates) before it is
+// (override_template_setting.param_templates / .retry_templates /
+// .request_key_rename_templates) before it is
 // persisted: it must be a JSON array of entries, each with a non-empty unique
 // name and a content field. The content's semantic validity (operations /
 // retry-rule shape) is enforced leniently at request time, where a bad entry is
@@ -300,7 +301,7 @@ func UpdateOption(c *gin.Context) {
 			common.ApiErrorT(c, "The Classic frontend has been removed. The theme can only be set to default")
 			return
 		}
-	case "override_template_setting.param_templates", "override_template_setting.retry_templates":
+	case "override_template_setting.param_templates", "override_template_setting.retry_templates", "override_template_setting.request_key_rename_templates":
 		if err = validateOverrideTemplatesJSON(option.Value.(string)); err != nil {
 			common.ApiError(c, err)
 			return

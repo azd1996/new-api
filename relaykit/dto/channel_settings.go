@@ -81,6 +81,32 @@ type ChannelSettings struct {
 	// responses). Example for Azure content-filter leakage: content_filter_results,
 	// prompt_filter_results, content_filters.
 	ResponseFilter []string `json:"response_filter,omitempty"`
+	// RequestKeyRename renames object keys in the client request body before it
+	// is parsed into the relay request DTO, so keys the DTO does not recognize
+	// (e.g. Gemini snake_case "file_data") are not silently dropped. Each rule
+	// scopes a key map to the objects at Path; only keys are rewritten, values
+	// are copied byte-for-byte. Applied per attempt to the selected channel, on
+	// JSON bodies of every relay format. Empty = disabled.
+	RequestKeyRename []RequestKeyRenameRule `json:"request_key_rename,omitempty"`
+	// RequestKeyRenameTemplateRefs are names of shared request key rename
+	// templates (operation_setting.OverrideTemplateSetting.RequestKeyRenameTemplates)
+	// this channel pulls in. At request time the referenced rules come first, in
+	// selection order, followed by the channel's own RequestKeyRename rules.
+	RequestKeyRenameTemplateRefs []string `json:"request_key_rename_template_refs,omitempty"`
+	// RequestKeyRenameModels limits request key rename (channel rules and
+	// referenced templates) to requests for these models, matched exactly
+	// against the client's requested model name. Empty = every model.
+	RequestKeyRenameModels []string `json:"request_key_rename_models,omitempty"`
+}
+
+// RequestKeyRenameRule renames keys of the objects located at Path. Path is a
+// "."-separated pattern over the client's original keys and array indices:
+// "" or "$" is the root object, "*" matches exactly one segment and "**"
+// matches zero or more segments. Keys maps an original key name to its new
+// name. Example: {"path":"contents.*.parts.*","keys":{"file_data":"fileData"}}.
+type RequestKeyRenameRule struct {
+	Path string            `json:"path"`
+	Keys map[string]string `json:"keys"`
 }
 
 // RetryRulePhaseCondition is a phase's condition block. Conditions are raw JSON

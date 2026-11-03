@@ -292,6 +292,9 @@ const SENSITIVE_FORM_FIELDS = [
   'key_mode',
   'param_override',
   'header_override',
+  'request_key_rename',
+  'request_key_rename_template_refs',
+  'request_key_rename_models',
   'settings',
   'setting',
   'advanced_custom',
@@ -584,6 +587,9 @@ export function ChannelMutateDrawer({
   )
   const retryTemplateOptions = toTemplateOptions(
     overrideTemplatesData?.data?.retry
+  )
+  const renameTemplateOptions = toTemplateOptions(
+    overrideTemplatesData?.data?.request_key_rename
   )
 
   const { copyToClipboard } = useCopyToClipboard()
@@ -3035,6 +3041,135 @@ export function ChannelMutateDrawer({
                   placeholder={
                     'content_filter_results\nprompt_filter_results\ncontent_filters'
                   }
+                  className='font-mono text-xs'
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name='request_key_rename_models'
+          render={({ field }) => (
+            <FormItem className='space-y-3 border-t pt-4'>
+              <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+                <div className='space-y-1'>
+                  <FormLabel>{t('Request Body Field Rename Models')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Only rename request body fields for these models, including template rules. Leave empty to apply to every model of this channel.'
+                    )}
+                  </FormDescription>
+                </div>
+                <div className='flex flex-wrap gap-2'>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    disabled={
+                      sensitiveLocked || currentModelsArray.length === 0
+                    }
+                    onClick={() => field.onChange([...currentModelsArray])}
+                  >
+                    {t('Select all')}
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='sm'
+                    disabled={sensitiveLocked || !field.value?.length}
+                    onClick={() => field.onChange([])}
+                  >
+                    {t('Clear')}
+                  </Button>
+                </div>
+              </div>
+              <FormControl>
+                <MultiSelect
+                  options={currentModelsArray.map((model) => ({
+                    value: model,
+                    label: model,
+                  }))}
+                  selected={field.value || []}
+                  onChange={field.onChange}
+                  disabled={sensitiveLocked}
+                  allowCreate
+                  createLabel='Add custom model "{{value}}"'
+                  maxVisibleChips={8}
+                  placeholder={t('All models')}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name='request_key_rename_template_refs'
+          render={({ field }) => (
+            <FormItem className='space-y-3 border-t pt-4'>
+              <div className='space-y-1'>
+                <FormLabel>
+                  {t('Request Body Field Rename Templates')}
+                </FormLabel>
+                <FormDescription>
+                  {t(
+                    'Reference reusable request body field rename templates by name. Template rules apply first, then the channel rules below.'
+                  )}
+                </FormDescription>
+              </div>
+              <FormControl>
+                <MultiSelect
+                  options={renameTemplateOptions}
+                  selected={field.value || []}
+                  onChange={field.onChange}
+                  disabled={sensitiveLocked}
+                  allowCreate
+                  createLabel='Add template "{{value}}"'
+                  placeholder={t('Select request body field rename templates')}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name='request_key_rename'
+          render={({ field }) => (
+            <FormItem className='space-y-3 border-t pt-4'>
+              <div className='space-y-1'>
+                <FormLabel>{t('Request Body Field Rename')}</FormLabel>
+                <FormDescription>
+                  {t(
+                    'Rename keys in the client request body before it is parsed, so keys the gateway does not recognize are not dropped. JSON array of rules: path selects objects by original keys ("*" = one level, "**" = any levels, empty = root), keys maps old key names to new ones. Only keys are renamed, values are kept as is.'
+                  )}
+                </FormDescription>
+              </div>
+              <FormControl>
+                <Textarea
+                  {...field}
+                  value={field.value || ''}
+                  rows={6}
+                  disabled={sensitiveLocked}
+                  placeholder={JSON.stringify(
+                    [
+                      {
+                        path: 'contents.*.parts.*',
+                        keys: { file_data: 'fileData' },
+                      },
+                      {
+                        path: 'contents.*.parts.*.file_data',
+                        keys: { mime_type: 'mimeType', file_uri: 'fileUri' },
+                      },
+                    ],
+                    null,
+                    2
+                  )}
                   className='font-mono text-xs'
                 />
               </FormControl>

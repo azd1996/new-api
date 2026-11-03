@@ -119,6 +119,31 @@ function isJsonObjectValue(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+// Shape check for request body field rename rules: [{path, keys: {old: new}}].
+// An omitted path targets the root object, just like an empty string or "$".
+// Shared by the channel form and the system-settings rename template editor.
+export function isRequestKeyRenameRules(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (rule) =>
+        isJsonObjectValue(rule) &&
+        (!('path' in rule) || typeof rule.path === 'string') &&
+        isJsonObjectValue(rule.keys) &&
+        Object.values(rule.keys).every((key) => typeof key === 'string')
+    )
+  )
+}
+
+function isOptionalRequestKeyRename(value: string | undefined): boolean {
+  try {
+    const parsed = parseOptionalJson(value)
+    return parsed === undefined || isRequestKeyRenameRules(parsed)
+  } catch {
+    return false
+  }
+}
+
 function isOptionalJsonObject(value: string | undefined): boolean {
   try {
     const parsed = parseOptionalJson(value)
@@ -287,11 +312,22 @@ export const channelFormSchema = z
     upstream_request_id_header: z.string().optional(),
     // Response filter rules, one per line in the form (string[] in setting).
     response_filter: z.string().optional(),
+    // Request key rename rules ({path, keys}[] in setting), edited as JSON.
+    request_key_rename: z
+      .string()
+      .optional()
+      .refine(
+        isOptionalRequestKeyRename,
+        'Request body field rename must be a JSON array of {"path": string, "keys": {old: new}} rules'
+      ),
     // Reporting-only stat ratio; string in the form, number in setting JSON.
     stat_group_ratio: z.string().optional(),
     // Named param/retry override templates referenced by name.
     param_override_template_refs: z.array(z.string()).optional(),
     retry_override_template_refs: z.array(z.string()).optional(),
+    request_key_rename_template_refs: z.array(z.string()).optional(),
+    // Models request key rename applies to; empty means every model.
+    request_key_rename_models: z.array(z.string()).optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -492,9 +528,12 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   retry_override: '',
   upstream_request_id_header: '',
   response_filter: '',
+  request_key_rename: '',
   stat_group_ratio: '',
   param_override_template_refs: [],
   retry_override_template_refs: [],
+  request_key_rename_template_refs: [],
+  request_key_rename_models: [],
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -547,9 +586,12 @@ export function transformChannelToFormDefaults(
     retry_override: '',
     upstream_request_id_header: '',
     response_filter: '',
+    request_key_rename: '',
     stat_group_ratio: '',
     param_override_template_refs: [] as string[],
     retry_override_template_refs: [] as string[],
+    request_key_rename_template_refs: [] as string[],
+    request_key_rename_models: [] as string[],
   }
 
   if (channel.setting) {
@@ -584,6 +626,9 @@ export function transformChannelToFormDefaults(
           : '',
         upstream_request_id_header: parsed.upstream_request_id_header || '',
         response_filter: readStringArray(parsed.response_filter).join('\n'),
+        request_key_rename: Array.isArray(parsed.request_key_rename)
+          ? JSON.stringify(parsed.request_key_rename, null, 2)
+          : '',
         stat_group_ratio:
           typeof parsed.stat_group_ratio === 'number'
             ? String(parsed.stat_group_ratio)
@@ -593,6 +638,12 @@ export function transformChannelToFormDefaults(
         ),
         retry_override_template_refs: readStringArray(
           parsed.retry_override_template_refs
+        ),
+        request_key_rename_template_refs: readStringArray(
+          parsed.request_key_rename_template_refs
+        ),
+        request_key_rename_models: readStringArray(
+          parsed.request_key_rename_models
         ),
       }
     } catch (error) {
@@ -780,6 +831,16 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   if (responseFilter.length > 0) {
     settingObj.response_filter = responseFilter
   }
+  if (formData.request_key_rename?.trim()) {
+    try {
+      const parsedRename = JSON.parse(formData.request_key_rename)
+      if (Array.isArray(parsedRename) && parsedRename.length > 0) {
+        settingObj.request_key_rename = parsedRename
+      }
+    } catch {
+      // Rejected by schema validation before submit.
+    }
+  }
   const statGroupRatio = Number(formData.stat_group_ratio)
   if (
     formData.stat_group_ratio?.trim() &&
@@ -795,6 +856,16 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   const retryTemplateRefs = trimNonEmpty(formData.retry_override_template_refs)
   if (retryTemplateRefs.length > 0) {
     settingObj.retry_override_template_refs = retryTemplateRefs
+  }
+  const renameTemplateRefs = trimNonEmpty(
+    formData.request_key_rename_template_refs
+  )
+  if (renameTemplateRefs.length > 0) {
+    settingObj.request_key_rename_template_refs = renameTemplateRefs
+  }
+  const renameModels = trimNonEmpty(formData.request_key_rename_models)
+  if (renameModels.length > 0) {
+    settingObj.request_key_rename_models = renameModels
   }
 
   return JSON.stringify(settingObj)

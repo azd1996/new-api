@@ -526,7 +526,7 @@ func successCellFrom(consume, errs, retryOverride int64) LogSuccessCell {
 // coreFilterForSuccess strips the error-drill filters (status_code /
 // error_keyword / error_signature / retry_triggered) from an admin log filter,
 // keeping only the type-agnostic core (field / time / request-id / customer /
-// trace-tag). The success-rate counts apply this to both consume and error
+// trace-tag / request-key rename). The success-rate counts apply this to both consume and error
 // logs so the consume side is not zeroed out by error-only drill filters.
 func coreFilterForSuccess(filter LogFilter) LogFilter {
 	return LogFilter{
@@ -545,6 +545,7 @@ func coreFilterForSuccess(filter LogFilter) LogFilter {
 		CustomerName:        filter.CustomerName,
 		NodeName:            filter.NodeName,
 		DownstreamTraceTag:  filter.DownstreamTraceTag,
+		RequestKeyRenamed:   filter.RequestKeyRenamed,
 	}
 }
 

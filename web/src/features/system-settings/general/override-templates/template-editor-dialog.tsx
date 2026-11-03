@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ParamOverrideEditorDialog } from '@/features/channels/components/dialogs/param-override-editor-dialog'
+import { isRequestKeyRenameRules } from '@/features/channels/lib/channel-form'
 
 import type { OverrideTemplateItem, OverrideTemplateKind } from './types'
 
@@ -76,6 +77,24 @@ const PARAM_TEMPLATE_SAMPLE = JSON.stringify(
   null,
   2
 )
+
+const RENAME_TEMPLATE_SAMPLE = JSON.stringify(
+  [
+    { path: 'contents.*.parts.*', keys: { file_data: 'fileData' } },
+    {
+      path: 'contents.*.parts.*.file_data',
+      keys: { mime_type: 'mimeType', file_uri: 'fileUri' },
+    },
+  ],
+  null,
+  2
+)
+
+const TEMPLATE_SAMPLES: Record<OverrideTemplateKind, string> = {
+  param: PARAM_TEMPLATE_SAMPLE,
+  retry: RETRY_TEMPLATE_SAMPLE,
+  rename: RENAME_TEMPLATE_SAMPLE,
+}
 
 interface Props {
   open: boolean
@@ -129,6 +148,15 @@ export function TemplateEditorDialog(props: Props) {
         toast.error(t('Retry template content must be a JSON array'))
         return
       }
+    } else if (props.kind === 'rename') {
+      if (!isRequestKeyRenameRules(parsed)) {
+        toast.error(
+          t(
+            'Request body field rename must be a JSON array of {"path": string, "keys": {old: new}} rules'
+          )
+        )
+        return
+      }
     } else if (typeof parsed !== 'object' || parsed === null) {
       toast.error(t('Parameter template content must be a JSON object or array'))
       return
@@ -143,10 +171,16 @@ export function TemplateEditorDialog(props: Props) {
     props.onOpenChange(false)
   }
 
+  const contentPlaceholders: Record<OverrideTemplateKind, string> = {
+    param: t('Parameter override object, e.g. {"operations": [...]}'),
+    retry: t('Retry override rules as a JSON array. Leave empty to disable.'),
+    rename: t(
+      'Request body field rename rules as a JSON array of {"path", "keys"} objects.'
+    ),
+  }
+
   const fillSample = () => {
-    setContent(
-      props.kind === 'retry' ? RETRY_TEMPLATE_SAMPLE : PARAM_TEMPLATE_SAMPLE
-    )
+    setContent(TEMPLATE_SAMPLES[props.kind])
   }
 
   return (
@@ -229,13 +263,7 @@ export function TemplateEditorDialog(props: Props) {
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={12}
-            placeholder={
-              props.kind === 'retry'
-                ? t(
-                    'Retry override rules as a JSON array. Leave empty to disable.'
-                  )
-                : t('Parameter override object, e.g. {"operations": [...]}')
-            }
+            placeholder={contentPlaceholders[props.kind]}
             className='max-h-96 min-h-40 resize-y overflow-auto font-mono text-xs'
           />
         </div>
