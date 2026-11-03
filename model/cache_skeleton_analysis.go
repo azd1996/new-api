@@ -96,6 +96,11 @@ type SkeletonTurn struct {
 	Segments           []SkeletonSegment        `json:"segments"`
 	Breakpoints        []SkeletonBreakpointMark `json:"breakpoints"`
 	Losses             []SkeletonLossAmount     `json:"losses,omitempty"`
+	CoverageAvailable  bool                     `json:"coverage_available"`
+	BaselineBytes      uint64                   `json:"baseline_covered_bytes"`
+	OptimizedBytes     uint64                   `json:"optimized_covered_bytes"`
+	CoverageDeltaBytes int64                    `json:"coverage_delta_bytes"`
+	CoverageTotalBytes uint64                   `json:"coverage_total_bytes"`
 }
 
 // SkeletonRates sums tokens of successful turns: Actual is what upstream
@@ -107,6 +112,22 @@ type SkeletonRates struct {
 	Current    int64 `json:"current"`
 	Adjusted   int64 `json:"adjusted"`
 	Adjusted1h int64 `json:"adjusted_1h"`
+}
+
+type SkeletonCoverage struct {
+	BaselineCovered  uint64 `json:"baseline_covered_bytes"`
+	OptimizedCovered uint64 `json:"optimized_covered_bytes"`
+	Delta            int64  `json:"delta_bytes"`
+	TotalBytes       uint64 `json:"total_bytes"`
+	ComparableTurns  int64  `json:"comparable_turns"`
+}
+
+func (c *SkeletonCoverage) add(o SkeletonCoverage) {
+	c.BaselineCovered += o.BaselineCovered
+	c.OptimizedCovered += o.OptimizedCovered
+	c.Delta += o.Delta
+	c.TotalBytes += o.TotalBytes
+	c.ComparableTurns += o.ComparableTurns
 }
 
 func (r *SkeletonRates) add(o SkeletonRates) {
@@ -124,6 +145,7 @@ type SkeletonLane struct {
 	Turns       []SkeletonTurn      `json:"turns"`
 	Summary     SkeletonRates       `json:"summary"`
 	LossSummary SkeletonLossSummary `json:"loss_summary"`
+	Coverage    SkeletonCoverage    `json:"coverage"`
 }
 
 type SessionCacheAnalysis struct {
@@ -131,6 +153,7 @@ type SessionCacheAnalysis struct {
 	Summary     SkeletonRates       `json:"summary"`
 	Truncated   bool                `json:"truncated"`
 	LossSummary SkeletonLossSummary `json:"loss_summary"`
+	Coverage    SkeletonCoverage    `json:"coverage"`
 }
 
 // GetSessionCacheAnalysis loads a session's skeletons and simulates them.
@@ -154,6 +177,7 @@ type SessionCacheRangeAnalysis struct {
 	Provider    string              `json:"provider"`
 	Truncated   bool                `json:"truncated"`
 	LossSummary SkeletonLossSummary `json:"loss_summary"`
+	Coverage    SkeletonCoverage    `json:"coverage"`
 }
 
 // GetSessionCacheRangeAnalysis replays skeletons for sessions matching the
@@ -205,6 +229,7 @@ func GetSessionCacheRangeAnalysis(userId int, filter LogFilter) (*SessionCacheRa
 		analysis := AnalyzeCacheSkeletons(sessionRows)
 		result.Summary.add(analysis.Summary)
 		result.LossSummary.add(analysis.LossSummary)
+		result.Coverage.add(analysis.Coverage)
 	}
 	for provider := range providers {
 		if result.Provider == "" {
@@ -238,8 +263,10 @@ func AnalyzeCacheSkeletons(rows []*CacheSkeleton) *SessionCacheAnalysis {
 		lane := analyzeSkeletonLane(lr)
 		result.Summary.add(lane.Summary)
 		result.LossSummary.add(lane.LossSummary)
+		result.Coverage.add(lane.Coverage)
 		result.Lanes = append(result.Lanes, lane)
 	}
+	analyzeSkeletonCoverage(rows, result)
 	return result
 }
 
@@ -433,6 +460,178 @@ func newClaudeLaneSim(modelName string) *claudeLaneSim {
 		adjusted:   newSkeletonCacheSim(false, skeletonLookback),
 		adjusted1h: newSkeletonCacheSim(false, skeletonLookback),
 		fallback:   newSkeletonCacheSim(false, skeletonLookback),
+	}
+}
+
+func coverageRow(row *CacheSkeleton, baseline bool) *CacheSkeleton {
+	out := &CacheSkeleton{ParamFp: row.ParamFp, Model: row.Model}
+	if baseline {
+		out.ParamFp = row.BaselineParamFp
+		out.BlkHash = row.BaselineHash
+		out.BlkLen = row.BaselineLen
+		out.BpIdx = row.BaselineBpIdx
+		out.BpTtl = row.BaselineBpTtl
+	} else {
+		out.BlkHash = row.CoverageHash
+		out.BlkLen = row.CoverageLen
+		out.BpIdx = row.CoverageBpIdx
+		out.BpTtl = row.CoverageBpTtl
+	}
+	return out
+}
+
+func coverageReplay(sim *skeletonCacheSim, row *CacheSkeleton, at time.Time) uint64 {
+	if len(row.BlkHash) == 0 {
+		return 0
+	}
+	prefix := skeletonPrefixHashes(row, row.ParamFp)
+	cumBytes := make([]uint64, len(row.BlkLen))
+	var total uint64
+	for i, length := range row.BlkLen {
+		total += uint64(length)
+		cumBytes[i] = total
+	}
+	if total == 0 {
+		return 0
+	}
+	var best uint64
+	for _, bp := range skeletonBreakpoints(row) {
+		for k := bp.idx; k >= 0 && k > bp.idx-sim.lookback; k-- {
+			entry := sim.entries[prefix[k]]
+			if entry == nil || at.Before(entry.availableAt) || at.After(entry.expireAt) {
+				continue
+			}
+			entry.expireAt = maxTime(entry.expireAt, at.Add(entry.ttl))
+			best = max(best, cumBytes[k])
+			break
+		}
+	}
+	return best
+}
+
+type coveragePendingWrite struct {
+	row         *CacheSkeleton
+	totalTokens int64
+	end         time.Time
+}
+
+type coverageHistory struct {
+	baseline, optimized *skeletonCacheSim
+	pending             []coveragePendingWrite
+}
+
+// analyzeSkeletonCoverage replays the two histories independently in request
+// order. Writes only become visible when the recorded attempt has finished;
+// a long-running request must not extend another request's cache lifetime
+// before that write has actually completed.
+func analyzeSkeletonCoverage(rows []*CacheSkeleton, result *SessionCacheAnalysis) {
+	ordered := slices.Clone(rows)
+	slices.SortStableFunc(ordered, func(a, b *CacheSkeleton) int { return a.Ts.Compare(b.Ts) })
+	type domain struct {
+		token          uint32
+		session, model string
+		channel        uint32
+		key            uint16
+	}
+	histories := map[domain]*coverageHistory{}
+	type attemptKey struct {
+		request string
+		attempt uint8
+		ts      time.Time
+	}
+	outcomes := map[attemptKey]SkeletonTurn{}
+	for _, row := range ordered {
+		if row.Provider == SkeletonProviderOpenAI {
+			continue
+		}
+		key := domain{row.TokenId, row.SessionId, row.Model, row.ChannelId, row.KeyIdx}
+		history := histories[key]
+		if history == nil {
+			history = &coverageHistory{
+				baseline:  newSkeletonCacheSim(false, skeletonLookback),
+				optimized: newSkeletonCacheSim(false, skeletonLookback),
+			}
+			histories[key] = history
+		}
+		totalTokens := int64(row.Input) + int64(row.CacheRead) + int64(row.CacheCreation)
+		if row.Status != "ok" || totalTokens == 0 {
+			continue
+		}
+		// Never infer a missing baseline from the optimized request. The first
+		// request after a recording gap starts a fresh, explicitly observed
+		// pair of histories.
+		if len(row.BaselineHash) == 0 || len(row.CoverageHash) == 0 ||
+			len(row.BaselineHash) != len(row.BaselineLen) ||
+			len(row.CoverageHash) != len(row.CoverageLen) ||
+			!slices.Equal(row.BaselineHash, row.CoverageHash) ||
+			!slices.Equal(row.BaselineLen, row.CoverageLen) {
+			delete(histories, key)
+			continue
+		}
+		slices.SortStableFunc(history.pending, func(a, b coveragePendingWrite) int { return a.end.Compare(b.end) })
+		pending := history.pending[:0]
+		for _, write := range history.pending {
+			if write.end.After(row.Ts) {
+				pending = append(pending, write)
+				continue
+			}
+			for i, sim := range []*skeletonCacheSim{history.baseline, history.optimized} {
+				structure := coverageRow(write.row, i == 0)
+				var bytes uint64
+				for _, length := range structure.BlkLen {
+					bytes += uint64(length)
+				}
+				cumTokens := make([]int64, len(structure.BlkLen))
+				var cumulative uint64
+				for j, length := range structure.BlkLen {
+					cumulative += uint64(length)
+					if bytes > 0 {
+						cumTokens[j] = int64(float64(write.totalTokens) * float64(cumulative) / float64(bytes))
+					}
+				}
+				prefix := skeletonPrefixHashes(structure, structure.ParamFp)
+				bps := skeletonBreakpoints(structure)
+				for _, bp := range bps {
+					if entry := sim.entries[prefix[bp.idx]]; entry != nil && write.end.After(entry.expireAt) {
+						delete(sim.entries, prefix[bp.idx])
+					}
+				}
+				sim.write(prefix, cumTokens, bps, write.end, int64(cacheMinTokensFor(write.row.Model)))
+			}
+		}
+		history.pending = pending
+		baseline := coverageReplay(history.baseline, coverageRow(row, true), row.Ts)
+		optimized := coverageReplay(history.optimized, coverageRow(row, false), row.Ts)
+		var bytes uint64
+		for _, length := range row.CoverageLen {
+			bytes += uint64(length)
+		}
+		if bytes == 0 {
+			continue
+		}
+		history.pending = append(history.pending, coveragePendingWrite{row, totalTokens, row.EndTs})
+		outcomes[attemptKey{row.RequestId, row.Attempt, row.Ts}] = SkeletonTurn{
+			CoverageAvailable: true, BaselineBytes: baseline, OptimizedBytes: optimized,
+			CoverageDeltaBytes: int64(optimized) - int64(baseline), CoverageTotalBytes: bytes,
+		}
+	}
+	for i := range result.Lanes {
+		lane := &result.Lanes[i]
+		for j := range lane.Turns {
+			turn := &lane.Turns[j]
+			out, ok := outcomes[attemptKey{turn.RequestId, turn.Attempt, turn.Ts}]
+			if !ok {
+				continue
+			}
+			turn.CoverageAvailable = true
+			turn.BaselineBytes, turn.OptimizedBytes = out.BaselineBytes, out.OptimizedBytes
+			turn.CoverageDeltaBytes, turn.CoverageTotalBytes = out.CoverageDeltaBytes, out.CoverageTotalBytes
+			lane.Coverage.add(SkeletonCoverage{
+				BaselineCovered: out.BaselineBytes, OptimizedCovered: out.OptimizedBytes,
+				Delta: out.CoverageDeltaBytes, TotalBytes: out.CoverageTotalBytes, ComparableTurns: 1,
+			})
+		}
+		result.Coverage.add(lane.Coverage)
 	}
 }
 

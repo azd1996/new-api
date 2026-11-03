@@ -58,6 +58,19 @@ type CacheSkeleton struct {
 	// prefix then lives upstream and the skeleton only sees the new input.
 	ParentRequestId string `json:"parent_request_id" gorm:"column:parent_request_id"`
 	PrefixLen       uint16 `json:"-" gorm:"column:prefix_len"`
+
+	// Coverage fields use canonical Claude text blocks and exclude
+	// cache_control bytes. They are stored separately so the original
+	// skeleton fingerprint remains backward compatible.
+	CoverageHash    []uint64 `json:"-" gorm:"column:coverage_hash;type:Array(UInt64)"`
+	CoverageLen     []uint32 `json:"-" gorm:"column:coverage_len;type:Array(UInt32)"`
+	CoverageBpIdx   []uint16 `json:"-" gorm:"column:coverage_bp_idx;type:Array(UInt16)"`
+	CoverageBpTtl   []string `json:"-" gorm:"column:coverage_bp_ttl;type:Array(LowCardinality(String))"`
+	BaselineHash    []uint64 `json:"-" gorm:"column:baseline_hash;type:Array(UInt64)"`
+	BaselineLen     []uint32 `json:"-" gorm:"column:baseline_len;type:Array(UInt32)"`
+	BaselineBpIdx   []uint16 `json:"-" gorm:"column:baseline_bp_idx;type:Array(UInt16)"`
+	BaselineBpTtl   []string `json:"-" gorm:"column:baseline_bp_ttl;type:Array(LowCardinality(String))"`
+	BaselineParamFp uint64   `json:"-" gorm:"column:baseline_param_fp"`
 }
 
 const (
@@ -108,6 +121,13 @@ func MigrateCacheSkeletons() error {
 		fixed LowCardinality(String),
 		cache_read UInt32, cache_creation UInt32, input UInt32,
 		parent_request_id String, prefix_len UInt16
+		,coverage_hash Array(UInt64) CODEC(ZSTD(3))
+		,coverage_len Array(UInt32) CODEC(ZSTD(3))
+		,coverage_bp_idx Array(UInt16), coverage_bp_ttl Array(LowCardinality(String))
+		,baseline_hash Array(UInt64) CODEC(ZSTD(3))
+		,baseline_len Array(UInt32) CODEC(ZSTD(3))
+		,baseline_bp_idx Array(UInt16), baseline_bp_ttl Array(LowCardinality(String))
+		,baseline_param_fp UInt64 DEFAULT 0
 	) ENGINE = MergeTree()
 	PARTITION BY toYYYYMMDD(ts)
 	ORDER BY (token_id, session_id, lane, ts)
@@ -122,6 +142,15 @@ func MigrateCacheSkeletons() error {
 		"provider LowCardinality(String) DEFAULT 'claude'",
 		"cache_key_hash UInt64 DEFAULT 0",
 		"retention LowCardinality(String) DEFAULT ''",
+		"coverage_hash Array(UInt64) DEFAULT []",
+		"coverage_len Array(UInt32) DEFAULT []",
+		"coverage_bp_idx Array(UInt16) DEFAULT []",
+		"coverage_bp_ttl Array(LowCardinality(String)) DEFAULT []",
+		"baseline_hash Array(UInt64) DEFAULT []",
+		"baseline_len Array(UInt32) DEFAULT []",
+		"baseline_bp_idx Array(UInt16) DEFAULT []",
+		"baseline_bp_ttl Array(LowCardinality(String)) DEFAULT []",
+		"baseline_param_fp UInt64 DEFAULT 0",
 	} {
 		if err := LOG_DB.Exec("ALTER TABLE cache_skeletons ADD COLUMN IF NOT EXISTS " + column).Error; err != nil {
 			return err

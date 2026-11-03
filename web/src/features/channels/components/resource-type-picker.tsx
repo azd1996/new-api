@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { handleServerError } from '@/lib/server-error-message'
+import { handleServerError } from '@/lib/handle-server-error'
 
 import {
   createResourceType,

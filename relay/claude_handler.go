@@ -94,6 +94,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	// The prompt-cache skeleton of this attempt's final outbound body is
 	// recorded once the attempt ends, success or not.
 	var cacheSkeleton *model.CacheSkeleton
+	var baselineCoverage *model.CacheSkeleton
 	var cacheSkeletonUsage *dto.Usage
 	var retainPreviousBreakpoint bool
 	_, _, cacheCustomerID, customerDecoded := common.TraceTagFromContext(c)
@@ -188,6 +189,15 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			model.GetCustomerClaudeCacheOptimization(cacheCustomerID), claudeGroup, claudeModel)
 		retainPreviousBreakpoint = cachePolicy.RetainPreviousBreakpoint.Enabled
 
+		// Observe a protocol-valid baseline without changing the existing
+		// order of transformations applied to the real outbound request.
+		if model.CacheSkeletonEnabled() {
+			baselineBody, _, baselineErr := prepareClaudeTurnScopedMessages(jsonData)
+			if baselineErr == nil {
+				baselineCoverage = buildClaudeCacheCoverage(baselineBody)
+			}
+		}
+
 		// For configured (group, model) rules, move a breakpoint that sits on a
 		// volatile trailing reminder onto the last stable block before it. Runs
 		// before the forced TTL so a new breakpoint is raised to 1h as well.
@@ -273,6 +283,20 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			cacheSkeleton = buildClaudeCacheSkeleton(jsonData)
 			cacheSkeleton.Fixed = cacheBreakpointFix
 			cacheSkeleton.SessionId = claudeSID
+			if model.CacheSkeletonEnabled() {
+				optimizedCoverage := buildClaudeCacheCoverage(jsonData)
+				cacheSkeleton.CoverageHash = optimizedCoverage.CoverageHash
+				cacheSkeleton.CoverageLen = optimizedCoverage.CoverageLen
+				cacheSkeleton.CoverageBpIdx = optimizedCoverage.CoverageBpIdx
+				cacheSkeleton.CoverageBpTtl = optimizedCoverage.CoverageBpTtl
+				if baselineCoverage != nil {
+					cacheSkeleton.BaselineHash = baselineCoverage.CoverageHash
+					cacheSkeleton.BaselineLen = baselineCoverage.CoverageLen
+					cacheSkeleton.BaselineBpIdx = baselineCoverage.CoverageBpIdx
+					cacheSkeleton.BaselineBpTtl = baselineCoverage.CoverageBpTtl
+					cacheSkeleton.BaselineParamFp = baselineCoverage.BaselineParamFp
+				}
+			}
 		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)

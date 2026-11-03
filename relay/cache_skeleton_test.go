@@ -88,6 +88,25 @@ func TestBuildClaudeCacheSkeletonTopLevelAutomaticCaching(t *testing.T) {
 	assert.Equal(t, []string{"5m"}, row.BpTtl)
 }
 
+func TestBuildClaudeCacheCoverageCanonicalContent(t *testing.T) {
+	plain := buildClaudeCacheCoverage([]byte(`{"model":"claude-sonnet-4","system":"规则","messages":[{"role":"user","content":"hello"}]}`))
+	marked := buildClaudeCacheCoverage([]byte(`{"model":"claude-sonnet-4","system":[{"type":"text","text":"规则","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"text":"hello","type":"text","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`))
+	require.Len(t, plain.CoverageHash, 2)
+	assert.Equal(t, plain.CoverageHash, marked.CoverageHash)
+	assert.Equal(t, plain.CoverageLen, marked.CoverageLen)
+	assert.Equal(t, []uint32{uint32(len(`{"text":"规则","type":"text"}`)), uint32(len(`{"text":"hello","type":"text"}`))}, marked.CoverageLen)
+	assert.Empty(t, plain.CoverageBpIdx)
+	assert.Equal(t, []uint16{0, 1}, marked.CoverageBpIdx)
+	assert.Equal(t, []string{"5m", "1h"}, marked.CoverageBpTtl)
+
+	role := buildClaudeCacheCoverage([]byte(`{"model":"claude-sonnet-4","system":"规则","messages":[{"role":"assistant","content":"hello"}]}`))
+	assert.NotEqual(t, plain.CoverageHash[1], role.CoverageHash[1])
+	split := buildClaudeCacheCoverage([]byte(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":[{"type":"text","text":"a"},{"type":"text","text":"b"}]}]}`))
+	separate := buildClaudeCacheCoverage([]byte(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"a"},{"role":"user","content":"b"}]}`))
+	assert.Equal(t, split.CoverageHash[0], separate.CoverageHash[0])
+	assert.NotEqual(t, split.CoverageHash[1], separate.CoverageHash[1])
+}
+
 func TestBuildOpenAIChatCacheSkeleton(t *testing.T) {
 	turn1 := buildOpenAIChatCacheSkeleton([]byte(`{
   "model":"gpt-5.5","reasoning_effort":"high","prompt_cache_key":"sess-1",

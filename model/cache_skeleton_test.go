@@ -30,8 +30,9 @@ func TestCacheSkeletonSchemaParses(t *testing.T) {
 }
 
 // TestCacheSkeletonClickHouseRoundTrip needs a real ClickHouse; point
-// TEST_CLICKHOUSE_DSN at a scratch database, e.g.
+// TEST_CLICKHOUSE_DSN at an isolated scratch database, e.g.
 // clickhouse://default:pwd@127.0.0.1:9000/skeleton_test.
+// Each scenario creates and drops cache_skeletons; an existing table is refused.
 func TestCacheSkeletonClickHouseRoundTrip(t *testing.T) {
 	dsn := os.Getenv("TEST_CLICKHOUSE_DSN")
 	if dsn == "" {
@@ -39,6 +40,15 @@ func TestCacheSkeletonClickHouseRoundTrip(t *testing.T) {
 	}
 	db, err := gorm.Open(clickhouse.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+	var version string
+	require.NoError(t, db.Raw("SELECT version()").Scan(&version).Error)
+	t.Logf("ClickHouse version: %s", version)
+	require.False(t, db.Migrator().HasTable(&CacheSkeleton{}), "use an isolated empty test database")
+	t.Setenv("CACHE_SKELETON_STORAGE_POLICY", "")
+	t.Setenv("CACHE_SKELETON_TTL_DAYS", "14")
 	prevDB, prevType := LOG_DB, common.LogDatabaseType()
 	LOG_DB = db
 	common.SetLogDatabaseType(common.DatabaseTypeClickHouse)
@@ -47,53 +57,140 @@ func TestCacheSkeletonClickHouseRoundTrip(t *testing.T) {
 		common.SetLogDatabaseType(prevType)
 	})
 
-	// Migration is idempotent: startup runs it on every boot.
-	require.NoError(t, MigrateCacheSkeletons())
-	require.NoError(t, MigrateCacheSkeletons())
+	for _, scenario := range []string{"fresh", "upgrade"} {
+		t.Run(scenario, func(t *testing.T) {
+			require.False(t, db.Migrator().HasTable(&CacheSkeleton{}))
+			t.Cleanup(func() {
+				assert.NoError(t, db.Exec("DROP TABLE IF EXISTS cache_skeletons SYNC").Error)
+			})
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			if scenario == "upgrade" {
+				// Explicit pre-coverage schema: the row must exist before ADD COLUMN
+				// so defaults are tested on old parts, not just on new inserts.
+				require.NoError(t, db.Exec(`CREATE TABLE cache_skeletons (
+					ts DateTime64(3), end_ts DateTime64(3), request_id String, attempt UInt8,
+					status LowCardinality(String), node LowCardinality(String),
+					token_id UInt32, session_id String, lane UInt64,
+					channel_id UInt32, key_idx UInt16, model LowCardinality(String),
+					param_fp UInt64, thinking LowCardinality(String), effort LowCardinality(String),
+					provider LowCardinality(String) DEFAULT 'claude',
+					cache_key_hash UInt64 DEFAULT 0, retention LowCardinality(String) DEFAULT '',
+					blk_hash Array(UInt64), blk_kind Array(LowCardinality(String)),
+					blk_name Array(LowCardinality(String)), blk_len Array(UInt32),
+					msg_start Array(UInt16), bp_idx Array(UInt16), bp_ttl Array(LowCardinality(String)),
+					fixed LowCardinality(String), cache_read UInt32, cache_creation UInt32, input UInt32,
+					parent_request_id String, prefix_len UInt16
+				) ENGINE = MergeTree()
+				PARTITION BY toYYYYMMDD(ts)
+				ORDER BY (token_id, session_id, lane, ts)`).Error)
+				require.NoError(t, db.Exec(`INSERT INTO cache_skeletons
+					(ts, end_ts, request_id, attempt, status, token_id, session_id,
+					 lane, param_fp, blk_hash, blk_len, bp_idx, bp_ttl)
+					VALUES (?, ?, 'legacy', 2, 'ok', 7, 'legacy-session',
+					 9223372036854775813, 9223372036854775817,
+					 [9223372036854775809, 2], [100, 200], [1], ['1h'])`,
+					now.Format("2006-01-02 15:04:05.000"), now.Format("2006-01-02 15:04:05.000")).Error)
+			}
+			// Startup migration must work both initially and on repeat.
+			require.NoError(t, MigrateCacheSkeletons())
+			require.NoError(t, MigrateCacheSkeletons())
 
-	requestId := "skeleton-test-" + time.Now().Format("150405.000000")
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	batch := []*CacheSkeleton{
-		{
-			Ts: now, EndTs: now.Add(time.Second), RequestId: requestId, Attempt: 1, Status: "ok",
-			Node: "n1", TokenId: 7, SessionId: "s1", Lane: 1<<63 + 5, ChannelId: 12, KeyIdx: 3,
-			Model: "claude-sonnet-5-5", ParamFp: 1<<63 + 9, Thinking: "adaptive", Effort: "high",
-			BlkHash:   []uint64{1<<63 + 1, 2, 3},
-			BlkKind:   []string{"tool", "system.text", "user.text"},
-			BlkName:   []string{"Bash", "", ""},
-			BlkLen:    []uint32{100, 200, 30},
-			MsgStart:  []uint16{2},
-			BpIdx:     []uint16{1},
-			BpTtl:     []string{"1h"},
-			CacheRead: 25100, CacheCreation: 48900, Input: 3,
-		},
-		{
-			Ts: now, EndTs: now, RequestId: requestId, Attempt: 0, Status: "error",
-			BlkHash: []uint64{}, BlkKind: []string{}, BlkName: []string{}, BlkLen: []uint32{},
-			MsgStart: []uint16{}, BpIdx: []uint16{}, BpTtl: []string{},
-		},
+			requestId := "skeleton-test-" + scenario
+			batch := []*CacheSkeleton{
+				{
+					Ts: now, EndTs: now.Add(time.Second), RequestId: requestId, Attempt: 1, Status: "ok",
+					Node: "n1", TokenId: 7, SessionId: "s1", Lane: 1<<63 + 5, ChannelId: 12, KeyIdx: 3,
+					Model: "claude-sonnet-5-5", ParamFp: 1<<63 + 9, Thinking: "adaptive", Effort: "high",
+					BlkHash:   []uint64{1<<63 + 1, 2, 3},
+					BlkKind:   []string{"tool", "system.text", "user.text"},
+					BlkName:   []string{"Bash", "", ""},
+					BlkLen:    []uint32{100, 200, 30},
+					MsgStart:  []uint16{2},
+					BpIdx:     []uint16{1},
+					BpTtl:     []string{"1h"},
+					CacheRead: 25100, CacheCreation: 48900, Input: 3,
+					CoverageHash:  []uint64{1<<63 + 11, 0, 1<<64 - 1},
+					CoverageLen:   []uint32{100, 0, 1<<32 - 1},
+					CoverageBpIdx: []uint16{0, 2}, CoverageBpTtl: []string{"5m", "1h"},
+					BaselineHash:  []uint64{1<<64 - 1, 1<<63 + 17},
+					BaselineLen:   []uint32{300, 400},
+					BaselineBpIdx: []uint16{1}, BaselineBpTtl: []string{""},
+					BaselineParamFp: 1<<63 + 23,
+				},
+				{
+					Ts: now, EndTs: now, RequestId: requestId, Attempt: 0, Status: "error",
+					BlkHash: []uint64{}, BlkKind: []string{}, BlkName: []string{}, BlkLen: []uint32{},
+					MsgStart: []uint16{}, BpIdx: []uint16{}, BpTtl: []string{},
+					CoverageHash: []uint64{}, CoverageLen: []uint32{},
+					CoverageBpIdx: []uint16{}, CoverageBpTtl: []string{},
+					BaselineHash: []uint64{}, BaselineLen: []uint32{},
+					BaselineBpIdx: []uint16{}, BaselineBpTtl: []string{},
+				},
+			}
+			require.NoError(t, LOG_DB.Create(&batch).Error)
+			// Repeating migration must preserve populated arrays as well as old rows.
+			require.NoError(t, MigrateCacheSkeletons())
+
+			rows, err := GetCacheSkeletons(requestId)
+			require.NoError(t, err)
+			require.Len(t, rows, 2)
+			assert.Equal(t, uint8(0), rows[0].Attempt)
+			assert.Equal(t, "error", rows[0].Status)
+			assert.Empty(t, rows[0].BlkHash)
+			emptyRows := []*CacheSkeleton{rows[0]}
+			if scenario == "upgrade" {
+				legacy, err := GetCacheSkeletons("legacy")
+				require.NoError(t, err)
+				require.Len(t, legacy, 1)
+				old := legacy[0]
+				assert.Equal(t, uint8(2), old.Attempt)
+				assert.Equal(t, "ok", old.Status)
+				assert.Equal(t, uint32(7), old.TokenId)
+				assert.Equal(t, "legacy-session", old.SessionId)
+				assert.Equal(t, uint64(1<<63+5), old.Lane)
+				assert.Equal(t, uint64(1<<63+9), old.ParamFp)
+				assert.Equal(t, []uint64{1<<63 + 1, 2}, old.BlkHash)
+				assert.Equal(t, []uint32{100, 200}, old.BlkLen)
+				assert.Equal(t, []uint16{1}, old.BpIdx)
+				assert.Equal(t, []string{"1h"}, old.BpTtl)
+				assert.True(t, now.Equal(old.Ts.UTC()))
+				emptyRows = append(emptyRows, old)
+			}
+			for _, empty := range emptyRows {
+				assert.Empty(t, empty.CoverageHash)
+				assert.Empty(t, empty.CoverageLen)
+				assert.Empty(t, empty.CoverageBpIdx)
+				assert.Empty(t, empty.CoverageBpTtl)
+				assert.Empty(t, empty.BaselineHash)
+				assert.Empty(t, empty.BaselineLen)
+				assert.Empty(t, empty.BaselineBpIdx)
+				assert.Empty(t, empty.BaselineBpTtl)
+				assert.Zero(t, empty.BaselineParamFp)
+			}
+
+			got := rows[1]
+			assert.Equal(t, batch[0].BlkHash, got.BlkHash)
+			assert.Equal(t, batch[0].BlkKind, got.BlkKind)
+			assert.Equal(t, batch[0].BlkName, got.BlkName)
+			assert.Equal(t, batch[0].BlkLen, got.BlkLen)
+			assert.Equal(t, batch[0].MsgStart, got.MsgStart)
+			assert.Equal(t, batch[0].BpIdx, got.BpIdx)
+			assert.Equal(t, batch[0].BpTtl, got.BpTtl)
+			assert.Equal(t, batch[0].Lane, got.Lane)
+			assert.Equal(t, batch[0].ParamFp, got.ParamFp)
+			assert.Equal(t, uint32(25100), got.CacheRead)
+			assert.True(t, now.Equal(got.Ts.UTC()))
+			assert.Equal(t, batch[0].CoverageHash, got.CoverageHash)
+			assert.Equal(t, batch[0].CoverageLen, got.CoverageLen)
+			assert.Equal(t, batch[0].CoverageBpIdx, got.CoverageBpIdx)
+			assert.Equal(t, batch[0].CoverageBpTtl, got.CoverageBpTtl)
+			assert.Equal(t, batch[0].BaselineHash, got.BaselineHash)
+			assert.Equal(t, batch[0].BaselineLen, got.BaselineLen)
+			assert.Equal(t, batch[0].BaselineBpIdx, got.BaselineBpIdx)
+			assert.Equal(t, batch[0].BaselineBpTtl, got.BaselineBpTtl)
+			assert.Equal(t, batch[0].BaselineParamFp, got.BaselineParamFp)
+		})
 	}
-	require.NoError(t, LOG_DB.Create(&batch).Error)
-
-	rows, err := GetCacheSkeletons(requestId)
-	require.NoError(t, err)
-	require.Len(t, rows, 2)
-	assert.Equal(t, uint8(0), rows[0].Attempt)
-	assert.Equal(t, "error", rows[0].Status)
-	assert.Empty(t, rows[0].BlkHash)
-
-	got := rows[1]
-	assert.Equal(t, batch[0].BlkHash, got.BlkHash)
-	assert.Equal(t, batch[0].BlkKind, got.BlkKind)
-	assert.Equal(t, batch[0].BlkName, got.BlkName)
-	assert.Equal(t, batch[0].BlkLen, got.BlkLen)
-	assert.Equal(t, batch[0].MsgStart, got.MsgStart)
-	assert.Equal(t, batch[0].BpIdx, got.BpIdx)
-	assert.Equal(t, batch[0].BpTtl, got.BpTtl)
-	assert.Equal(t, batch[0].Lane, got.Lane)
-	assert.Equal(t, batch[0].ParamFp, got.ParamFp)
-	assert.Equal(t, uint32(25100), got.CacheRead)
-	assert.True(t, now.Equal(got.Ts.UTC()))
 }
 
 // skeletonFixture builds one successful turn: every block is 1000 bytes

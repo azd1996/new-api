@@ -776,6 +776,11 @@ export interface SkeletonTurn {
   total_bytes: number
   segments: { state: 'same' | 'changed' | 'new'; bytes: number }[] | null
   breakpoints: { offset: number; ttl: string }[] | null
+  coverage_available?: boolean
+  baseline_covered_bytes?: number
+  optimized_covered_bytes?: number
+  coverage_delta_bytes?: number
+  coverage_total_bytes?: number
 }
 
 // Token sums over the successful turns.
@@ -794,6 +799,15 @@ export interface SkeletonLane {
   provider: string
   turns: SkeletonTurn[]
   summary: SkeletonRates
+  coverage?: ByteCacheCoverage
+}
+
+export interface ByteCacheCoverage {
+  baseline_covered_bytes: number
+  optimized_covered_bytes: number
+  delta_bytes: number
+  total_bytes: number
+  comparable_turns: number
 }
 
 export interface SessionCacheAnalysisResponse {
@@ -804,6 +818,7 @@ export interface SessionCacheAnalysisResponse {
     lanes?: SkeletonLane[]
     loss_summary?: SkeletonLossSummary
     summary?: SkeletonRates
+    coverage?: ByteCacheCoverage
     truncated?: boolean
   }
 }
@@ -814,6 +829,7 @@ export interface SessionCacheRangeAnalysisResponse {
   data?: {
     enabled: boolean
     summary?: SkeletonRates
+    coverage?: ByteCacheCoverage
     provider?: string
     loss_summary?: SkeletonLossSummary
     truncated?: boolean

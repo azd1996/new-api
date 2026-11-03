@@ -479,6 +479,7 @@ func GetCacheSkeletonSession(c *gin.Context) {
 		"lanes":        analysis.Lanes,
 		"summary":      analysis.Summary,
 		"loss_summary": analysis.LossSummary,
+		"coverage":     analysis.Coverage,
 		"truncated":    analysis.Truncated,
 	})
 }
@@ -500,6 +501,7 @@ func GetCacheSkeletonSessionsAnalysis(c *gin.Context) {
 		"summary":      analysis.Summary,
 		"provider":     analysis.Provider,
 		"loss_summary": analysis.LossSummary,
+		"coverage":     analysis.Coverage,
 		"truncated":    analysis.Truncated,
 	})
 }

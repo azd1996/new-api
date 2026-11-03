@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/binary"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,6 +134,85 @@ func buildClaudeCacheSkeleton(body []byte) *model.CacheSkeleton {
 		}
 		row.BpIdx = append(row.BpIdx, uint16(len(row.BlkHash)-1))
 		row.BpTtl = append(row.BpTtl, ttl)
+	}
+	return row
+}
+
+// buildClaudeCacheCoverage stores a canonical, marker-free representation for
+// byte-level before/after coverage analysis. Plain string message content is
+// represented as one text block so gateway-added wrappers do not look like a
+// content change, and cache_control itself is excluded from the byte count.
+func buildClaudeCacheCoverage(body []byte) *model.CacheSkeleton {
+	root := gjson.ParseBytes(body)
+	row := &model.CacheSkeleton{
+		Model: root.Get("model").String(),
+	}
+	row.BaselineParamFp = xxhash.Sum64String(row.Model + "\x00" + root.Get("tool_choice").Raw + "\x00" +
+		root.Get("thinking").Raw + "\x00" + root.Get("output_config.effort").String())
+	row.ParamFp = row.BaselineParamFp
+	messageIndex := -1
+	add := func(kind string, block gjson.Result) {
+		raw := block.Raw
+		if block.IsObject() {
+			var fields map[string]any
+			if common.Unmarshal([]byte(raw), &fields) == nil {
+				delete(fields, "cache_control")
+				if canonical, err := common.Marshal(fields); err == nil {
+					raw = string(canonical)
+				}
+			}
+		}
+		row.CoverageHash = append(row.CoverageHash, xxhash.Sum64String(
+			strconv.Itoa(messageIndex)+"\x00"+kind+"\x00"+raw))
+		row.CoverageLen = append(row.CoverageLen, uint32(len(raw)))
+		if block.Get("cache_control").IsObject() {
+			row.CoverageBpIdx = append(row.CoverageBpIdx, uint16(len(row.CoverageHash)-1))
+			ttl := block.Get("cache_control.ttl").String()
+			if ttl == "" {
+				ttl = claudeDefaultCacheTTL
+			}
+			row.CoverageBpTtl = append(row.CoverageBpTtl, ttl)
+		}
+	}
+	addText := func(kind string, content gjson.Result) {
+		block, err := sjson.Set(`{"type":"text"}`, "text", content.String())
+		if err != nil {
+			return
+		}
+		add(kind, gjson.Parse(block))
+	}
+	root.Get("tools").ForEach(func(_, tool gjson.Result) bool {
+		add("tool", tool)
+		return true
+	})
+	if root.Get("system").Type == gjson.String {
+		addText("system.text", root.Get("system"))
+	} else if root.Get("system").IsArray() {
+		root.Get("system").ForEach(func(_, block gjson.Result) bool {
+			add("system."+block.Get("type").String(), block)
+			return true
+		})
+	}
+	root.Get("messages").ForEach(func(_, msg gjson.Result) bool {
+		messageIndex++
+		content := msg.Get("content")
+		if content.Type == gjson.String {
+			addText(msg.Get("role").String()+".text", content)
+			return true
+		}
+		content.ForEach(func(_, block gjson.Result) bool {
+			add(msg.Get("role").String()+"."+block.Get("type").String(), block)
+			return true
+		})
+		return true
+	})
+	if root.Get("cache_control").IsObject() && len(row.CoverageHash) > 0 {
+		row.CoverageBpIdx = append(row.CoverageBpIdx, uint16(len(row.CoverageHash)-1))
+		ttl := root.Get("cache_control.ttl").String()
+		if ttl == "" {
+			ttl = claudeDefaultCacheTTL
+		}
+		row.CoverageBpTtl = append(row.CoverageBpTtl, ttl)
 	}
 	return row
 }

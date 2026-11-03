@@ -97,6 +97,7 @@ function rowOf(label: string) {
     screen.getByText(label)
   const row = field.closest('[data-slot="logs-filter-row"]')
   expect(row, label).not.toBeNull()
+  if (!row) throw new Error(`Filter row not found: ${label}`)
   return row
 }
 
@@ -109,9 +110,7 @@ afterEach(() => {
 it('groups the customer and downstream filters into the last advanced row', async () => {
   await renderAdminFilter()
 
-  const rows = [
-    ...document.querySelectorAll('[data-slot="logs-filter-row"]'),
-  ]
+  const rows = [...document.querySelectorAll('[data-slot="logs-filter-row"]')]
   const customerRow = rowOf('Customer Name')
   for (const label of [
     'Customer ID',
@@ -132,4 +131,43 @@ it('puts node, retry, status code and error keyword on their own row', async () 
   }
   expect(nodeRow).not.toBe(rowOf('Session ID'))
   expect(nodeRow).not.toBe(rowOf('Customer Name'))
+})
+
+it('keeps common log filter columns adaptive instead of splitting them into twelve narrow tracks', async () => {
+  await renderAdminFilter()
+
+  const primaryFilters = screen.getByRole('button', {
+    name: 'Model Name: Equals',
+  }).parentElement?.parentElement?.parentElement
+  expect(primaryFilters?.className).toContain(
+    'sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'
+  )
+  expect(primaryFilters?.className).not.toContain('lg:grid-cols-12')
+
+  const advancedRows = [
+    ...document.querySelectorAll('[data-slot="logs-filter-row"]'),
+  ]
+  expect(advancedRows.length).toBeGreaterThan(0)
+  expect(advancedRows[0].className).toContain(
+    'sm:grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]'
+  )
+  expect(advancedRows[0].className).not.toContain('lg:grid-cols-12')
+})
+
+it('gives group, node name and customer ID filters two adaptive grid tracks', async () => {
+  await renderAdminFilter()
+
+  let groupField: HTMLElement | null = screen.getByRole('combobox', {
+    name: 'Group',
+  })
+  while (groupField && !groupField.classList.contains('sm:col-span-2')) {
+    groupField = groupField.parentElement
+  }
+  expect(groupField).not.toBeNull()
+
+  const nodeRow = rowOf('Node Name')
+  expect(nodeRow.children[0].classList.contains('sm:col-span-2')).toBe(true)
+
+  const customerRow = rowOf('Customer ID')
+  expect(customerRow.children[1].classList.contains('sm:col-span-2')).toBe(true)
 })

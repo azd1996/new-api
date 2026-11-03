@@ -35,11 +35,11 @@ import { getLogSessions, getSessionCacheRangeAnalysis } from '../api'
 import { skeletonRate, skeletonTierLabels } from '../lib/cache-skeleton'
 import { buildApiParams } from '../lib/utils'
 import type { LogSession } from '../types'
+import { ByteCacheCoverageSummary } from './cache-coverage-summary'
 import { CacheLossBreakdown } from './cache-loss-breakdown'
 import { useSessionColumns } from './columns/session-columns'
 import { SessionCacheDiagnosis } from './session-cache-diagnosis'
 import { SessionRequestsTable } from './session-requests-table'
-import { SessionsBackfillButton } from './sessions-backfill-button'
 import { useLogsViewScope } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
@@ -58,7 +58,7 @@ interface UsageLogsSessionsProps {
 // session_id, expanded in place to list the session's requests.
 export function UsageLogsSessions(props: UsageLogsSessionsProps) {
   const { t } = useTranslation()
-  const { isAdminView, isRootView, viewAccess } = useLogsViewScope()
+  const { isAdminView, viewAccess } = useLogsViewScope()
   const searchParams = route.useSearch()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
 
@@ -172,11 +172,11 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
       applyHeaderSize
       hideMobile
       fixedHeight={false}
+      className='h-full overflow-y-auto'
       tableClassName='[&_[data-slot=table]]:text-[13px] [&_[data-slot=table]_td]:text-[13px] [&_[data-slot=table]_th]:text-[13px]'
       toolbar={
         <div className='flex flex-col gap-2'>
           {props.toolbar}
-          {isRootView && sessionsEnabled && <SessionsBackfillButton />}
           {isAdminView &&
             sessionsEnabled &&
             cacheSummary?.enabled !== false && (
@@ -235,7 +235,12 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                   </>
                 )}
                 {cacheSummary?.enabled && (
-                  <CacheLossBreakdown summary={cacheSummary.loss_summary} />
+                  <>
+                    <ByteCacheCoverageSummary
+                      coverage={cacheSummary.coverage}
+                    />
+                    <CacheLossBreakdown summary={cacheSummary.loss_summary} />
+                  </>
                 )}
               </section>
             )}

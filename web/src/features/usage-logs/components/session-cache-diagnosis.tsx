@@ -44,6 +44,7 @@ import {
   skeletonUpstreamSplit,
 } from '../lib/cache-skeleton'
 import type { SkeletonLane, SkeletonRates, SkeletonTurn } from '../types'
+import { ByteCacheCoverageSummary } from './cache-coverage-summary'
 import { CacheLossBreakdown } from './cache-loss-breakdown'
 import { CacheSkeletonDialog } from './dialogs/cache-skeleton-dialog'
 
@@ -152,6 +153,15 @@ function LaneTurns(props: {
                 {skeletonRate(turn.expected_current, turn.total_tokens)}
                 {turn.expected_adjusted > turn.expected_current &&
                   ` → ${skeletonRate(turn.expected_adjusted, turn.total_tokens)}`}
+                {turn.coverage_available &&
+                  (turn.coverage_total_bytes ?? 0) > 0 && (
+                    <div className='text-muted-foreground'>
+                      {skeletonRate(
+                        turn.optimized_covered_bytes ?? 0,
+                        turn.coverage_total_bytes ?? 0
+                      )}
+                    </div>
+                  )}
               </TableCell>
               <TableCell className='text-muted-foreground py-1'>
                 {turn.channel_id} / {turn.key_idx}
@@ -247,6 +257,7 @@ export function SessionCacheDiagnosis(props: { sessionId: string }) {
         </div>
       )}
       <CacheLossBreakdown summary={data.loss_summary} />
+      <ByteCacheCoverageSummary coverage={data.coverage} />
       {showTurns &&
         lanes.map((lane) => (
           <div key={lane.lane} className='space-y-1'>
@@ -261,6 +272,7 @@ export function SessionCacheDiagnosis(props: { sessionId: string }) {
                   turns={lane.turns}
                   provider={lane.provider}
                 />
+                <ByteCacheCoverageSummary coverage={lane.coverage} />
               </div>
             )}
             <LaneTurns lane={lane} onOpenSkeleton={setSkeletonRequestId} />

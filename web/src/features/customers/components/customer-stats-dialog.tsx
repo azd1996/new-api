@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
+import { ByteCacheCoverageSummary } from '@/features/usage-logs/components/cache-coverage-summary'
 import { CacheLossBreakdown } from '@/features/usage-logs/components/cache-loss-breakdown'
 import dayjs from '@/lib/dayjs'
 import { getServerErrorMessage } from '@/lib/server-error-message'
@@ -129,6 +130,7 @@ export function CustomerStatsDialog(props: {
                     title={t('No analyzable Claude cache attempts')}
                   />
                 )}
+                <ByteCacheCoverageSummary coverage={cache.data.coverage} />
                 <CacheLossBreakdown summary={cache.data.loss_summary} />
               </>
             )}

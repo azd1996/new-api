@@ -183,3 +183,28 @@ it('analysis API rejects a business failure instead of displaying it as empty st
     })
   ).rejects.toThrow('Analysis unavailable')
 })
+
+it('shows byte coverage alongside actual token rates without requiring Claude losses', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+    data: {
+      success: true,
+      data:
+        url === '/api/log/analysis'
+          ? data
+          : {
+              enabled: true,
+              coverage: {
+                baseline_covered_bytes: 200,
+                optimized_covered_bytes: 600,
+                delta_bytes: 400,
+                total_bytes: 1000,
+                comparable_turns: 3,
+              },
+            },
+    },
+  }))
+  renderStats()
+  expect(await screen.findByText('20.0% → 60.0%')).toBeVisible()
+  expect(screen.getByText('+40.0 pp / +400B')).toBeVisible()
+  expect(screen.getByText('50%')).toBeVisible()
+})

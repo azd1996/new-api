@@ -115,6 +115,13 @@ function mockApi(
             enabled: true,
             provider: options?.provider ?? 'openai',
             loss_summary: options?.lossSummary,
+            coverage: {
+              baseline_covered_bytes: 800,
+              optimized_covered_bytes: 500,
+              delta_bytes: -300,
+              total_bytes: 1000,
+              comparable_turns: 2,
+            },
             summary: {
               total: 1000,
               actual: 750,
@@ -222,11 +229,13 @@ it('lists sessions collapsed and loads no session requests before expanding', as
   expect(screen.getByText('Calculating...')).toBeVisible()
   expect(screen.getByText('Requests')).toBeVisible()
   expect(
-    screen.getByRole('table').closest('[class*="space-y-2.5"]')
+    screen.getByRole('table').closest('.h-full.overflow-y-auto')
   ).not.toBeNull()
   await act(async () => finishSummary())
   expect(await screen.findByText('Actual hit rate')).toBeVisible()
   expect(screen.getByText('75.0%')).toBeVisible()
+  expect(screen.getByText('80.0% → 50.0%')).toBeVisible()
+  expect(screen.getByText('-30.0 pp / -300B')).toBeVisible()
   expect(screen.getByText('Prefix-match ceiling')).toBeVisible()
   expect(screen.getByText('With one prompt_cache_key')).toBeVisible()
   expect(screen.getByText('One key + 24h retention')).toBeVisible()
@@ -321,6 +330,11 @@ it.each([true, false])(
     const showTurns = await screen.findByRole('button', { name: 'Show turns' })
     const diagnosis = showTurns.closest('section')
     if (!diagnosis) throw new Error('Cache diagnosis section not found')
+    expect(
+      within(diagnosis).getByText(
+        'No comparable samples recorded since upgrade'
+      )
+    ).toBeVisible()
     for (const rate of ['40.0%', '60.0%', '80.0%', '90.0%']) {
       expect(within(diagnosis).getByText(rate)).toBeVisible()
     }
@@ -367,25 +381,11 @@ it('explains the view is unavailable when the deployment keeps no session table'
   ).not.toBeInTheDocument()
 })
 
-it('lets a root user start a backfill for the entered number of days', async () => {
+it('does not show the historical session backfill control', async () => {
   useAuthStore
     .getState()
     .auth.setUser({ id: 1, username: 'root', role: ROLE.SUPER_ADMIN })
-  vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
-    if (url === '/api/log/sessions/backfill') {
-      return {
-        data: {
-          success: true,
-          data: {
-            running: false,
-            cutoff: 0,
-            days: 0,
-            done_days: [],
-            skipped_days: [],
-          },
-        },
-      }
-    }
+  const get = vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
     if (url.startsWith('/api/log/sessions?')) {
       return {
         data: {
@@ -402,32 +402,13 @@ it('lets a root user start a backfill for the entered number of days', async () 
     }
     return { data: { success: true, data: {} } }
   })
-  const post = vi.spyOn(api, 'post').mockResolvedValue({
-    data: {
-      success: true,
-      data: {
-        running: true,
-        cutoff: 1,
-        days: 30,
-        done_days: [],
-        skipped_days: [],
-      },
-    },
-  })
   await renderSessions()
 
-  await userEvent.click(
-    await screen.findByRole('button', { name: 'Backfill session history' })
-  )
-  const daysInput = await screen.findByLabelText('Days to backfill (1-366)')
-  await userEvent.clear(daysInput)
-  await userEvent.type(daysInput, '30')
-  await userEvent.click(screen.getByRole('button', { name: 'Start' }))
-
-  await waitFor(() =>
-    expect(post).toHaveBeenCalledWith('/api/log/sessions/backfill?days=30')
-  )
-  expect(await screen.findByRole('status')).toHaveTextContent(
-    'Backfilling: 0 / 30 days done'
-  )
+  await screen.findByText('sess-abc')
+  expect(
+    screen.queryByRole('button', { name: 'Backfill session history' })
+  ).not.toBeInTheDocument()
+  expect(
+    get.mock.calls.some(([url]) => String(url) === '/api/log/sessions/backfill')
+  ).toBe(false)
 })

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 
+import { ByteCacheCoverageSummary } from '../cache-coverage-summary'
 import { CacheLossBreakdown } from '../cache-loss-breakdown'
 
 afterEach(cleanup)
@@ -60,3 +61,84 @@ it('renders an unknown future reason without dropping its tokens or dividing by 
   expect(screen.getByRole('cell', { name: '5' })).toBeVisible()
   expect(screen.getByRole('cell', { name: '—' })).toBeVisible()
 })
+
+it('shows signed byte coverage change and keeps legacy coverage unavailable', () => {
+  const { rerender } = render(
+    <ByteCacheCoverageSummary
+      coverage={{
+        baseline_covered_bytes: 400,
+        optimized_covered_bytes: 500,
+        delta_bytes: 100,
+        total_bytes: 1000,
+        comparable_turns: 2,
+      }}
+    />
+  )
+
+  expect(screen.getByText('40.0% → 50.0%')).toBeVisible()
+  expect(screen.getByText('+10.0 pp / +100B')).toBeVisible()
+  expect(screen.getByRole('region')).toHaveTextContent('Comparable turns: 2')
+
+  rerender(<ByteCacheCoverageSummary />)
+  expect(
+    screen.getByText('No comparable samples recorded since upgrade')
+  ).toBeVisible()
+})
+
+it.each([
+  {
+    baseline: 800,
+    optimized: 500,
+    delta: -300,
+    rates: '80.0% → 50.0%',
+    change: '-30.0 pp / -300B',
+  },
+  {
+    baseline: 0,
+    optimized: 0,
+    delta: 0,
+    rates: '0.0% → 0.0%',
+    change: '+0.0 pp / 0B',
+  },
+])('preserves signed coverage with baseline $baseline', (sample) => {
+  render(
+    <ByteCacheCoverageSummary
+      coverage={{
+        baseline_covered_bytes: sample.baseline,
+        optimized_covered_bytes: sample.optimized,
+        delta_bytes: sample.delta,
+        total_bytes: 1000,
+        comparable_turns: 1,
+      }}
+    />
+  )
+  expect(screen.getByText(sample.rates)).toBeVisible()
+  expect(screen.getByText(sample.change)).toBeVisible()
+})
+
+it.each([
+  { comparable_turns: 0 },
+  { total_bytes: 0 },
+  { delta_bytes: Number.NaN },
+  { baseline_covered_bytes: Number.POSITIVE_INFINITY },
+])(
+  'shows missing samples instead of invalid percentages for %o',
+  (override) => {
+    render(
+      <ByteCacheCoverageSummary
+        coverage={{
+          baseline_covered_bytes: 400,
+          optimized_covered_bytes: 500,
+          delta_bytes: 100,
+          total_bytes: 1000,
+          comparable_turns: 1,
+          ...override,
+        }}
+      />
+    )
+    expect(
+      screen.getByText('No comparable samples recorded since upgrade')
+    ).toBeVisible()
+    expect(screen.getByRole('region')).not.toHaveTextContent(/NaN|Infinity|%/)
+  }
+)
