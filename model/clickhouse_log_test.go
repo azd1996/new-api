@@ -84,6 +84,9 @@ func TestClickHouseLogCreateTableSQL(t *testing.T) {
 	assert.Contains(t, withoutTTL, "PARTITION BY toYYYYMM(toDateTime(created_at))")
 	assert.Contains(t, withoutTTL, "ORDER BY (created_at, request_id)")
 	assert.NotContains(t, withoutTTL, "TTL ")
+	for _, col := range clickHouseLogBloomFilterColumns {
+		assert.Contains(t, withoutTTL, "INDEX idx_logs_"+col+" "+col+" TYPE bloom_filter(0.01) GRANULARITY 4")
+	}
 
 	withTTL := clickHouseLogCreateTableSQL(30)
 	assert.Contains(t, withTTL, "ORDER BY (created_at, request_id)")

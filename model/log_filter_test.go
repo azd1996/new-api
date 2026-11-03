@@ -222,6 +222,75 @@ func TestLogFilterCustomerFallsBackToOtherJSON(t *testing.T) {
 	assert.Equal(t, []int{3}, findIDs(LogFilter{CustomerId: customerNoneFilter}))
 }
 
+// TestLogFilterStatusCodeFallsBackToOtherJSON pins the status_code filter to
+// match the dedicated indexed column for rows written since the column was
+// added, while still finding older rows that only carry it in the Other JSON
+// (see RecordErrorLog's StatusCode dual-write).
+func TestLogFilterStatusCodeFallsBackToOtherJSON(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	oldType := common.LogDatabaseType()
+	t.Cleanup(func() { common.SetLogDatabaseType(oldType) })
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+
+	require.NoError(t, db.Create([]Log{
+		// New row: value in both the indexed column and Other.
+		{Id: 1, StatusCode: 429, Other: `{"status_code":429}`},
+		// Legacy row: value only in Other, column empty (pre-column rows).
+		{Id: 2, Other: `{"status_code":429}`},
+		// Unrelated status code.
+		{Id: 3, StatusCode: 500, Other: `{"status_code":500}`},
+	}).Error)
+
+	findIDs := func(filter LogFilter) []int {
+		query, applyErr := filter.apply(db.Model(&Log{}))
+		require.NoError(t, applyErr)
+		var ids []int
+		require.NoError(t, query.Order("id").Pluck("id", &ids).Error)
+		return ids
+	}
+
+	assert.Equal(t, []int{1, 2}, findIDs(LogFilter{StatusCode: 429}))
+	assert.Equal(t, []int{3}, findIDs(LogFilter{StatusCode: 500}))
+}
+
+// TestLogFilterErrorKeywordAppliesRegardlessOfType pins ErrorKeyword to apply
+// whenever it is set, independent of Type. The frontend's Error Keyword input
+// never forces the Type selector to "Error" (see
+// web/src/features/usage-logs/components/common-logs-filter-bar.tsx), so a
+// Type == LogTypeError guard here silently dropped the filter any time an
+// admin searched by keyword while Type was left at "All" or set to something
+// else — the "通用日志" keyword search bug this test locks against a regression of.
+func TestLogFilterErrorKeywordAppliesRegardlessOfType(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	oldType := common.LogDatabaseType()
+	t.Cleanup(func() { common.SetLogDatabaseType(oldType) })
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+
+	require.NoError(t, db.Create([]Log{
+		{Id: 1, Type: LogTypeError, Content: "boom: rate limit exceeded"},
+		{Id: 2, Type: LogTypeConsume, Content: "unrelated content"},
+		{Id: 3, Type: LogTypeError, Content: "another failure"},
+	}).Error)
+
+	findIDs := func(filter LogFilter) []int {
+		query, applyErr := filter.apply(db.Model(&Log{}))
+		require.NoError(t, applyErr)
+		var ids []int
+		require.NoError(t, query.Order("id").Pluck("id", &ids).Error)
+		return ids
+	}
+
+	// Type left unset ("All Types" in the UI): the keyword must still narrow
+	// the result instead of being silently ignored.
+	assert.Equal(t, []int{1}, findIDs(LogFilter{ErrorKeyword: "boom"}))
+	// Explicit Type=Error keeps working alongside the keyword.
+	assert.Equal(t, []int{1}, findIDs(LogFilter{Type: LogTypeError, ErrorKeyword: "boom"}))
+}
+
 func TestSuccessCountsRetainCustomerAndTraceFilters(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)

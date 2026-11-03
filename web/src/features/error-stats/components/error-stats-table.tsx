@@ -314,10 +314,17 @@ function ModelsCell(props: { item: ErrorStatItem }) {
         <span className='text-muted-foreground text-xs'>-</span>
       )}
       {props.item.models.map((m) => (
-        <Badge key={m.model} variant='outline' className='max-w-[180px]'>
-          <span className='truncate'>{m.model}</span>
-          <span className='text-muted-foreground'>×{m.count}</span>
-        </Badge>
+        <Tooltip key={m.model}>
+          <TooltipTrigger
+            render={<Badge variant='outline' className='max-w-[260px]' />}
+          >
+            <span className='truncate'>{m.model}</span>
+            <span className='text-muted-foreground'>×{m.count}</span>
+          </TooltipTrigger>
+          <TooltipContent className='max-w-[360px] break-words'>
+            {m.model} ×{m.count}
+          </TooltipContent>
+        </Tooltip>
       ))}
     </div>
   )
@@ -433,7 +440,7 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
                 {t('Status Code')}
               </TableHead>
             )}
-            <TableHead className='min-w-[180px]'>{t('Models')}</TableHead>
+            <TableHead className='min-w-[200px]'>{t('Models')}</TableHead>
             <TableHead className='min-w-[450px]'>{t('Channels')}</TableHead>
             <TableHead className='min-w-[200px]'>{t('Customers')}</TableHead>
             {isSignatureMode && (

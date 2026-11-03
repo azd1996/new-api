@@ -5,8 +5,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // TestErrorSignatureOtherReadsLogOtherAdminInfo locks the 明细错误 read path to
@@ -41,4 +43,25 @@ func TestErrorSignatureOtherLegacyTopLevel(t *testing.T) {
 	assert.Equal(t, "deadbeef", o.signatureHash())
 	assert.Equal(t, "old sig", o.signature())
 	assert.Equal(t, "cust-9", o.customerId())
+}
+
+// TestErrorStatFilterStatusCodeFallsBackToOtherJSON pins
+// applyErrorStatFilter's status_code narrowing to match the dedicated indexed
+// column for rows written since the column was added, while still finding
+// older error rows that only carry it in the Other JSON.
+func TestErrorStatFilterStatusCodeFallsBackToOtherJSON(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+
+	require.NoError(t, db.Create([]Log{
+		{Id: 1, Type: LogTypeError, StatusCode: 429, Other: `{"status_code":429}`},
+		{Id: 2, Type: LogTypeError, Other: `{"status_code":429}`},
+		{Id: 3, Type: LogTypeError, StatusCode: 500, Other: `{"status_code":500}`},
+	}).Error)
+
+	var rows []errorStatScanRow
+	require.NoError(t, applyErrorStatFilter(db.Table("logs"), ErrorStatFilter{StatusCode: 429}).
+		Select("created_at, model_name, channel_id, other").Order("id").Scan(&rows).Error)
+	assert.Len(t, rows, 2)
 }

@@ -77,8 +77,11 @@ func applyErrorStatFilter(tx *gorm.DB, f ErrorStatFilter) *gorm.DB {
 		tx = tx.Where(logGroupCol+" = ?", f.Group)
 	}
 	if f.StatusCode != 0 {
+		// status_code lives in a dedicated indexed column for rows written since
+		// the column was added; older rows carry it only in the Other JSON blob.
+		// Match either so historical error logs stay searchable.
 		condition, args := statusCodeOtherCondition("other", f.StatusCode)
-		tx = tx.Where(condition, args...)
+		tx = tx.Where("(status_code = ? OR "+condition+")", append([]any{f.StatusCode}, args...)...)
 	}
 	if f.CustomerId == customerNoneFilter || f.CustomerName == customerNoneFilter {
 		cond, pat := otherFieldAbsentCondition("other", "customer_id")

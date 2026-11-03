@@ -67,3 +67,40 @@ func TestRecordErrorLogMarksProcessShutdown(t *testing.T) {
 	assert.Equal(t, "shutdown_timeout", shutdown["reason"])
 	assert.Equal(t, "node-x", shutdown["instance"])
 }
+
+// TestRecordErrorLogDualWritesStatusCode proves RecordErrorLog copies
+// other.status_code (set via SetPublic by the caller) into the dedicated
+// indexed Log.StatusCode column, so status-code filtering can use an exact
+// match instead of scanning the Other blob.
+func TestRecordErrorLogDualWritesStatusCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&Log{}))
+
+	oldDB, oldLogDB := DB, LOG_DB
+	oldMainType, oldLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	t.Cleanup(func() {
+		DB, LOG_DB = oldDB, oldLogDB
+		common.SetDatabaseTypes(oldMainType, oldLogType)
+	})
+	DB, LOG_DB = db, db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	other := NewLogOther()
+	other.SetPublic("status_code", 429)
+	RecordErrorLog(c, 0, 0, "", "", "rate limited", 0, 0, false, "", other)
+
+	var logs []Log
+	require.NoError(t, db.Find(&logs).Error)
+	require.Len(t, logs, 1)
+	assert.Equal(t, 429, logs[0].StatusCode)
+}

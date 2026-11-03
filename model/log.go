@@ -211,6 +211,11 @@ type Log struct {
 	// ErrorSignatureHash duplicates other.error_signature_hash into a real indexed
 	// column so the detailed-error stats drill-down is a fast exact match.
 	ErrorSignatureHash string `json:"error_signature_hash,omitempty" gorm:"type:varchar(64);index:idx_logs_error_signature_hash;default:''"`
+	// StatusCode duplicates other.status_code (error logs only) into a real
+	// indexed column so the status-code filter is an exact match instead of a
+	// LIKE scan over the unindexed Other blob. Rows predating the column, and
+	// non-error logs, read as 0; statusCodeOtherCondition still covers those.
+	StatusCode int `json:"status_code,omitempty" gorm:"default:0;index:idx_logs_status_code"`
 	// DownstreamRequestId / CustomerId / CustomerName are decoded from the
 	// downstream gateway trace-tag header and duplicated into real indexed
 	// columns for fast search. CustomerName is the write-time snapshot of the
@@ -579,9 +584,11 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	attachProcessShutdownOther(c, other)
 	errorSignatureHash := ""
 	retryTriggered := false
+	statusCode := 0
 	if other != nil {
 		errorSignatureHash, _ = other.adminInfo["error_signature_hash"].(string)
 		retryTriggered, _ = other.adminInfo["retry_triggered"].(bool)
+		statusCode, _ = other.public["status_code"].(int)
 	}
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
@@ -607,6 +614,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		NodeName:            common.NodeName,
 		ErrorSignatureHash:  errorSignatureHash,
 		RetryTriggered:      retryTriggered,
+		StatusCode:          statusCode,
 		Content:             content,
 		PromptTokens:        0,
 		CompletionTokens:    0,
@@ -925,10 +933,18 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 		tx = tx.Where(cond, pat)
 	}
 	if f.StatusCode != 0 {
+		// status_code lives in a dedicated indexed column for rows written since
+		// the column was added; older rows carry it only in the Other JSON blob.
+		// Match either so historical logs stay searchable.
 		cond, args := statusCodeOtherCondition("logs.other", f.StatusCode)
-		tx = tx.Where(cond, args...)
+		tx = tx.Where("(logs.status_code = ? OR "+cond+")", append([]any{f.StatusCode}, args...)...)
 	}
-	if f.Type == LogTypeError && f.ErrorKeyword != "" {
+	// ErrorKeyword searches logs.content regardless of Type: the field name
+	// reflects its origin (error logs are the usual target), but the frontend
+	// does not force Type=Error when the admin fills it in, so requiring that
+	// here silently dropped the filter whenever Type was left at "All" or set
+	// to anything else.
+	if f.ErrorKeyword != "" {
 		cond, pat := errorContentLikeCondition("logs.content", f.ErrorKeyword)
 		tx = tx.Where(cond, pat)
 	}

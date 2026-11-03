@@ -463,6 +463,12 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS retry_triggered UInt8 DEFAULT 0").Error; err != nil {
 		return err
 	}
+	// status_code duplicates other.status_code (error logs only) into a real
+	// column so filtering by it is an exact match instead of a LIKE scan over
+	// the Other blob. Rows predating the column read as 0.
+	if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS status_code Int32 DEFAULT 0").Error; err != nil {
+		return err
+	}
 	// Reporting-only raw/discounted stat amount columns (consume logs only),
 	// dual-written from model.Log. ADD COLUMN IF NOT EXISTS is idempotent on
 	// ClickHouse; rows predating them read as 0.
@@ -478,11 +484,14 @@ func migrateClickHouseLogDB() error {
 			return err
 		}
 	}
-	// The session view looks logs up by session_id, which is not in the
-	// sorting key. The skip index covers new parts only; older parts get it
-	// through merges or an operator-run MATERIALIZE INDEX.
-	if err := LOG_DB.Exec("ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_logs_session_id session_id TYPE bloom_filter(0.01) GRANULARITY 4").Error; err != nil {
-		return err
+	// These columns are looked up by exact value but are not in the sorting key
+	// (created_at, request_id), so a wide time range otherwise scans every part.
+	// The skip index covers new parts only; older parts get it through merges or
+	// an operator-run MATERIALIZE INDEX.
+	for _, col := range clickHouseLogBloomFilterColumns {
+		if err := LOG_DB.Exec("ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_logs_" + col + " " + col + " TYPE bloom_filter(0.01) GRANULARITY 4").Error; err != nil {
+			return err
+		}
 	}
 	// The session view reads the columns added above.
 	if err := MigrateLogSessions(); err != nil {
@@ -514,6 +523,29 @@ func clickHouseLogTTLClause(ttlDays int) string {
 	return "\nTTL " + expression
 }
 
+// clickHouseLogBloomFilterColumns lists the logs columns that get a
+// bloom_filter skip index: high-cardinality identifiers looked up by exact
+// value for a request/session/customer/signature lookup, independent of the
+// sorting key (created_at, request_id). Shared by clickHouseLogCreateTableSQL
+// (fresh installs) and migrateClickHouseLogDB (existing tables), so the two
+// never drift apart.
+var clickHouseLogBloomFilterColumns = []string{
+	"session_id",
+	"request_id",
+	"upstream_request_id",
+	"downstream_request_id",
+	"customer_id",
+	"error_signature_hash",
+}
+
+func clickHouseLogSkipIndexesSQL() string {
+	var sql strings.Builder
+	for _, col := range clickHouseLogBloomFilterColumns {
+		sql.WriteString(",\n\tINDEX idx_logs_" + col + " " + col + " TYPE bloom_filter(0.01) GRANULARITY 4")
+	}
+	return sql.String()
+}
+
 func clickHouseLogCreateTableSQL(ttlDays int) string {
 	return fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS logs (
@@ -543,17 +575,17 @@ CREATE TABLE IF NOT EXISTS logs (
 	node_name String DEFAULT '',
 	error_signature_hash String DEFAULT '',
 	retry_triggered UInt8 DEFAULT 0,
+	status_code Int32 DEFAULT 0,
 	raw_quota Int32 DEFAULT 0,
 	stat_quota Int32 DEFAULT 0,
 	stat_group_ratio Float64 DEFAULT 0,
 	customer_stat_quota Int32 DEFAULT 0,
 	customer_discount Float64 DEFAULT 0,
-	other String DEFAULT '',
-	INDEX idx_logs_session_id session_id TYPE bloom_filter(0.01) GRANULARITY 4
+	other String DEFAULT ''%s
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime(created_at))
-ORDER BY (created_at, request_id)%s`, clickHouseLogTTLClause(ttlDays))
+ORDER BY (created_at, request_id)%s`, clickHouseLogSkipIndexesSQL(), clickHouseLogTTLClause(ttlDays))
 }
 
 func syncClickHouseLogTTL(ttlDays int) error {
