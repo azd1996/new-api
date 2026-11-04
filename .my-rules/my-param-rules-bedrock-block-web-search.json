@@ -1,0 +1,23 @@
+{
+    "operations": [
+        {
+            "description": "纯Bedrock渠道：Bedrock的Claude不支持服务端web_search等内置工具，请求体tools里只要出现type含web_search的工具就直接拒绝、不回源(skip_retry避免fallback到其它渠道)。匹配用gjson投影tools.#.type聚成数组再contains，命中任一即触发。非通用规则，仅挂纯Bedrock渠道",
+            "mode": "return_error",
+            "path": "tools",
+            "value": {
+                "message": "web_search tool is not supported on this Bedrock channel",
+                "status_code": 421,
+                "type": "invalid_request_error",
+                "code": "tool_not_allowed",
+                "skip_retry": true
+            },
+            "conditions": [
+                {
+                    "path": "tools.#.type",
+                    "mode": "contains",
+                    "value": "web_search"
+                }
+            ]
+        }
+    ]
+}

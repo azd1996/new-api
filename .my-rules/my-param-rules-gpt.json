@@ -1,0 +1,139 @@
+{
+    "operations": [
+        {
+            "mode": "delete",
+            "description": "gpt-6只支持默认temperature(1)，删除非1的temperature避免400",
+            "path": "temperature",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                },
+                {
+                    "path": "temperature",
+                    "mode": "full",
+                    "value": 1,
+                    "invert": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "mode": "set",
+            "description": "gpt-6的max_output_tokens低于最小值16时抬到16避免400",
+            "path": "max_output_tokens",
+            "value": 16,
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                },
+                {
+                    "path": "max_output_tokens",
+                    "mode": "lt",
+                    "value": 16
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "mode": "set",
+            "description": "gpt-6在chat/completions下function tools与reasoning_effort冲突，置为none避免400",
+            "path": "reasoning_effort",
+            "value": "none",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                },
+                {
+                    "path": "tools.#(type==\"function\").type",
+                    "mode": "full",
+                    "value": "function"
+                },
+                {
+                    "path": "reasoning_effort",
+                    "mode": "full",
+                    "value": "none",
+                    "invert": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "mode": "set",
+            "description": "gpt-6.1-sol不支持reasoning_effort=none(仅low/medium/high/xhigh/max)，把none改成最低档low避免400；兜住客户端直传none及上一条gpt-6兜底置none的情况(故置于其后)",
+            "path": "reasoning_effort",
+            "value": "low",
+            "conditions": [
+                { "path": "model", "mode": "prefix", "value": "gpt-6.1-sol" },
+                { "path": "reasoning_effort", "mode": "full", "value": "none" }
+            ],
+            "logic": "AND"
+        },
+        {
+            "mode": "move",
+            "description": "chat completions的max_tokens已弃用；仅当请求没有max_completion_tokens时才把max_tokens改名搬过去",
+            "from": "max_tokens",
+            "to": "max_completion_tokens",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                },
+                {
+                    "path": "max_tokens",
+                    "mode": "gte",
+                    "value": 0
+                },
+                {
+                    "path": "max_completion_tokens",
+                    "mode": "gte",
+                    "value": 0,
+                    "invert": true,
+                    "pass_missing_key": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "mode": "delete",
+            "description": "max_tokens与max_completion_tokens并存时，保留客户端的max_completion_tokens，删除弃用的max_tokens",
+            "path": "max_tokens",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-6"
+                },
+                {
+                    "path": "max_tokens",
+                    "mode": "gte",
+                    "value": 0
+                },
+                {
+                    "path": "max_completion_tokens",
+                    "mode": "gte",
+                    "value": 0
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "gpt-5.6-luna: 删除OpenAI内部消息元数据，避免Unknown parameter internal_chat_message_metadata_passthrough",
+            "mode": "delete",
+            "path": "input.*.internal_chat_message_metadata_passthrough",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "gpt-5.6-luna"
+                }
+            ]
+        }
+    ]
+}

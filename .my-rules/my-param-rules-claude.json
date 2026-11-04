@@ -1,0 +1,779 @@
+{
+    "operations": [
+        {
+            "mode": "set",
+            "description": "Bedrock要求anthropic_version(值仅bedrock-2023-05-31)，缺失时补上避免400 anthropic_version: Field required(多见于透传模式下客户端原生Claude body不带该字段)；keep_origin不覆盖已有值",
+            "path": "anthropic_version",
+            "value": "bedrock-2023-05-31",
+            "keep_origin": true,
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
+            ]
+        },
+        {
+            "mode": "regex_replace",
+            "description": "system为数组且首段text存在时才trim",
+            "path": "system.0.text",
+            "from": "^\\s+|\\s+$",
+            "to": "",
+            "conditions": [
+                {
+                    "path": "system.0.text",
+                    "mode": "prefix",
+                    "value": ""
+                }
+            ],
+            "logic": "OR"
+        },
+        {
+            "description": "system为数组且首段为空时则删除system",
+            "mode": "delete",
+            "path": "system",
+            "conditions": [
+                {
+                    "path": "system.0.text",
+                    "mode": "full",
+                    "value": ""
+                }
+            ],
+            "logic": "OR"
+        },
+        {
+            "description": "thinking的enabled to adaptive参数适配",
+            "mode": "set",
+            "path": "output_config",
+            "value": {
+                "effort": "medium"
+            },
+            "conditions": [
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "enabled"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-sonnet-5"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "thinking的enabled to adaptive参数适配",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "enabled"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-sonnet-5"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "thinking的enabled to adaptive参数适配",
+            "mode": "set",
+            "path": "output_config",
+            "value": {
+                "effort": "medium"
+            },
+            "conditions": [
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "enabled"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "thinking的enabled to adaptive参数适配",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "enabled"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-4-7: 模型仅支持thinking.type=adaptive，disabled/enabled等会400；thinking存在且type不存在或!=adaptive时补output_config.effort",
+            "mode": "set",
+            "path": "output_config.effort",
+            "value": "medium",
+            "keep_origin": true,
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-4-7"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-4-7: thinking存在且type不存在或!=adaptive时统一转adaptive",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-4-7"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-4-8: 提前适配，模型仅支持thinking.type=adaptive；thinking存在且type不存在或!=adaptive时补output_config.effort",
+            "mode": "set",
+            "path": "output_config.effort",
+            "value": "medium",
+            "keep_origin": true,
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-4-8"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-4-8: thinking存在且type不存在或!=adaptive时统一转adaptive",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-4-8"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 提前适配(前缀含opus-5/opus-5-5)，模型仅支持thinking.type=adaptive；thinking存在且type不存在或!=adaptive时补output_config.effort",
+            "mode": "set",
+            "path": "output_config.effort",
+            "value": "medium",
+            "keep_origin": true,
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: thinking存在且type不存在或!=adaptive时统一转adaptive",
+            "mode": "set",
+            "path": "thinking",
+            "value": {
+                "type": "adaptive"
+            },
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "thinking",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive",
+                    "invert": true,
+                    "pass_missing_key": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "format字段不再被支持",
+            "path": "output_config.format",
+            "mode": "delete",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                }
+            ]
+        },
+        {
+            "description": "claude-: 工具定义里的strict不被Bedrock支持(报错tools.N.custom.strict里custom是判别联合变体标签type=custom，真实字段在工具顶层tools.N.strict)，逐个剥掉；工具与input_schema保留，响应仍是tool_use，对客户端无感。覆盖opus/sonnet全系(sonnet-5-5等也会报)",
+            "mode": "delete",
+            "path": "tools.*.strict",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "tools.#(strict)#|#",
+                    "mode": "gt",
+                    "value": 0
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-: 工具里的defer_loading(tool-search-tool beta字段)不被Bedrock支持。Bedrock报错路径tools.N.custom.defer_loading里的custom是判别联合的变体标签(type=custom)而非真实键，真实JSON字段在工具顶层，故按tools.*.defer_loading逐个剥掉；工具定义本身保留，对客户端无感",
+            "mode": "delete",
+            "path": "tools.*.defer_loading",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "tools.#(defer_loading)#|#",
+                    "mode": "gt",
+                    "value": 0
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5-5/claude-sonnet-5-5: 不支持强制tool_choice(any/tool)，仅auto/none；tool_choice存在且type既非auto也非none时统一改成auto(保留想用工具的意图，而非用none禁用)，避免400 does not support forced tool_choice",
+            "mode": "set",
+            "path": "tool_choice",
+            "value": {
+                "type": "auto"
+            },
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "-5-5"
+                },
+                {
+                    "path": "tool_choice",
+                    "mode": "contains",
+                    "value": ""
+                },
+                {
+                    "path": "tool_choice.type",
+                    "mode": "full",
+                    "value": "auto",
+                    "invert": true
+                },
+                {
+                    "path": "tool_choice.type",
+                    "mode": "full",
+                    "value": "none",
+                    "invert": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: thinking.display仅非法值(非summarized/omitted)兜底改为summarized，合法值保留，避免Bedrock 400",
+            "mode": "set",
+            "path": "thinking.display",
+            "value": "summarized",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "thinking.display",
+                    "mode": "full",
+                    "value": "summarized",
+                    "invert": true
+                },
+                {
+                    "path": "thinking.display",
+                    "mode": "full",
+                    "value": "omitted",
+                    "invert": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-: 存在context_management时给anthropic-beta追加context-management-2025-06-27，启用Bedrock服务端上下文管理",
+            "mode": "set_header",
+            "path": "anthropic-beta",
+            "value": {
+                "$append": [
+                    "context-management-2025-06-27"
+                ]
+            },
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "context_management",
+                    "mode": "contains",
+                    "value": ""
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-: 黑名单过滤anthropic-beta里不被Bedrock支持的beta token，逐个置null剔除，其余token原样透传(未设$keep_only_declared)",
+            "mode": "set_header",
+            "path": "anthropic-beta",
+            "value": {
+                "prompt-caching-2024-07-31": null,
+                "extended-cache-ttl-2025-04-11": null,
+                "redact-thinking-2026-02-12": null,
+                "thinking-token-count-2026-05-13": null,
+                "prompt-caching-scope-2026-01-05": null,
+                "mid-conversation-system-2026-04-07": null,
+                "per-turn-control-2026-07-01": null,
+                "mid-conversation-tool-changes-2026-07-01": null,
+                "inline-tools-2026-09-15": null,
+                "advisor-tool-2026-03-01": null,
+                "afk-mode-2026-01-31": null,
+                "fallback-credit-2026-06-01": null,
+                "thinking-binding-controls-2026-08-01": null,
+                "thinking-display-updates-2026-08-18": null,
+                "dangerous-tool-use-2026-09-03": null,
+                "advanced-tool-use-2025-11-20": null,
+                "structured-outputs-2025-12-15": null,
+                "structured-outputs-2025-11-13": null
+            },
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
+            ]
+        },
+        {
+            "description": "claude-opus-5(前缀含opus-5/opus-5-5): 顶层cache_control与block级ttl不一致会触发Bedrock 400 matching TTLs。策略=一旦请求体任意位置出现ttl='1h'，就把全部已存在的cache_control.ttl统一抬成1h，彻底消除5m/1h混用冲突并保留1h缓存收益。本条处理顶层。检测条件用gjson多路径投影messages/system/tools/顶层的全部ttl聚成一个数组再contains '1h'，即'请求体确实要求1h'才触发；第3个条件保证顶层cache_control已存在才改(contains空=存在性判断)，避免给无顶层cache_control的请求凭空造缓存断点",
+            "mode": "set",
+            "path": "cache_control.ttl",
+            "value": "1h",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "[messages.#.content.#.cache_control.ttl,system.#.cache_control.ttl,tools.#.cache_control.ttl,cache_control.ttl]",
+                    "mode": "contains",
+                    "value": "1h"
+                },
+                {
+                    "path": "cache_control",
+                    "mode": "contains",
+                    "value": ""
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 同上策略，处理messages各内容块。set路径messages.*.content.*.cache_control.ttl因cache_control是中间段，引擎仅命中已存在cache_control的块(无cache_control的纯文本块被剪枝，不会凭空新增缓存断点)，把其ttl统一改为1h",
+            "mode": "set",
+            "path": "messages.*.content.*.cache_control.ttl",
+            "value": "1h",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "[messages.#.content.#.cache_control.ttl,system.#.cache_control.ttl,tools.#.cache_control.ttl,cache_control.ttl]",
+                    "mode": "contains",
+                    "value": "1h"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 同上策略，处理system各段。仅命中已存在cache_control的system块，ttl统一改1h",
+            "mode": "set",
+            "path": "system.*.cache_control.ttl",
+            "value": "1h",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "[messages.#.content.#.cache_control.ttl,system.#.cache_control.ttl,tools.#.cache_control.ttl,cache_control.ttl]",
+                    "mode": "contains",
+                    "value": "1h"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 同上策略，处理tools各工具。仅命中已存在cache_control的工具，ttl统一改1h",
+            "mode": "set",
+            "path": "tools.*.cache_control.ttl",
+            "value": "1h",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "[messages.#.content.#.cache_control.ttl,system.#.cache_control.ttl,tools.#.cache_control.ttl,cache_control.ttl]",
+                    "mode": "contains",
+                    "value": "1h"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-sonnet-5-5: 关闭thinking需用type=between_tools而非disabled，避免Bedrock 400",
+            "mode": "set",
+            "path": "thinking.type",
+            "value": "between_tools",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-sonnet-5-5"
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "disabled"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-sonnet-5-5: thinking.type=between_tools时不允许display(400 thinking.between_tools.display: Extra inputs are not permitted；between_tools是判别联合变体标签，真实字段是thinking.display)。须在disabled→between_tools转换之后执行，清掉display兜底规则补上的字段",
+            "mode": "delete",
+            "path": "thinking.display",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "between_tools"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-: Bedrock不接受messages里的developer角色(400 Unexpected role \"developer\"，只允许user/assistant/system)，把role精确等于developer的逐条改写成user，保留该条内容；用^developer$锚定，不误伤其它角色。性能gate：第2个条件用gjson查询messages.#(role==\"developer\")探测请求里是否真有developer角色，没有则整条跳过(不展开messages.*.role通配、不逐条sjson重写)，developer角色极罕见故绝大多数请求零成本",
+            "mode": "regex_replace",
+            "path": "messages.*.role",
+            "from": "^developer$",
+            "to": "user",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "messages.#(role==\"developer\").role",
+                    "mode": "full",
+                    "value": "developer"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-: thinking内容块里的endpoint_signature不被Bedrock支持(报错路径...content.M.thinking.endpoint_signature里thinking是判别联合变体标签type=thinking，真实字段在块顶层messages.N.content.M.endpoint_signature)，逐个删除；signature本体保留，不影响thinking多轮验签",
+            "mode": "delete",
+            "path": "messages.*.content.*.endpoint_signature",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "messages.#.content|@flatten|#(endpoint_signature)#|#",
+                    "mode": "gt",
+                    "value": 0
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-: text内容块里的container不被Bedrock支持(报错路径...content.M.text.container里text是判别联合变体标签type=text，真实字段在块顶层messages.N.content.M.container)，逐个删除；text正文保留",
+            "mode": "delete",
+            "path": "messages.*.content.*.container",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "messages.#.content|@flatten|#(container)#|#",
+                    "mode": "gt",
+                    "value": 0
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "删除messages里的system角色",
+            "mode": "prune_objects",
+            "path": "messages",
+            "value": {
+                "where": {
+                    "role": "system"
+                },
+                "recursive": false
+            }
+        },
+        {
+            "description": "claude-: 删除空的text内容块(type==text且text为空)，避免Bedrock 400 text content blocks must be non-empty；只扫content数组且不递归，避免误入tool_use.input触发类型比较崩溃",
+            "mode": "prune_objects",
+            "path": "messages.*.content",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
+            ],
+            "value": {
+                "logic": "AND",
+                "recursive": false,
+                "conditions": [
+                    {
+                        "path": "type",
+                        "mode": "full",
+                        "value": "text"
+                    },
+                    {
+                        "path": "text",
+                        "mode": "full",
+                        "value": ""
+                    }
+                ]
+            }
+        },
+        {
+            "description": "claude-: 删除没有thinking文本的thinking块(type==thinking且thinking为空或缺失)，避免Bedrock 400 each thinking block must contain thinking；只扫content数组不递归",
+            "mode": "prune_objects",
+            "path": "messages.*.content",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                }
+            ],
+            "value": {
+                "logic": "AND",
+                "recursive": false,
+                "conditions": [
+                    {
+                        "path": "type",
+                        "mode": "full",
+                        "value": "thinking"
+                    },
+                    {
+                        "path": "thinking",
+                        "mode": "full",
+                        "value": "",
+                        "pass_missing_key": true
+                    }
+                ]
+            }
+        },
+        {
+            "description": "claude-: messages.0 content为空数组([])时补占位，避免Bedrock 400 non-empty content。用content.#==0做类型安全判空，content为非空数组或字符串时都不会触发类型比较崩溃",
+            "mode": "set",
+            "path": "messages.0.content",
+            "value": ".",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "messages.0.content.#",
+                    "mode": "full",
+                    "value": 0
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-opus-5: 不支持assistant消息预填充(prefill)，对话必须以user消息结尾。末条消息role==assistant时删除它使对话落回上一条user(该模型无法保留prefill意图)；放在所有messages清洗之后，前缀claude-opus-5含opus-5/opus-5-5",
+            "mode": "delete",
+            "path": "messages.-1",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "messages.-1.role",
+                    "mode": "full",
+                    "value": "assistant"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude 新世代(opus-5/sonnet-5 及 opus-4-6/4-7/4-8)已弃用temperature，存在即删除，避免400 temperature is deprecated for this model。按精确型号匹配，不放宽到老的 opus-4/4-1(它们仍支持temperature)",
+            "mode": "delete",
+            "path": "temperature",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-fable-5"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-opus-5"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-sonnet-5"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-opus-4-6"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-opus-4-7"
+                },
+                {
+                    "path": "model",
+                    "mode": "contains",
+                    "value": "claude-opus-4-8"
+                }
+            ],
+            "logic": "OR"
+        }
+    ]
+}
