@@ -18,8 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import type { ColumnDef } from '@tanstack/react-table'
-import { Fragment, useCallback, useState, type ReactNode } from 'react'
+import type { ColumnDef, OnChangeFn, SortingState } from '@tanstack/react-table'
+import { Fragment, useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -34,7 +34,7 @@ import { createServerError } from '@/lib/server-error-message'
 import { getLogSessions, getSessionCacheRangeAnalysis } from '../api'
 import { skeletonRate, skeletonTierLabels } from '../lib/cache-skeleton'
 import { buildApiParams } from '../lib/utils'
-import type { LogSession } from '../types'
+import type { LogSession, LogSessionSortBy } from '../types'
 import { ByteCacheCoverageSummary } from './cache-coverage-summary'
 import { CacheLossBreakdown } from './cache-loss-breakdown'
 import { useSessionColumns } from './columns/session-columns'
@@ -48,7 +48,10 @@ const DEFAULT_SESSIONS_DATA = {
   enabled: true,
   items: [] as LogSession[],
   total: 0,
+  total_tokens_sum: 0,
 }
+
+const SESSION_SORTABLE_COLUMNS = new Set<LogSessionSortBy>(['total_tokens'])
 
 interface UsageLogsSessionsProps {
   toolbar: ReactNode
@@ -61,6 +64,7 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
   const { isAdminView, viewAccess } = useLogsViewScope()
   const searchParams = route.useSearch()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const [sorting, setSorting] = useState<SortingState>([])
 
   const toggleSession = useCallback((sessionId: string) => {
     setExpanded((previous) => {
@@ -82,6 +86,27 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
       globalFilter: { enabled: false },
     })
 
+  const sortParams = useMemo(() => {
+    const activeSort = sorting[0]
+    if (
+      !activeSort ||
+      !SESSION_SORTABLE_COLUMNS.has(activeSort.id as LogSessionSortBy)
+    ) {
+      return {}
+    }
+    return {
+      sort_by: activeSort.id as LogSessionSortBy,
+      sort_order: activeSort.desc ? ('desc' as const) : ('asc' as const),
+    }
+  }, [sorting])
+
+  const handleSortingChange: OnChangeFn<SortingState> = (updater) => {
+    setSorting(updater)
+    if (pagination.pageIndex > 0) {
+      onPaginationChange({ ...pagination, pageIndex: 0 })
+    }
+  }
+
   const { data, isLoading, isFetching } = useQuery({
     queryKey: [
       'logs',
@@ -90,6 +115,7 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
       pagination.pageIndex + 1,
       pagination.pageSize,
       searchParams,
+      sortParams,
     ],
     queryFn: async () => {
       const params = buildApiParams({
@@ -98,7 +124,10 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
         searchParams,
         isAdmin: isAdminView,
       })
-      const result = await getLogSessions(params, isAdminView)
+      const result = await getLogSessions(
+        { ...params, ...sortParams },
+        isAdminView
+      )
       if (!result?.success) {
         throw createServerError(result, t('Failed to load sessions'))
       }
@@ -128,7 +157,12 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
     meta: { errorToast: false },
     retry: false,
   })
-  const columns = useSessionColumns(isAdminView, expanded, toggleSession)
+  const columns = useSessionColumns(
+    isAdminView,
+    expanded,
+    toggleSession,
+    data?.total_tokens_sum
+  )
   const cacheSummary = cacheSummaryQuery.data
   const cacheSummaryRates = cacheSummary?.summary
   const cacheSummaryLabels =
@@ -144,8 +178,11 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
     columns: columns as ColumnDef<LogSession, unknown>[],
     pagination,
     onPaginationChange,
+    sorting,
+    onSortingChange: handleSortingChange,
     enableRowSelection: false,
     manualPagination: true,
+    manualSorting: true,
     totalCount: data?.total || 0,
     ensurePageInRange,
     columnVisibilityStorageKey: `usage-logs:sessions:${viewAccess}:column-visibility`,

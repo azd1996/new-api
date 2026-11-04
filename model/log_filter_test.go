@@ -157,8 +157,9 @@ func TestRetryOverrideLogIsAdminOnly(t *testing.T) {
 }
 
 // TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag pins the admin filters
-// on customer_name (matched against its dedicated indexed column) and
-// downstream_trace_tag (which still lives only in the Other JSON).
+// on customer_name (matched against its dedicated indexed column),
+// downstream_trace_tag, and session_id_source (both of which still live only
+// in the Other JSON, the latter with multi-value include/exclude semantics).
 func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -168,8 +169,8 @@ func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
 
 	require.NoError(t, db.Create([]Log{
-		{Id: 1, CustomerName: "Acme", NodeName: "node-a", Other: `{"admin_info":{"customer_name":"Acme","downstream_trace_tag":"tag-a"}}`},
-		{Id: 2, CustomerName: "Other", NodeName: "node-b", Other: `{"admin_info":{"customer_name":"Other","downstream_trace_tag":"tag-b"}}`},
+		{Id: 1, CustomerName: "Acme", NodeName: "node-a", Other: `{"session_id_source":"prompt_cache_key","admin_info":{"customer_name":"Acme","downstream_trace_tag":"tag-a"}}`},
+		{Id: 2, CustomerName: "Other", NodeName: "node-b", Other: `{"session_id_source":"metadata.user_id","admin_info":{"customer_name":"Other","downstream_trace_tag":"tag-b"}}`},
 	}).Error)
 
 	findIDs := func(filter LogFilter) []int {
@@ -186,6 +187,10 @@ func TestLogFilterMatchesAdminInfoCustomerNameAndTraceTag(t *testing.T) {
 	assert.Equal(t, []int{2}, findIDs(LogFilter{NodeName: LogFieldFilter{Values: []string{"node-b"}}}))
 	assert.Equal(t, []int{1}, findIDs(LogFilter{NodeName: LogFieldFilter{Values: []string{"node-b"}, Exclude: true}}))
 	assert.Empty(t, findIDs(LogFilter{NodeName: LogFieldFilter{Values: []string{"node-c"}}}))
+	assert.Equal(t, []int{1}, findIDs(LogFilter{SessionIdSource: LogFieldFilter{Values: []string{"prompt_cache_key"}}}))
+	assert.Equal(t, []int{1, 2}, findIDs(LogFilter{SessionIdSource: LogFieldFilter{Values: []string{"prompt_cache_key", "metadata.user_id"}}}))
+	assert.Equal(t, []int{2}, findIDs(LogFilter{SessionIdSource: LogFieldFilter{Values: []string{"prompt_cache_key"}, Exclude: true}}))
+	assert.Empty(t, findIDs(LogFilter{SessionIdSource: LogFieldFilter{Values: []string{"content-fallback"}}}))
 }
 
 // TestLogFilterCustomerFallsBackToOtherJSON pins that the customer_id /
@@ -394,7 +399,7 @@ func TestLogSessionsClickHouse(t *testing.T) {
 		return out
 	}
 
-	sessions, total, err := GetLogSessions(0, LogFilter{}, 0, 10)
+	sessions, total, totalTokens, err := GetLogSessions(0, LogFilter{}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, total)
 	require.Equal(t, []string{"s-b", "s-a"}, ids(sessions))
@@ -413,15 +418,31 @@ func TestLogSessionsClickHouse(t *testing.T) {
 	assert.Equal(t, 1, a.Cache.ColdWrite)
 	assert.EqualValues(t, 3000, a.Cache.CacheRead)
 	assert.EqualValues(t, 5200, a.Cache.InputAll)
+	// s-a: (100+5) + (0+0, error log) + (100+7) prompt+completion across its three logs.
+	assert.EqualValues(t, 212, a.TotalTokens)
+	assert.EqualValues(t, 50, sessions[0].TotalTokens) // s-b: 50 prompt, no completion
+	assert.EqualValues(t, 262, totalTokens)
 
 	// Lifetime overlap: a window after s-a's last request lists only s-b;
 	// a window ending before s-b started lists only s-a.
-	sessions, _, err = GetLogSessions(0, LogFilter{StartTimestamp: now - 200}, 0, 10)
+	sessions, _, _, err = GetLogSessions(0, LogFilter{StartTimestamp: now - 200}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s-b"}, ids(sessions))
-	sessions, _, err = GetLogSessions(0, LogFilter{EndTimestamp: now - 280}, 0, 10)
+	sessions, _, _, err = GetLogSessions(0, LogFilter{EndTimestamp: now - 280}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s-a"}, ids(sessions))
+
+	// Sorting by total tokens overrides the default newest-activity order.
+	sessions, _, _, err = GetLogSessions(0, LogFilter{}, 0, 10, NewLogSessionSortOptions("total_tokens", "desc"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"s-a", "s-b"}, ids(sessions))
+	sessions, _, _, err = GetLogSessions(0, LogFilter{}, 0, 10, NewLogSessionSortOptions("total_tokens", "asc"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"s-b", "s-a"}, ids(sessions))
+	// An unrecognized sort_by falls back to the default order.
+	sessions, _, _, err = GetLogSessions(0, LogFilter{}, 0, 10, NewLogSessionSortOptions("quota", "desc"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"s-b", "s-a"}, ids(sessions))
 
 	// Kept dimensions filter sessions; others are ignored.
 	for _, tc := range []struct {
@@ -438,13 +459,13 @@ func TestLogSessionsClickHouse(t *testing.T) {
 		{"ignored field", LogFilter{RequestId: "nope", StatusCode: 500}, []string{"s-b", "s-a"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sessions, _, err := GetLogSessions(0, tc.filter, 0, 10)
+			sessions, _, _, err := GetLogSessions(0, tc.filter, 0, 10, LogSessionSortOptions{})
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, ids(sessions))
 		})
 	}
 
-	own, total, err := GetLogSessions(2, LogFilter{}, 0, 10)
+	own, total, _, err := GetLogSessions(2, LogFilter{}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, total)
 	assert.Equal(t, []string{"s-b"}, ids(own))
@@ -456,7 +477,7 @@ func TestLogSessionsClickHouse(t *testing.T) {
 	assert.Empty(t, status.LastError)
 	assert.Len(t, status.Skipped, 2)
 
-	sessions, total, err = GetLogSessions(0, LogFilter{}, 0, 10)
+	sessions, total, totalTokens, err = GetLogSessions(0, LogFilter{}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, total)
 	require.Equal(t, []string{"s-b", "s-a", "s-old"}, ids(sessions))
@@ -464,6 +485,10 @@ func TestLogSessionsClickHouse(t *testing.T) {
 	assert.EqualValues(t, 31, sessions[1].Quota)
 	assert.EqualValues(t, yesterday, sessions[1].FirstAt)
 	assert.EqualValues(t, 7, sessions[2].Quota)
+	// s-a backfilled with the yesterday row (100 prompt, 0 completion): 212+100.
+	assert.EqualValues(t, 312, sessions[1].TotalTokens)
+	assert.EqualValues(t, 10, sessions[2].TotalTokens) // s-old: 10 prompt, 0 completion
+	assert.EqualValues(t, 312+50+10, totalTokens)
 }
 
 type requestKeyRenameLogRow struct {

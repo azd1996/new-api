@@ -53,6 +53,8 @@ const usageLogsSearchSchema = z.object({
   customerId: z.string().optional().catch(''),
   node: z.string().optional().catch(''),
   nodeOp: z.enum(['include', 'exclude']).optional().catch('include'),
+  sessionIdSource: z.string().optional().catch(''),
+  sessionIdSourceOp: z.enum(['include', 'exclude']).optional().catch('include'),
   retryTriggered: z.enum(['true', 'false']).optional().catch(undefined),
   statusCode: z.string().optional().catch(''),
   errorKeyword: z.string().optional().catch(''),

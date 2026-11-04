@@ -82,6 +82,7 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 		filter.CustomerId = c.Query("customer_id")
 		filter.CustomerName = c.Query("customer_name")
 		filter.NodeName = logFieldFilterFromQuery(c, "node_name")
+		filter.SessionIdSource = logFieldFilterFromQuery(c, "session_id_source")
 		filter.DownstreamTraceTag = c.Query("downstream_trace_tag")
 		filter.ErrorSignatureHash = c.Query("error_signature_hash")
 		// retry_triggered is a tri-state admin filter: absent = no filter; only
@@ -152,26 +153,30 @@ func GetLogsAnalysis(c *gin.Context) {
 func GetLogSessions(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	if !model.LogSessionsEnabled() {
-		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0)
+		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0, 0)
 		return
 	}
-	sessions, total, err := model.GetLogSessions(0, logFilterFromQuery(c, true), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	sortOptions := model.NewLogSessionSortOptions(c.Query("sort_by"), c.Query("sort_order"))
+	sessions, total, totalTokens, err := model.GetLogSessions(0, logFilterFromQuery(c, true), pageInfo.GetStartIdx(), pageInfo.GetPageSize(), sortOptions)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	respondLogSessions(c, pageInfo, true, sessions, total)
+	respondLogSessions(c, pageInfo, true, sessions, total, totalTokens)
 }
 
 // respondLogSessions writes a session page. enabled=false means the log
 // database is not ClickHouse, so this deployment keeps no session table.
-func respondLogSessions(c *gin.Context, pageInfo *common.PageInfo, enabled bool, sessions []*model.LogSession, total int64) {
+// totalTokens is the lifetime prompt+completion token sum over every session
+// matching the filter, not only the listed page.
+func respondLogSessions(c *gin.Context, pageInfo *common.PageInfo, enabled bool, sessions []*model.LogSession, total int64, totalTokens int64) {
 	common.ApiSuccess(c, gin.H{
-		"enabled":   enabled,
-		"page":      pageInfo.GetPage(),
-		"page_size": pageInfo.GetPageSize(),
-		"total":     total,
-		"items":     sessions,
+		"enabled":          enabled,
+		"page":             pageInfo.GetPage(),
+		"page_size":        pageInfo.GetPageSize(),
+		"total":            total,
+		"total_tokens_sum": totalTokens,
+		"items":            sessions,
 	})
 }
 
@@ -211,16 +216,17 @@ func GetUserLogSessions(c *gin.Context) {
 		filter.StartTimestamp = startTimestamp
 	}
 	if !model.LogSessionsEnabled() {
-		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0)
+		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0, 0)
 		return
 	}
-	sessions, total, err := model.GetLogSessions(c.GetInt("id"), filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	sortOptions := model.NewLogSessionSortOptions(c.Query("sort_by"), c.Query("sort_order"))
+	sessions, total, totalTokens, err := model.GetLogSessions(c.GetInt("id"), filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), sortOptions)
 	if err != nil {
 		common.SysError(common.LogText("failed to query user log sessions: %s", err.Error()))
 		common.ApiErrorT(c, "Failed to query logs")
 		return
 	}
-	respondLogSessions(c, pageInfo, true, sessions, total)
+	respondLogSessions(c, pageInfo, true, sessions, total, totalTokens)
 }
 
 func GetUserLogs(c *gin.Context) {

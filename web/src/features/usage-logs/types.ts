@@ -71,6 +71,9 @@ export interface CommonLogFilters extends CommonFilters {
   // Cluster node that served the request (admin only).
   node?: string
   nodeOp?: LogFilterOperator
+  // Where the request's session id was derived from (admin only).
+  sessionIdSource?: string
+  sessionIdSourceOp?: LogFilterOperator
   // Error logs only: 'true' / 'false'; undefined means no filter.
   retryTriggered?: 'true' | 'false'
   statusCode?: string
@@ -525,11 +528,19 @@ export interface GetLogsParams {
   customer_id?: string
   node_name?: string
   node_name_op?: LogFilterOperator
+  session_id_source?: string
+  session_id_source_op?: LogFilterOperator
   retry_triggered?: 'true' | 'false'
   request_key_rename?: 'true'
   status_code?: number
   error_keyword?: string
   error_signature_hash?: string
+}
+
+// GetLogsParams plus the session list's own sort params.
+export interface GetLogSessionsParams extends GetLogsParams {
+  sort_by?: LogSessionSortBy
+  sort_order?: LogSessionSortOrder
 }
 
 export interface GetLogsResponse {
@@ -565,6 +576,8 @@ export interface GetLogStatsParams {
   customer_name?: string
   node_name?: string
   node_name_op?: LogFilterOperator
+  session_id_source?: string
+  session_id_source_op?: LogFilterOperator
   retry_triggered?: 'true' | 'false'
   status_code?: number
   error_keyword?: string
@@ -867,6 +880,7 @@ export interface LogSession {
   quota: number
   prompt_tokens: number
   completion_tokens: number
+  total_tokens: number
   username: string
   user_count: number
   token_name: string
@@ -879,6 +893,11 @@ export interface LogSession {
   cache: LogCacheCell
   truncated?: boolean
 }
+
+// Sort key for the session list; 'last_at' (the default) keeps newest
+// activity first.
+export type LogSessionSortBy = 'last_at' | 'total_tokens'
+export type LogSessionSortOrder = 'asc' | 'desc'
 
 // Session backfill run of the node that served the request (root only).
 export interface LogSessionsBackfillStatus {
@@ -906,6 +925,9 @@ export interface GetLogSessionsResponse {
     total: number
     page: number
     page_size: number
+    // Lifetime prompt+completion token sum over every session matching the
+    // filter, not only the listed page; used to show each session's share.
+    total_tokens_sum?: number
   }
 }
 

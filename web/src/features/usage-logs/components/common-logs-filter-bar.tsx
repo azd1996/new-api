@@ -47,7 +47,7 @@ import { getUserGroups } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getLogNodes } from '../api'
-import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS, SESSION_ID_SOURCE_OPTIONS } from '../constants'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters, LogFilterOperator } from '../types'
@@ -156,6 +156,8 @@ function buildSearchSourceKey(values: {
   customerId?: unknown
   node?: unknown
   nodeOp?: unknown
+  sessionIdSource?: unknown
+  sessionIdSourceOp?: unknown
   retryTriggered?: unknown
   statusCode?: unknown
   errorKeyword?: unknown
@@ -185,6 +187,8 @@ function buildSearchSourceKey(values: {
     values.customerId,
     values.node,
     values.nodeOp,
+    values.sessionIdSource,
+    values.sessionIdSourceOp,
     values.retryTriggered,
     values.statusCode,
     values.errorKeyword,
@@ -267,6 +271,15 @@ export function CommonLogsFilterBar<TData>(
     [logNodes]
   )
 
+  const sessionIdSourceOptions = useMemo(
+    () =>
+      SESSION_ID_SOURCE_OPTIONS.map((option) => ({
+        label: t(option.label),
+        value: option.value,
+      })),
+    [t]
+  )
+
   const searchState = useMemo<CommonLogDraft>(() => {
     const { start, end } = getDefaultTimeRange()
     const sourceValues = {
@@ -291,6 +304,8 @@ export function CommonLogsFilterBar<TData>(
       customerId: searchParams.customerId,
       node: searchParams.node,
       nodeOp: searchParams.nodeOp,
+      sessionIdSource: searchParams.sessionIdSource,
+      sessionIdSourceOp: searchParams.sessionIdSourceOp,
       retryTriggered: searchParams.retryTriggered,
       statusCode: searchParams.statusCode,
       errorKeyword: searchParams.errorKeyword,
@@ -322,6 +337,8 @@ export function CommonLogsFilterBar<TData>(
       customerId: searchParams.customerId || undefined,
       node: searchParams.node || undefined,
       nodeOp: searchParams.nodeOp || 'include',
+      sessionIdSource: searchParams.sessionIdSource || undefined,
+      sessionIdSourceOp: searchParams.sessionIdSourceOp || 'include',
       retryTriggered: searchParams.retryTriggered,
       statusCode: searchParams.statusCode || undefined,
       errorKeyword: searchParams.errorKeyword || undefined,
@@ -355,6 +372,8 @@ export function CommonLogsFilterBar<TData>(
     searchParams.customerId,
     searchParams.node,
     searchParams.nodeOp,
+    searchParams.sessionIdSource,
+    searchParams.sessionIdSourceOp,
     searchParams.retryTriggered,
     searchParams.statusCode,
     searchParams.errorKeyword,
@@ -449,6 +468,7 @@ export function CommonLogsFilterBar<TData>(
     !!filters.customerName ||
     !!filters.customerId ||
     !!filters.node ||
+    !!filters.sessionIdSource ||
     !!filters.retryTriggered ||
     !!filters.statusCode ||
     !!filters.errorKeyword ||
@@ -470,6 +490,7 @@ export function CommonLogsFilterBar<TData>(
     isAdmin ? filters.customerName : undefined,
     isAdmin ? filters.customerId : undefined,
     isAdmin ? filters.node : undefined,
+    isAdmin ? filters.sessionIdSource : undefined,
     isAdmin ? filters.retryTriggered : undefined,
     filters.statusCode,
     filters.errorKeyword,
@@ -769,6 +790,30 @@ export function CommonLogsFilterBar<TData>(
                 fieldLabel={t('Node Name')}
                 operator={filters.nodeOp}
                 onChange={(value) => handleChange('nodeOp', value)}
+              />
+            </div>
+          </LogsFilterField>
+        )}
+        {isAdmin && (
+          <LogsFilterField wide>
+            <div className='flex min-w-0 gap-1'>
+              <MultiSelect
+                options={sessionIdSourceOptions}
+                selected={getFilterValues(filters.sessionIdSource)}
+                onChange={(values) =>
+                  handleChange(
+                    'sessionIdSource',
+                    serializeFilterValues(values)
+                  )
+                }
+                placeholder={t('Session ID Source')}
+                emptyText={t('No option found.')}
+                className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
+              />
+              <LogFilterModeButton
+                fieldLabel={t('Session ID Source')}
+                operator={filters.sessionIdSourceOp}
+                onChange={(value) => handleChange('sessionIdSourceOp', value)}
               />
             </div>
           </LogsFilterField>

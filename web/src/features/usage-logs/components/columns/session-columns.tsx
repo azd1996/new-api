@@ -22,9 +22,11 @@ import { useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
+import { DataTableColumnHeader } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
 import {
   formatLogQuota,
+  formatPercent,
   formatTimestampToDate,
   formatTokens,
   formatUseTime,
@@ -52,7 +54,8 @@ function renderMultiValue(value: string, count: number): ReactNode {
 export function useSessionColumns(
   isAdmin: boolean,
   expanded: ReadonlySet<string>,
-  onToggle: (sessionId: string) => void
+  onToggle: (sessionId: string) => void,
+  totalTokensSum?: number
 ): ColumnDef<LogSession>[] {
   const { t } = useTranslation()
 
@@ -99,6 +102,7 @@ export function useSessionColumns(
           )
         },
         enableHiding: false,
+        enableSorting: false,
         size: 260,
       },
       {
@@ -115,6 +119,7 @@ export function useSessionColumns(
             </div>
           )
         },
+        enableSorting: false,
         size: 170,
       },
       {
@@ -122,6 +127,7 @@ export function useSessionColumns(
         header: t('Duration'),
         cell: ({ row }) =>
           formatUseTime(row.original.last_at - row.original.first_at),
+        enableSorting: false,
         size: 90,
       },
       {
@@ -140,6 +146,7 @@ export function useSessionColumns(
             </div>
           )
         },
+        enableSorting: false,
         size: 90,
       },
     ]
@@ -150,6 +157,7 @@ export function useSessionColumns(
         header: t('User'),
         cell: ({ row }) =>
           renderMultiValue(row.original.username, row.original.user_count),
+        enableSorting: false,
         size: 120,
       })
     }
@@ -181,6 +189,7 @@ export function useSessionColumns(
             </span>
           )
         },
+        enableSorting: false,
         size: 200,
       },
       {
@@ -188,6 +197,7 @@ export function useSessionColumns(
         header: t('Token'),
         cell: ({ row }) =>
           renderMultiValue(row.original.token_name, row.original.token_count),
+        enableSorting: false,
         size: 120,
       },
       {
@@ -195,6 +205,7 @@ export function useSessionColumns(
         header: t('Model'),
         cell: ({ row }) =>
           renderMultiValue(row.original.model_name, row.original.model_count),
+        enableSorting: false,
         size: 160,
       },
       {
@@ -206,12 +217,38 @@ export function useSessionColumns(
             {formatTokens(row.original.completion_tokens)}
           </span>
         ),
+        enableSorting: false,
+        size: 120,
+      },
+      {
+        accessorKey: 'total_tokens',
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t('Total Tokens')} />
+        ),
+        cell: ({ row }) => {
+          const total = row.original.total_tokens
+          const share =
+            totalTokensSum && totalTokensSum > 0
+              ? (total / totalTokensSum) * 100
+              : undefined
+          return (
+            <div className='flex flex-col gap-0.5'>
+              <span className='tabular-nums'>{formatTokens(total)}</span>
+              {share !== undefined && (
+                <span className='text-muted-foreground text-xs tabular-nums'>
+                  {t('Share')}: {formatPercent(share)}
+                </span>
+              )}
+            </div>
+          )
+        },
         size: 120,
       },
       {
         accessorKey: 'quota',
         header: t('Cost'),
         cell: ({ row }) => formatLogQuota(row.original.quota),
+        enableSorting: false,
         size: 110,
       },
       {
@@ -233,6 +270,7 @@ export function useSessionColumns(
             </div>
           )
         },
+        enableSorting: false,
         size: 110,
       },
       {
@@ -251,10 +289,11 @@ export function useSessionColumns(
             </span>
           )
         },
+        enableSorting: false,
         size: 190,
       }
     )
 
     return columns
-  }, [t, isAdmin, expanded, onToggle])
+  }, [t, isAdmin, expanded, onToggle, totalTokensSum])
 }

@@ -125,6 +125,7 @@ type LogSession struct {
 	Quota            int64                `json:"quota"`
 	PromptTokens     int64                `json:"prompt_tokens"`
 	CompletionTokens int64                `json:"completion_tokens"`
+	TotalTokens      int64                `json:"total_tokens"`
 	Username         string               `json:"username"`
 	UserCount        int64                `json:"user_count"`
 	TokenName        string               `json:"token_name"`
@@ -314,26 +315,74 @@ func logSessionQuery(userId int, filter LogFilter) (string, []any, error) {
 	return sql.String(), append(args, havingArgs...), nil
 }
 
-// GetLogSessions lists sessions newest activity first from log_sessions.
-// userId > 0 limits the result to that user's requests.
-func GetLogSessions(userId int, filter LogFilter, startIdx int, num int) ([]*LogSession, int64, error) {
+// LogSessionSortOptions orders the session list. SortBy "" (the default)
+// keeps the original newest-activity-first order; "total_tokens" sorts by the
+// session's lifetime prompt+completion tokens.
+type LogSessionSortOptions struct {
+	SortBy    string
+	SortOrder string
+}
+
+// logSessionSortColumns maps a validated SortBy to the aggregated expression
+// it orders by, referencing the outer SELECT's own aliases.
+var logSessionSortColumns = map[string]string{
+	"total_tokens": "s_prompt_tokens + s_completion_tokens",
+}
+
+func NewLogSessionSortOptions(sortBy string, sortOrder string) LogSessionSortOptions {
+	normalizedSortBy := strings.ToLower(strings.TrimSpace(sortBy))
+	normalizedSortOrder := strings.ToLower(strings.TrimSpace(sortOrder))
+	if _, ok := logSessionSortColumns[normalizedSortBy]; !ok {
+		normalizedSortBy = ""
+		normalizedSortOrder = ""
+	} else if normalizedSortOrder != "asc" {
+		normalizedSortOrder = "desc"
+	}
+	return LogSessionSortOptions{SortBy: normalizedSortBy, SortOrder: normalizedSortOrder}
+}
+
+func (options LogSessionSortOptions) orderByClause() string {
+	columnExpr, ok := logSessionSortColumns[options.SortBy]
+	if !ok {
+		return " ORDER BY s_last_at DESC, session_id DESC"
+	}
+	direction := "DESC"
+	if options.SortOrder == "asc" {
+		direction = "ASC"
+	}
+	return fmt.Sprintf(" ORDER BY (%s) %s, session_id DESC", columnExpr, direction)
+}
+
+// logSessionTotals is the count and token sum over every session matching the
+// filter, independent of the page being listed.
+type logSessionTotals struct {
+	Total       int64 `gorm:"column:total"`
+	TotalTokens int64 `gorm:"column:total_tokens"`
+}
+
+// GetLogSessions lists sessions ordered by sortOptions (newest activity first
+// by default) from log_sessions. userId > 0 limits the result to that user's
+// requests. The returned token sum covers every session matching filter, not
+// only the listed page.
+func GetLogSessions(userId int, filter LogFilter, startIdx int, num int, sortOptions LogSessionSortOptions) ([]*LogSession, int64, int64, error) {
 	query, args, err := logSessionQuery(userId, filter)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	var total int64
-	if err := LOG_DB.Raw("SELECT count() FROM ("+query+")", args...).Scan(&total).Error; err != nil {
-		return nil, 0, err
+	var totals logSessionTotals
+	totalsSQL := "SELECT count() AS total, sum(s_prompt_tokens + s_completion_tokens) AS total_tokens FROM (" + query + ")"
+	if err := LOG_DB.Raw(totalsSQL, args...).Scan(&totals).Error; err != nil {
+		return nil, 0, 0, err
 	}
 	sessions := make([]*LogSession, 0, num)
-	if total == 0 {
-		return sessions, 0, nil
+	if totals.Total == 0 {
+		return sessions, 0, 0, nil
 	}
 
 	var rows []logSessionAggRow
 	pageArgs := append(slices.Clone(args), num, startIdx)
-	if err := LOG_DB.Raw(query+" ORDER BY s_last_at DESC, session_id DESC LIMIT ? OFFSET ?", pageArgs...).Scan(&rows).Error; err != nil {
-		return nil, 0, err
+	if err := LOG_DB.Raw(query+sortOptions.orderByClause()+" LIMIT ? OFFSET ?", pageArgs...).Scan(&rows).Error; err != nil {
+		return nil, 0, 0, err
 	}
 	customerIDs := make([]string, 0)
 	for _, row := range rows {
@@ -345,7 +394,7 @@ func GetLogSessions(userId int, filter LogFilter, startIdx int, num int) ([]*Log
 	if len(customerIDs) > 0 {
 		var customers []Customer
 		if err := DB.Select("customer_id", "name").Where("customer_id IN ?", customerIDs).Find(&customers).Error; err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 		for _, customer := range customers {
 			customerNames[customer.CustomerId] = customer.Name
@@ -370,6 +419,7 @@ func GetLogSessions(userId int, filter LogFilter, startIdx int, num int) ([]*Log
 			Quota:            r.Quota,
 			PromptTokens:     r.PromptTokens,
 			CompletionTokens: r.CompletionTokens,
+			TotalTokens:      r.PromptTokens + r.CompletionTokens,
 			Username:         r.Username,
 			UserCount:        int64(r.UserCount),
 			TokenName:        r.TokenName,
@@ -387,12 +437,12 @@ func GetLogSessions(userId int, filter LogFilter, startIdx int, num int) ([]*Log
 		sessions = append(sessions, s)
 	}
 	if len(sessions) == 0 {
-		return sessions, total, nil
+		return sessions, totals.Total, totals.TotalTokens, nil
 	}
 	if err := fillLogSessionIntervals(userId, sessions); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return sessions, total, nil
+	return sessions, totals.Total, totals.TotalTokens, nil
 }
 
 // logSessionTimeRow holds the columns the interval statistics need.

@@ -176,6 +176,36 @@ func otherFieldAbsentCondition(column, key string) (string, string) {
 	return column + " NOT LIKE ? ESCAPE '!'", "%" + esc + "%"
 }
 
+// applyLogOtherFieldFilter adds an include/exclude filter matching logs whose
+// Other JSON carries key as one of filter's values, mirroring
+// applyLogFieldFilter's multi-value include/exclude semantics over the
+// unindexed Other JSON blob instead of a real column. Callers should pair it
+// with a time range or other narrowing filter. An empty filter leaves tx
+// unchanged.
+func applyLogOtherFieldFilter(tx *gorm.DB, column, key string, filter LogFieldFilter) *gorm.DB {
+	conditions := make([]string, 0, len(filter.Values))
+	args := make([]any, 0, len(filter.Values))
+	for _, value := range filter.Values {
+		if value == "" {
+			continue
+		}
+		condition, pattern := otherFieldLikeCondition(column, key, value)
+		if filter.Exclude {
+			condition = strings.Replace(condition, " LIKE ", " NOT LIKE ", 1)
+		}
+		conditions = append(conditions, condition)
+		args = append(args, pattern)
+	}
+	if len(conditions) == 0 {
+		return tx
+	}
+	joiner := " OR "
+	if filter.Exclude {
+		joiner = " AND "
+	}
+	return tx.Where("("+strings.Join(conditions, joiner)+")", args...)
+}
+
 // otherFieldPresentCondition is the counterpart of otherFieldAbsentCondition:
 // it matches logs whose Other JSON contains the given top-level key.
 func otherFieldPresentCondition(column, key string) (string, string) {
@@ -856,17 +886,23 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 // Channel/Group each accept multiple values with an include/exclude operator; a
 // single include value reproduces the former scalar behavior.
 type LogFilter struct {
-	Type                int
-	StartTimestamp      int64
-	EndTimestamp        int64
-	ModelName           LogFieldFilter
-	Username            LogFieldFilter
-	TokenName           LogFieldFilter
-	Channel             LogChannelFilter
-	Group               LogFieldFilter
-	RequestId           string
-	UpstreamRequestId   string
-	SessionId           string
+	Type              int
+	StartTimestamp    int64
+	EndTimestamp      int64
+	ModelName         LogFieldFilter
+	Username          LogFieldFilter
+	TokenName         LogFieldFilter
+	Channel           LogChannelFilter
+	Group             LogFieldFilter
+	RequestId         string
+	UpstreamRequestId string
+	SessionId         string
+	// SessionIdSource restricts to logs whose session id was derived from one
+	// of the given sources (other.session_id_source), e.g. "prompt_cache_key"
+	// or "metadata.user_id"; see relay/session_id.go for every value the relay
+	// writes. Matches the unindexed Other blob, so pair it with a time range.
+	// Admin-only.
+	SessionIdSource     LogFieldFilter
 	DownstreamRequestId string
 	CustomerId          string
 	// CustomerName / CustomerId match either the dedicated indexed column or the
@@ -922,6 +958,7 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 	if f.SessionId != "" {
 		tx = tx.Where("logs.session_id = ?", f.SessionId)
 	}
+	tx = applyLogOtherFieldFilter(tx, "logs.other", "session_id_source", f.SessionIdSource)
 	if f.DownstreamRequestId != "" {
 		tx = tx.Where("logs.downstream_request_id = ?", f.DownstreamRequestId)
 	}

@@ -104,6 +104,14 @@ export function buildSearchParams(
         commonFilters.node
           ? { nodeOp: commonFilters.nodeOp }
           : {}),
+        ...(commonFilters.sessionIdSource && {
+          sessionIdSource: commonFilters.sessionIdSource,
+        }),
+        ...(commonFilters.sessionIdSourceOp &&
+        commonFilters.sessionIdSourceOp !== 'include' &&
+        commonFilters.sessionIdSource
+          ? { sessionIdSourceOp: commonFilters.sessionIdSourceOp }
+          : {}),
         ...(commonFilters.retryTriggered && {
           retryTriggered: commonFilters.retryTriggered,
         }),

@@ -26,10 +26,12 @@ const adminSearch = {
   retryTriggered: 'true',
   node: 'node-a,node-b',
   nodeOp: 'exclude',
+  sessionIdSource: 'prompt_cache_key,metadata.user_id',
+  sessionIdSourceOp: 'exclude',
 }
 
 describe('usage log admin filter params', () => {
-  test('sends trace tag, customer name, node and retry flag for admin views', () => {
+  test('sends trace tag, customer name, node, session id source and retry flag for admin views', () => {
     const params = buildApiParams({
       page: 1,
       pageSize: 20,
@@ -43,6 +45,8 @@ describe('usage log admin filter params', () => {
       retry_triggered: 'true',
       node_name: 'node-a,node-b',
       node_name_op: 'exclude',
+      session_id_source: 'prompt_cache_key,metadata.user_id',
+      session_id_source_op: 'exclude',
     })
   })
 
@@ -59,6 +63,8 @@ describe('usage log admin filter params', () => {
     expect(params.retry_triggered).toBeUndefined()
     expect(params.node_name).toBeUndefined()
     expect(params.node_name_op).toBeUndefined()
+    expect(params.session_id_source).toBeUndefined()
+    expect(params.session_id_source_op).toBeUndefined()
   })
 
   test('ignores a retry flag that is neither true nor false', () => {

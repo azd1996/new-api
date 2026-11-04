@@ -56,6 +56,7 @@ const session = {
   quota: 1000,
   prompt_tokens: 200,
   completion_tokens: 30,
+  total_tokens: 230,
   username: 'alice',
   user_count: 1,
   token_name: 'key-a',
@@ -147,6 +148,7 @@ function mockApi(
             total: enabled ? 1 : 0,
             page: 1,
             page_size: 20,
+            total_tokens_sum: enabled ? 1150 : 0,
           },
         },
       }
@@ -246,6 +248,45 @@ it('lists sessions collapsed and loads no session requests before expanding', as
     get.mock.calls.some(([url]) => String(url).startsWith('/api/log/self?'))
   ).toBe(false)
   expect(screen.getByText('cust-1（Acme）, cust-2')).toBeVisible()
+})
+
+it('shows each session\'s total tokens with its share of the filtered total', async () => {
+  mockApi(true)
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'admin', role: ROLE.ADMIN })
+  await renderSessions()
+
+  await screen.findByText('sess-abc')
+  expect(screen.getByText('230')).toBeVisible()
+  expect(screen.getByText('Share: 20%')).toBeVisible()
+})
+
+it('sorts sessions by total tokens when the column header is clicked', async () => {
+  const get = mockApi(true)
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'admin', role: ROLE.ADMIN })
+  await renderSessions()
+  await screen.findByText('sess-abc')
+
+  const user = userEvent.setup()
+  await user.click(
+    within(screen.getByRole('table')).getByRole('button', {
+      name: 'Total Tokens',
+    })
+  )
+  await user.click(await screen.findByRole('menuitem', { name: 'Desc' }))
+
+  await waitFor(() => {
+    const call = get.mock.calls.findLast(([url]) =>
+      String(url).startsWith('/api/log/sessions?')
+    )
+    expect(call).toBeDefined()
+    const params = new URLSearchParams(String(call?.[0]).split('?')[1])
+    expect(params.get('sort_by')).toBe('total_tokens')
+    expect(params.get('sort_order')).toBe('desc')
+  })
 })
 
 it('shows the Claude-only loss denominator in a mixed-provider filtered summary', async () => {

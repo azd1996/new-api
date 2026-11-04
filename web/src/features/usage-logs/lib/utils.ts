@@ -275,6 +275,14 @@ export function buildApiParams(config: {
             : {}),
         }
       : {}),
+    ...(isAdmin && searchParams.sessionIdSource
+      ? {
+          session_id_source: String(searchParams.sessionIdSource),
+          ...(searchParams.sessionIdSourceOp === 'exclude'
+            ? { session_id_source_op: 'exclude' as const }
+            : {}),
+        }
+      : {}),
     ...(isAdmin &&
     (searchParams.retryTriggered === 'true' ||
       searchParams.retryTriggered === 'false')

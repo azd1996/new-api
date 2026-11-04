@@ -77,6 +77,29 @@ export const LOG_TYPE_ALL_VALUE = '0' as const
 export const LOG_TYPE_REQUEST_KEY_RENAME_VALUE = 'request_key_rename' as const
 
 // ============================================================================
+// Session ID Source
+// ============================================================================
+
+/**
+ * Where the relay derived a request's session id from (other.session_id_source).
+ * Must match every value relay/session_id.go, relay/compatible_handler.go,
+ * relay/responses_handler.go and relay/claude_handler.go can write.
+ */
+export const SESSION_ID_SOURCE_OPTIONS = [
+  { value: 'metadata.user_id', label: 'Claude metadata.user_id' },
+  { value: 'content-fallback', label: 'Claude content fallback' },
+  { value: 'prompt_cache_key', label: 'prompt_cache_key' },
+  {
+    value: 'gateway.prompt_cache_key',
+    label: 'Gateway-generated prompt_cache_key',
+  },
+  {
+    value: 'client_metadata.session_id',
+    label: 'client_metadata.session_id',
+  },
+] as const
+
+// ============================================================================
 // Time Range Presets
 // ============================================================================
 

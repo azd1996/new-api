@@ -25,6 +25,7 @@ import { parseTaskArtifactsResponse } from './lib/task-artifacts'
 import type {
   CacheSkeletonResponse,
   GetLogsParams,
+  GetLogSessionsParams,
   GetLogSessionsResponse,
   LogSessionsBackfillResponse,
   GetLogsResponse,
@@ -152,9 +153,9 @@ export async function getSessionCacheRangeAnalysis(
 }
 
 // getLogSessions groups the filtered consume and error logs by session_id,
-// newest activity first.
+// newest activity first unless params.sort_by picks another order.
 export async function getLogSessions(
-  params: GetLogsParams,
+  params: GetLogSessionsParams,
   isAdmin: boolean
 ): Promise<GetLogSessionsResponse> {
   const queryParams = buildQueryParams(
