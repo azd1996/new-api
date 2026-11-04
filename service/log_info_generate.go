@@ -150,6 +150,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendFinalRequestFormat(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
+	AppendRequestKeyRenameInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
 	return other
 }
@@ -172,6 +173,15 @@ func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other *model.LogO
 		return
 	}
 	other.SetPublic("po", relayInfo.ParamOverrideAudit)
+}
+
+// AppendRequestKeyRenameInfo records the request body key renames applied for
+// the attempt, so consume and error logs show which client keys were rewritten.
+func AppendRequestKeyRenameInfo(relayInfo *relaycommon.RelayInfo, other *model.LogOther) {
+	if relayInfo == nil || other == nil || len(relayInfo.RequestKeyRenameAudit) == 0 {
+		return
+	}
+	other.SetPublic("request_key_rename", relayInfo.RequestKeyRenameAudit)
 }
 
 func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other *model.LogOther) {

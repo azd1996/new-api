@@ -143,6 +143,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
+	keyRename := &requestKeyRenameState{}
+	defer keyRename.restore(c, relayInfo)
+
 	defer func() {
 		recovered := recover()
 		resultErr := newAPIError
@@ -172,9 +175,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}()
 
 	generalSettings := operation_setting.GetGeneralSetting()
+	var stopKeepAlive func()
+	defer func() {
+		if stopKeepAlive != nil {
+			stopKeepAlive()
+		}
+	}()
 	if relayFormat == types.RelayFormatClaude && relayInfo.IsStream && generalSettings.PingIntervalEnabled {
-		stopKeepAlive := helper.StartStreamKeepAlive(c, time.Duration(generalSettings.PingIntervalSeconds)*time.Second)
-		defer stopKeepAlive()
+		channelSettings, _ := common.GetContextKeyType[dto.ChannelSettings](c, constant.ContextKeyChannelSetting)
+		// A rename may change stream mode. Wait for its DTO before committing SSE.
+		if len(service.ResolveRequestKeyRenameRules(channelSettings, relayInfo.OriginModelName)) == 0 {
+			stopKeepAlive = helper.StartStreamKeepAlive(c, time.Duration(generalSettings.PingIntervalSeconds)*time.Second)
+		}
 	}
 
 	if newAPIError = relay.PrepareRequestBilling(c, relayInfo); newAPIError != nil {
@@ -195,6 +207,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.LastError = nil
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		// Channel selection and each attempt start from the client's original body.
+		keyRename.restore(c, relayInfo)
 		relayInfo.StreamStatus = nil
 		relayInfo.PerformanceBusinessRejection = false
 		relayInfo.PerformanceOutputTokens = 0
@@ -212,6 +226,23 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
 			newAPIError = billingErr
 			break
+		}
+		if newAPIError = keyRename.apply(c, relayInfo, relayFormat); newAPIError != nil {
+			break
+		}
+		if keyRename.streamModeChanged && !relayInfo.IsStream {
+			if stopKeepAlive != nil {
+				stopKeepAlive()
+				stopKeepAlive = nil
+			}
+			// Failed attempts may prepare SSE headers without sending them.
+			if _, streaming := c.Get("event_stream_headers_set"); streaming && c.Writer.Written() {
+				newAPIError = types.NewErrorWithStatusCode(errors.New("request key rename cannot disable streaming after SSE has started"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+				break
+			}
+		}
+		if relayFormat == types.RelayFormatClaude && relayInfo.IsStream && generalSettings.PingIntervalEnabled && stopKeepAlive == nil {
+			stopKeepAlive = helper.StartStreamKeepAlive(c, time.Duration(generalSettings.PingIntervalSeconds)*time.Second)
 		}
 
 		bodyStorage, bodyErr := common.GetBodyStorage(c)

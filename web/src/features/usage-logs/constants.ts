@@ -69,6 +69,13 @@ export const LOG_TYPE_ENUM = {
  */
 export const LOG_TYPE_ALL_VALUE = '0' as const
 
+/**
+ * Pseudo log type for the type filter: consume and error logs whose request
+ * body had keys renamed by the channel. Sent as `request_key_rename=true`
+ * instead of a numeric `type`.
+ */
+export const LOG_TYPE_REQUEST_KEY_RENAME_VALUE = 'request_key_rename' as const
+
 // ============================================================================
 // Time Range Presets
 // ============================================================================
@@ -118,6 +125,11 @@ export const LOG_TYPE_FILTERS = [
         type.value === LOG_TYPE_ENUM.LOGIN,
     })
   ),
+  {
+    label: 'Request Body Field Rename',
+    value: LOG_TYPE_REQUEST_KEY_RENAME_VALUE,
+    deprecated: false,
+  },
 ] as const
 
 // ============================================================================

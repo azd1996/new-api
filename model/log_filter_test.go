@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -10,7 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/clickhouse"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type logFilterTestRow struct {
@@ -460,4 +464,158 @@ func TestLogSessionsClickHouse(t *testing.T) {
 	assert.EqualValues(t, 31, sessions[1].Quota)
 	assert.EqualValues(t, yesterday, sessions[1].FirstAt)
 	assert.EqualValues(t, 7, sessions[2].Quota)
+}
+
+type requestKeyRenameLogRow struct {
+	ID    int    `gorm:"column:id;primaryKey"`
+	Type  int    `gorm:"column:type"`
+	Other string `gorm:"column:other;type:text"`
+}
+
+func (requestKeyRenameLogRow) TableName() string {
+	return "logs"
+}
+
+// TestLogFilterRequestKeyRenamedDatabaseMatrix pins the request body field
+// rename filter on every supported log database: it keeps consume and error
+// logs whose Other carries the rename audit and nothing else, including a log
+// that only mentions the key name inside a string value.
+func TestLogFilterRequestKeyRenamedDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(":memory:")
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(dsn)
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(dsn)
+			}
+			db, err := gorm.Open(driver, &gorm.Config{})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			previousType := common.LogDatabaseType()
+			common.SetLogDatabaseType(common.DatabaseType(dialect))
+			t.Cleanup(func() {
+				common.SetLogDatabaseType(previousType)
+				assert.NoError(t, sqlDB.Close())
+			})
+			versionSQL := "SELECT version()"
+			if dialect == "sqlite" {
+				versionSQL = "SELECT sqlite_version()"
+			}
+			var version string
+			require.NoError(t, db.Raw(versionSQL).Scan(&version).Error)
+			t.Logf("database version: %s", version)
+
+			switch dialect {
+			case "postgres":
+				db = db.Begin()
+				require.NoError(t, db.Error)
+				t.Cleanup(func() { assert.NoError(t, db.Rollback().Error) })
+				schemaName := fmt.Sprintf("log_filter_test_%d", time.Now().UnixNano())
+				require.NoError(t, db.Exec("CREATE SCHEMA ?", clause.Table{Name: schemaName}).Error)
+				require.NoError(t, db.Exec("SET LOCAL search_path TO ?", clause.Table{Name: schemaName}).Error)
+			case "mysql":
+				require.False(t, db.Migrator().HasTable("logs"), "TEST_MYSQL_DSN must point at a scratch database")
+				require.False(t, db.Migrator().HasTable("channels"), "TEST_MYSQL_DSN must point at a scratch database")
+				t.Cleanup(func() { assert.NoError(t, db.Migrator().DropTable(&Log{}, &Channel{})) })
+			}
+			require.NoError(t, db.AutoMigrate(&Log{}, &Channel{}))
+			require.NoError(t, db.Create([]requestKeyRenameLogRow{
+				{ID: 1, Type: LogTypeConsume, Other: `{"request_key_rename":["rename file_data -> fileData"]}`},
+				{ID: 2, Type: LogTypeError, Other: `{"status_code":400,"request_key_rename":["rename parts.[0-1].file_data -> fileData"]}`},
+				{ID: 3, Type: LogTypeConsume, Other: `{"po":["set request_key_rename = 1"]}`},
+				{ID: 4, Type: LogTypeConsume, Other: `{"requestXkeyXrename":1}`},
+				{ID: 5, Type: LogTypeRetryOverride, Other: `{"request_key_rename":["rename a -> b"]}`},
+				{ID: 6, Type: LogTypeConsume, Other: ``},
+			}).Error)
+
+			query, err := LogFilter{RequestKeyRenamed: true}.apply(db.Model(&requestKeyRenameLogRow{}))
+			require.NoError(t, err)
+			var ids []int
+			require.NoError(t, query.Order("logs.id").Pluck("logs.id", &ids).Error)
+			assert.Equal(t, []int{1, 2}, ids)
+
+			oldDB, oldLogDB := DB, LOG_DB
+			oldMemory := common.MemoryCacheEnabled
+			t.Cleanup(func() {
+				DB, LOG_DB = oldDB, oldLogDB
+				common.MemoryCacheEnabled = oldMemory
+			})
+			DB, LOG_DB = db, db
+			common.MemoryCacheEnabled = false
+			require.NoError(t, db.Create(&Channel{Id: 1, Name: "renamed"}).Error)
+			now := time.Now().Unix()
+			const renamed = `{"request_key_rename":["rename a -> b"]}`
+			logs := []Log{
+				{Type: LogTypeConsume, Username: "alice", CreatedAt: now - 3600, Quota: 10, PromptTokens: 20, CompletionTokens: 10, Other: renamed},
+				{Type: LogTypeConsume, Username: "alice", CreatedAt: now - 10, Quota: 20, PromptTokens: 40, CompletionTokens: 30, Other: renamed},
+				{Type: LogTypeConsume, Username: "bob", CreatedAt: now - 10, Quota: 30, PromptTokens: 60, CompletionTokens: 50, Other: renamed},
+				{Type: LogTypeError, Username: "alice", CreatedAt: now - 10, RetryTriggered: true, Quota: 999, PromptTokens: 999, Other: `{"status_code":429,"request_key_rename":["rename a -> b"]}`},
+				{Type: LogTypeError, Username: "alice", CreatedAt: now - 10, Quota: 999, PromptTokens: 999, Other: `{"status_code":500,"request_key_rename":["rename a -> b"]}`},
+				{Type: LogTypeConsume, Username: "alice", CreatedAt: now - 3600, Quota: 100, Other: `{}`},
+				{Type: LogTypeConsume, Username: "alice", CreatedAt: now - 10, Quota: 200, PromptTokens: 300, Other: `{"requestXkeyXrename":1}`},
+				{Type: LogTypeError, Username: "alice", CreatedAt: now - 10, RetryTriggered: true, Other: `{"status_code":429}`},
+				{Type: LogTypeError, Username: "alice", CreatedAt: now - 10, Other: `{"status_code":500}`},
+				{Type: LogTypeRetryOverride, Username: "alice", CreatedAt: now - 10, Quota: 999, PromptTokens: 999, Other: renamed},
+			}
+			for i := range logs {
+				logs[i].TokenName = "aggregate-regression"
+				logs[i].ChannelId = 1
+			}
+			require.NoError(t, db.Create(&logs).Error)
+			token := LogFieldFilter{Values: []string{"aggregate-regression"}}
+			for _, tc := range []struct {
+				name     string
+				username LogFieldFilter
+				consume  int64
+				rpm, tpm int
+			}{
+				{"admin", LogFieldFilter{}, 3, 2, 180},
+				{"self", LogFieldFilter{Values: []string{"alice"}}, 2, 1, 70},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					analysis, err := GetLogAnalysis(LogFilter{
+						RequestKeyRenamed: true, TokenName: token, Username: tc.username,
+						StartTimestamp: now - 4000, EndTimestamp: now + 60,
+					})
+					require.NoError(t, err)
+					assert.EqualValues(t, tc.consume, analysis.Scanned)
+					wantSuccess := LogSuccessCell{Total: tc.consume + 1, Success: tc.consume, Error: 2, RetryOverride: 1, Rate: float64(tc.consume) / float64(tc.consume+1)}
+					assert.Equal(t, wantSuccess, analysis.Success.Total)
+					assert.Equal(t, []LogSuccessCell{wantSuccess}, analysis.Success.Channels)
+
+					// Error drill filters still leave the success denominator intact.
+					drilled, err := GetLogAnalysis(LogFilter{
+						RequestKeyRenamed: true, TokenName: token, Username: tc.username,
+						Type: LogTypeError, StatusCode: 500, ErrorKeyword: "no-match",
+						StartTimestamp: now - 4000, EndTimestamp: now + 60,
+					})
+					require.NoError(t, err)
+					assert.Equal(t, wantSuccess, drilled.Success.Total)
+
+					// The requested type is historically ignored, and the rate window
+					// stays independent of the historical quota interval.
+					stat, err := SumUsedQuota(LogTypeError, now-3700, now-3500, LogFieldFilter{}, tc.username, token, LogChannelFilter{}, LogFieldFilter{}, true)
+					require.NoError(t, err)
+					assert.Equal(t, Stat{Quota: 10, Rpm: tc.rpm, Tpm: tc.tpm}, stat)
+					all, err := SumUsedQuota(LogTypeError, now-3700, now-3500, LogFieldFilter{}, tc.username, token, LogChannelFilter{}, LogFieldFilter{})
+					require.NoError(t, err)
+					assert.Equal(t, Stat{Quota: 110, Rpm: tc.rpm + 1, Tpm: tc.tpm + 300}, all)
+				})
+			}
+		})
+	}
 }

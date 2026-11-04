@@ -214,6 +214,46 @@ func TestLogExportRules(t *testing.T) {
 	})
 }
 
+func TestLogStatsRequestKeyRenamed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, _ := newAuditTestDatabase(t, "sqlite", "")
+	useLogExportDatabases(t, db, db, common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	now := time.Now().Unix()
+	const renamed = `{"request_key_rename":["rename a -> b"]}`
+	require.NoError(t, db.Create([]model.Log{
+		{Username: "alice", Type: model.LogTypeConsume, CreatedAt: now - 10, Quota: 5, PromptTokens: 8, CompletionTokens: 4, Other: renamed},
+		{Username: "bob", Type: model.LogTypeConsume, CreatedAt: now - 10, Quota: 7, PromptTokens: 12, CompletionTokens: 8, Other: renamed},
+		{Username: "alice", Type: model.LogTypeConsume, CreatedAt: now - 10, Quota: 100, PromptTokens: 100, Other: `{}`},
+		{Username: "alice", Type: model.LogTypeError, CreatedAt: now - 10, Quota: 999, PromptTokens: 999, Other: renamed},
+	}).Error)
+	query := fmt.Sprintf("type=%d&start_timestamp=%d&end_timestamp=%d", model.LogTypeError, now-3600, now+60)
+	for _, tc := range []struct {
+		name    string
+		handler gin.HandlerFunc
+		flag    string
+		want    model.Stat
+	}{
+		{"admin renamed", GetLogsStat, "&request_key_rename=true", model.Stat{Quota: 12, Rpm: 2, Tpm: 32}},
+		{"admin absent", GetLogsStat, "", model.Stat{Quota: 112, Rpm: 3, Tpm: 132}},
+		{"admin false", GetLogsStat, "&request_key_rename=false", model.Stat{Quota: 112, Rpm: 3, Tpm: 132}},
+		{"self renamed", GetLogsSelfStat, "&request_key_rename=true&username=bob", model.Stat{Quota: 5, Rpm: 1, Tpm: 12}},
+		{"self absent", GetLogsSelfStat, "", model.Stat{Quota: 105, Rpm: 2, Tpm: 112}},
+		{"self false", GetLogsSelfStat, "&request_key_rename=false", model.Stat{Quota: 105, Rpm: 2, Tpm: 112}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := callLogHandler(t, func(c *gin.Context) {
+				c.Set("username", "alice")
+				tc.handler(c)
+			}, 1, common.RoleCommonUser, query+tc.flag)[0]
+			require.Equal(t, true, response["success"])
+			assert.Equal(t, map[string]any{
+				"quota": float64(tc.want.Quota), "rpm": float64(tc.want.Rpm), "tpm": float64(tc.want.Tpm),
+			}, response["data"])
+		})
+	}
+}
+
 func TestAcquireLogExportLock(t *testing.T) {
 	for _, useRedis := range []bool{false, true} {
 		t.Run(fmt.Sprintf("redis=%v", useRedis), func(t *testing.T) {

@@ -318,6 +318,8 @@ export interface LogOtherData {
   image_generation_call_count?: number
   is_system_prompt_overwritten?: boolean
   po?: string[]
+  // Request body key renames applied for the channel ("rename <path> -> <key>").
+  request_key_rename?: string[]
   billing_source?: string
   group?: string
   stream_status?: {
@@ -524,6 +526,7 @@ export interface GetLogsParams {
   node_name?: string
   node_name_op?: LogFilterOperator
   retry_triggered?: 'true' | 'false'
+  request_key_rename?: 'true'
   status_code?: number
   error_keyword?: string
   error_signature_hash?: string

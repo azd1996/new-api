@@ -1652,6 +1652,37 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        {/* Request body field rename */}
+        {Array.isArray(other?.request_key_rename) &&
+          other.request_key_rename.length > 0 && (
+            <DetailSection
+              icon={<Settings2 className='size-3.5' aria-hidden='true' />}
+              iconTone='chart-3'
+              label={`${t('Request Body Field Rename')} (${other.request_key_rename.length})`}
+            >
+              {other.request_key_rename.filter(Boolean).map((line) => {
+                const parsed = parseAuditLine(line)
+                if (!parsed) return null
+                return (
+                  <div
+                    key={line}
+                    className='bg-background/60 flex min-w-0 flex-col gap-1.5 rounded border p-2 sm:flex-row sm:items-start sm:gap-2'
+                  >
+                    <StatusBadge
+                      variant='neutral'
+                      label={getParamOverrideActionLabel(parsed.action, t)}
+                      className='shrink-0 font-medium'
+                      copyable={false}
+                    />
+                    <span className='min-w-0 font-mono text-[11px] leading-relaxed break-all sm:wrap-break-word'>
+                      {parsed.content}
+                    </span>
+                  </div>
+                )
+              })}
+            </DetailSection>
+          )}
+
         {/* Content */}
         {details && (
           <div className='space-y-1.5'>

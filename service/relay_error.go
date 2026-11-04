@@ -96,6 +96,7 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other.SetAdmin("error_signature_hash", ErrorSignatureHash(signature))
 		AppendRelayLogAdminInfo(c, relayInfo, other)
 		AppendResponseModelLogInfo(relayInfo, other)
+		AppendRequestKeyRenameInfo(relayInfo, other)
 		AppendTaskPluginContextAuditInfo(c, other)
 		// retry_triggered records whether this failed attempt fired an
 		// error-triggered retry-override (detail present); the retry rewrite

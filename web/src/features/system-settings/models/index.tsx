@@ -68,6 +68,7 @@ const defaultModelSettings: ModelSettings = {
   'model_deployment.ionet.enabled': false,
   'override_template_setting.param_templates': '[]',
   'override_template_setting.retry_templates': '[]',
+  'override_template_setting.request_key_rename_templates': '[]',
   'proxy_setting.proxies': [],
   'proxy_setting.ttft_routing': {},
 }

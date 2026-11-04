@@ -168,6 +168,9 @@ type RelayInfo struct {
 	RuntimeHeadersOverride                map[string]any
 	UseRuntimeHeadersOverride             bool
 	ParamOverrideAudit                    []string
+	// RequestKeyRenameAudit lists the request body key renames applied for the
+	// current attempt's channel; written to consume and error logs.
+	RequestKeyRenameAudit []string
 
 	// PendingRetryRewrite holds param-override operations to apply once to the
 	// outgoing request body on an error-triggered fallback retry (retry-override).
@@ -498,10 +501,6 @@ func GenRelayInfoRerank(c *gin.Context, request *dto.RerankRequest) *RelayInfo {
 	info := genBaseRelayInfo(c, request)
 	info.RelayMode = relayconstant.RelayModeRerank
 	info.RelayFormat = types.RelayFormatRerank
-	info.RerankerInfo = &RerankerInfo{
-		Documents:       request.Documents,
-		ReturnDocuments: request.GetReturnDocuments(),
-	}
 	return info
 }
 
@@ -521,19 +520,6 @@ func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) 
 	info := genBaseRelayInfo(c, request)
 	info.RelayMode = relayconstant.RelayModeResponses
 	info.RelayFormat = types.RelayFormatOpenAIResponses
-
-	info.ResponsesUsageInfo = &ResponsesUsageInfo{
-		BuiltInTools: make(map[string]*BuildInToolInfo),
-	}
-	if len(request.Tools) > 0 {
-		for _, tool := range request.GetToolsMap() {
-			toolType := common.Interface2String(tool["type"])
-			info.ResponsesUsageInfo.BuiltInTools[toolType] = &BuildInToolInfo{
-				ToolName:  toolType,
-				CallCount: 0,
-			}
-		}
-	}
 	return info
 }
 
@@ -594,6 +580,37 @@ func reasoningEffortFromRequest(request dto.Request) string {
 	return strings.TrimSpace(effort)
 }
 
+// SetRequest replaces the parsed request and the state derived from it. Channel
+// retries retain their routing, billing session and pending outgoing rewrite.
+func (info *RelayInfo) SetRequest(c *gin.Context, request dto.Request) {
+	info.Request = request
+	info.IsStream = request != nil && request.IsStream(c.Request)
+	common.SetContextKey(c, constant.ContextKeyIsStream, info.IsStream)
+	info.ReasoningEffort = reasoningEffortFromRequest(request)
+	info.RerankerInfo = nil
+	info.ResponsesUsageInfo = nil
+	info.requestInferredToolKey = ""
+	switch request := request.(type) {
+	case *dto.RerankRequest:
+		info.RerankerInfo = &RerankerInfo{
+			Documents:       request.Documents,
+			ReturnDocuments: request.GetReturnDocuments(),
+		}
+	case *dto.OpenAIResponsesRequest:
+		info.ResponsesUsageInfo = &ResponsesUsageInfo{BuiltInTools: make(map[string]*BuildInToolInfo)}
+		for _, tool := range request.GetToolsMap() {
+			toolType := common.Interface2String(tool["type"])
+			info.BuiltInTools[toolType] = &BuildInToolInfo{ToolName: toolType}
+		}
+	case *dto.AlphaSearchRequest:
+		info.ResponsesUsageInfo = &ResponsesUsageInfo{
+			BuiltInTools: map[string]*BuildInToolInfo{
+				dto.BuildInToolWebSearchPreview: {ToolName: dto.BuildInToolWebSearchPreview},
+			},
+		}
+	}
+}
+
 func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 	//channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
@@ -611,25 +628,14 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		startTime = time.Now()
 	}
 
-	isStream := false
-
-	if request != nil {
-		isStream = request.IsStream(c.Request)
-	}
-	c.Set(string(constant.ContextKeyIsStream), isStream)
-
 	// firstResponseTime = time.Now() - 1 second
 
 	reqId := common.GetContextKeyString(c, common.RequestIdKey)
 	if reqId == "" {
 		reqId = common.NewRequestId()
 	}
-	reasoningEffort := reasoningEffortFromRequest(request)
 	originModelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 	info := &RelayInfo{
-		Request:         request,
-		ReasoningEffort: reasoningEffort,
-
 		RequestId:  reqId,
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
 		UsingGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
@@ -648,7 +654,6 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),
 		RequestURLPath:  c.Request.URL.String(),
 		RequestHeaders:  cloneRequestHeaders(c),
-		IsStream:        isStream,
 
 		StartTime:         startTime,
 		FirstResponseTime: startTime.Add(-time.Second),
@@ -662,6 +667,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		},
 	}
 
+	info.SetRequest(c, request)
 	if info.RelayMode == relayconstant.RelayModeUnknown {
 		info.RelayMode = c.GetInt("relay_mode")
 	}
@@ -824,14 +830,6 @@ func GenRelayInfoAlphaSearch(c *gin.Context, request *dto.AlphaSearchRequest) *R
 		info.RelayMode = relayconstant.RelayModeAlphaSearch
 	}
 	info.RelayFormat = types.RelayFormatOpenAIAlphaSearch
-	info.ResponsesUsageInfo = &ResponsesUsageInfo{
-		BuiltInTools: map[string]*BuildInToolInfo{
-			dto.BuildInToolWebSearchPreview: {
-				ToolName:  dto.BuildInToolWebSearchPreview,
-				CallCount: 0,
-			},
-		},
-	}
 	return info
 }
 

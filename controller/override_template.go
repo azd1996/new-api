@@ -14,8 +14,8 @@ type overrideTemplateOption struct {
 	Description string `json:"description,omitempty"`
 }
 
-// GetOverrideTemplateOptions returns the names of the shared parameter-override
-// and retry-override templates, so the channel editor can offer them in a
+// GetOverrideTemplateOptions returns the names of the shared parameter-override,
+// retry-override and request-key-rename templates, so the channel editor can offer them in a
 // multi-select. Only names/descriptions are exposed (not the rule content),
 // and it is reachable by channel admins (unlike the root-only option API where
 // the templates are edited).
@@ -36,8 +36,9 @@ func GetOverrideTemplateOptions(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"param": toOptions(setting.ParamTemplates),
-			"retry": toOptions(setting.RetryTemplates),
+			"param":              toOptions(setting.ParamTemplates),
+			"retry":              toOptions(setting.RetryTemplates),
+			"request_key_rename": toOptions(setting.RequestKeyRenameTemplates),
 		},
 	})
 }

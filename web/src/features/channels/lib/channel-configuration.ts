@@ -59,6 +59,9 @@ const CONFIGURATION_BLOCKS = {
       'param_override_template_refs',
       'retry_override_template_refs',
       'response_filter',
+      'request_key_rename',
+      'request_key_rename_template_refs',
+      'request_key_rename_models',
     ],
   },
   requestProcessing: {
@@ -161,7 +164,9 @@ export function getChannelConfigurationState(
       hasConfiguredJson(values.header_override) ||
       Boolean(values.param_override_template_refs?.length) ||
       Boolean(values.retry_override_template_refs?.length) ||
-      Boolean(values.response_filter?.trim()),
+      Boolean(values.response_filter?.trim()) ||
+      hasConfiguredJson(values.request_key_rename) ||
+      Boolean(values.request_key_rename_template_refs?.length),
     requestProcessing: Boolean(
       (values.type === 1 && values.force_format) ||
       values.thinking_to_content ||

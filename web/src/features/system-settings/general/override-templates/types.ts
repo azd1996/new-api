@@ -18,8 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 // A single override template row as edited in the UI. `content` is kept as a
-// JSON string in the editor (parameter override object for param templates, or
-// a JSON array of retry rules for retry templates). The synthetic `id` is a
+// JSON string in the editor (parameter override object for param templates, a
+// JSON array of retry rules for retry templates, or a JSON array of request key
+// rename rules for rename templates). The synthetic `id` is a
 // UI-only field used for table row keys and is stripped before saving.
 export interface OverrideTemplateItem {
   id?: number
@@ -28,11 +29,12 @@ export interface OverrideTemplateItem {
   content: string
 }
 
-// Option-key map for the two root-only override template options. Both values
+// Option-key map for the root-only override template options. Both values
 // are JSON STRINGs (an array of `{ name, description?, content }` once parsed).
 export interface OverrideTemplatesSettings {
   'override_template_setting.param_templates': string
   'override_template_setting.retry_templates': string
+  'override_template_setting.request_key_rename_templates': string
 }
 
-export type OverrideTemplateKind = 'param' | 'retry'
+export type OverrideTemplateKind = 'param' | 'retry' | 'rename'

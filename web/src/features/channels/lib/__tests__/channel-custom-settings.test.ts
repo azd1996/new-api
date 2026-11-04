@@ -20,6 +20,8 @@ import { expect, test } from 'vitest'
 
 import { channelSchema } from '../../types'
 import {
+  channelFormSchema,
+  isRequestKeyRenameRules,
   transformChannelToFormDefaults,
   transformFormDataToUpdatePayload,
 } from '../channel-form'
@@ -27,6 +29,11 @@ import {
 const storedSetting = {
   upstream_request_id_header: 'X-Upstream-Id',
   response_filter: ['content_filter_results', 'choices.#.logprobs'],
+  request_key_rename: [
+    { path: 'contents.*.parts.*', keys: { file_data: 'fileData' } },
+  ],
+  request_key_rename_template_refs: ['gemini-snake-case'],
+  request_key_rename_models: ['gemini-2.5-pro'],
   stat_group_ratio: 0.8,
   param_override_template_refs: ['claude-defaults'],
   retry_override_template_refs: ['fallback-429'],
@@ -57,6 +64,45 @@ test('editing a channel keeps the custom setting fields it was loaded with', () 
   const payload = transformFormDataToUpdatePayload(form, 7)
   expect(JSON.parse(payload.setting ?? '{}')).toMatchObject(storedSetting)
 })
+
+test.each([
+  { name: 'omitted', rule: { keys: { file_data: 'fileData' } } },
+  { name: 'empty', rule: { path: '', keys: { file_data: 'fileData' } } },
+  { name: 'dollar', rule: { path: '$', keys: { file_data: 'fileData' } } },
+])(
+  'an API channel with an $name root rename path validates and preserves its rules on save',
+  ({ rule }) => {
+    const setting = { ...storedSetting, request_key_rename: [rule] }
+    const defaults = transformChannelToFormDefaults(buildChannel(setting))
+    const form = channelFormSchema.parse(defaults)
+    const payload = transformFormDataToUpdatePayload(form, 7)
+
+    expect(JSON.parse(payload.setting ?? '{}')).toMatchObject(setting)
+    expect(JSON.parse(payload.setting ?? '{}').request_key_rename).toEqual([
+      rule,
+    ])
+    expect(isRequestKeyRenameRules([rule])).toBe(true)
+  }
+)
+
+test.each([null, 0, false, [], {}])(
+  'an explicit non-string rename path %j is rejected by channel and template validation',
+  (path) => {
+    const rules = [{ path, keys: { file_data: 'fileData' } }]
+    const defaults = transformChannelToFormDefaults(
+      buildChannel({ request_key_rename: rules })
+    )
+    const result = channelFormSchema.safeParse(defaults)
+
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path)).toContainEqual([
+        'request_key_rename',
+      ])
+    }
+    expect(isRequestKeyRenameRules(rules)).toBe(false)
+  }
+)
 
 test('a blank or non-positive stat ratio is omitted from the saved setting', () => {
   const form = transformChannelToFormDefaults(buildChannel({}))

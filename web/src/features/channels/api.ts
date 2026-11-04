@@ -815,6 +815,7 @@ export type OverrideTemplatesResponse = {
   data?: {
     param: OverrideTemplateOption[]
     retry: OverrideTemplateOption[]
+    request_key_rename?: OverrideTemplateOption[]
   }
 }
 

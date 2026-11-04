@@ -165,6 +165,15 @@ export function OverrideTemplatesSection(props: Props) {
         props.defaultValues['override_template_setting.retry_templates']
       )
   )
+  const [renameTemplates, setRenameTemplates] = useState<
+    OverrideTemplateItem[]
+  >(() =>
+    parseTemplates(
+      props.defaultValues[
+        'override_template_setting.request_key_rename_templates'
+      ]
+    )
+  )
   const [saving, setSaving] = useState(false)
   const [editor, setEditor] = useState<EditorState>({
     open: false,
@@ -183,23 +192,39 @@ export function OverrideTemplatesSection(props: Props) {
         props.defaultValues['override_template_setting.retry_templates']
       )
     )
+    setRenameTemplates(
+      parseTemplates(
+        props.defaultValues[
+          'override_template_setting.request_key_rename_templates'
+        ]
+      )
+    )
   }, [props.defaultValues])
+
+  const templatesByKind = {
+    param: paramTemplates,
+    retry: retryTemplates,
+    rename: renameTemplates,
+  }
+  const settersByKind = {
+    param: setParamTemplates,
+    retry: setRetryTemplates,
+    rename: setRenameTemplates,
+  }
 
   const openEditor = (kind: OverrideTemplateKind, item: OverrideTemplateItem | null) => {
     setEditor({ open: true, kind, item })
   }
 
   const handleDelete = (kind: OverrideTemplateKind, idx: number) => {
-    const setter = kind === 'param' ? setParamTemplates : setRetryTemplates
-    setter((prev) =>
+    settersByKind[kind]((prev) =>
       prev.filter((_, i) => i !== idx).map((item, i) => ({ ...item, id: i }))
     )
     toast.success(t('Deleted successfully'))
   }
 
   const handleTemplateSave = (item: OverrideTemplateItem) => {
-    const setter = editor.kind === 'param' ? setParamTemplates : setRetryTemplates
-    setter((prev) => {
+    settersByKind[editor.kind]((prev) => {
       const existIdx = prev.findIndex(
         (row) => row.id === item.id || row.name === editor.item?.name
       )
@@ -244,6 +269,21 @@ export function OverrideTemplatesSection(props: Props) {
         })
       }
 
+      const nextRename = serializeTemplates(renameTemplates)
+      if (
+        nextRename !==
+        normalizeSerialized(
+          props.defaultValues[
+            'override_template_setting.request_key_rename_templates'
+          ]
+        )
+      ) {
+        updates.push({
+          key: 'override_template_setting.request_key_rename_templates',
+          value: nextRename,
+        })
+      }
+
       if (updates.length === 0) {
         toast.info(t('No changes'))
         return
@@ -260,10 +300,7 @@ export function OverrideTemplatesSection(props: Props) {
     }
   }
 
-  const existingNames =
-    editor.kind === 'param'
-      ? paramTemplates.map((item) => item.name)
-      : retryTemplates.map((item) => item.name)
+  const existingNames = templatesByKind[editor.kind].map((item) => item.name)
 
   return (
     <>
@@ -271,7 +308,7 @@ export function OverrideTemplatesSection(props: Props) {
         <Alert>
           <AlertDescription className='text-xs'>
             {t(
-              'Define reusable parameter override and retry override templates. Channels can reference these templates by name.'
+              'Define reusable parameter override, retry override and request body field rename templates. Channels can reference these templates by name.'
             )}
           </AlertDescription>
         </Alert>
@@ -292,6 +329,15 @@ export function OverrideTemplatesSection(props: Props) {
           onAdd={() => openEditor('retry', null)}
           onEdit={(item) => openEditor('retry', item)}
           onDelete={(idx) => handleDelete('retry', idx)}
+        />
+
+        <TemplateTable
+          title={t('Request Body Field Rename Templates')}
+          items={renameTemplates}
+          emptyContent={t('No templates yet')}
+          onAdd={() => openEditor('rename', null)}
+          onEdit={(item) => openEditor('rename', item)}
+          onDelete={(idx) => handleDelete('rename', idx)}
         />
 
         <SettingsPageActionsPortal>

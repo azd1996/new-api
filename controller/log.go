@@ -70,6 +70,7 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 		UpstreamRequestId: c.Query("upstream_request_id"),
 		SessionId:         c.Query("session_id"),
 		ErrorKeyword:      c.Query("error_keyword"),
+		RequestKeyRenamed: c.Query("request_key_rename") == "true",
 	}
 	if sc, e := strconv.Atoi(c.Query("status_code")); e == nil {
 		filter.StatusCode = sc
@@ -361,7 +362,7 @@ func GetLogsStat(c *gin.Context) {
 	modelName := logFieldFilterFromQuery(c, "model_name")
 	channel := logChannelFilterFromQuery(c)
 	group := logFieldFilterFromQuery(c, "group")
-	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, c.Query("request_key_rename") == "true")
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -396,7 +397,7 @@ func GetLogsSelfStat(c *gin.Context) {
 	channel := logChannelFilterFromQuery(c)
 	group := logFieldFilterFromQuery(c, "group")
 	usernameFilter := model.LogFieldFilter{Values: []string{username}}
-	quotaNum, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, usernameFilter, tokenName, channel, group)
+	quotaNum, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, usernameFilter, tokenName, channel, group, c.Query("request_key_rename") == "true")
 	if err != nil {
 		common.ApiError(c, err)
 		return

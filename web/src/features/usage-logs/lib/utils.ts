@@ -31,6 +31,7 @@ import {
   LOG_TYPES,
   DISPLAYABLE_LOG_TYPES,
   TIMING_LOG_TYPES,
+  LOG_TYPE_REQUEST_KEY_RENAME_VALUE,
 } from '../constants'
 import type {
   GetLogsParams,
@@ -107,8 +108,8 @@ function buildTimeRangeParams(
   // picked.
   const hasIndexedIdentifier = Boolean(
     searchParams.sessionId ||
-      searchParams.requestId ||
-      searchParams.upstreamRequestId
+    searchParams.requestId ||
+    searchParams.upstreamRequestId
   )
   const skipDefaultRange = Boolean(hasTimeParams) || hasIndexedIdentifier
   const defaultTimeRange = !skipDefaultRange ? getDefaultTimeRange() : null
@@ -193,6 +194,11 @@ export function buildApiParams(config: {
     p: page,
     page_size: pageSize,
     ...(searchParams.type ? { type: processType(searchParams.type) } : {}),
+    ...(Array.isArray(searchParams.type) &&
+    searchParams.type.length === 1 &&
+    searchParams.type[0] === LOG_TYPE_REQUEST_KEY_RENAME_VALUE
+      ? { request_key_rename: 'true' as const }
+      : {}),
     ...(searchParams.model
       ? {
           model_name: String(searchParams.model),
