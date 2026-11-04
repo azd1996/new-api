@@ -214,13 +214,13 @@ func TestProxyTtftGateTriggerDivertRecover(t *testing.T) {
 
 	// Head is fast: no diversion, always strict head even though routing is on.
 	proxyTtftRandFloat = func() float64 { return 0.99 }
-	RecordProxyTTFT(ch, model, "A", fast)
+	RecordProxyTTFT(ch, model, "A", fast, 0)
 	_, alias := ResolveChannelProxyWeighted(ch, aliases, "", model, true)
 	require.Equal(t, "A", alias, "fast head stays strict")
 
 	// Head turns slow for ConsecutiveBad samples -> gate opens.
 	for i := 0; i < cfg.ConsecutiveBad; i++ {
-		RecordProxyTTFT(ch, model, "A", slow)
+		RecordProxyTTFT(ch, model, "A", slow, 0)
 	}
 	// With head and unknown B both treated as slow, weights are ~0.5/0.5; a high
 	// random draw lands on the backup, proving traffic is diverted.
@@ -233,7 +233,7 @@ func TestProxyTtftGateTriggerDivertRecover(t *testing.T) {
 
 	// Head recovers for ConsecutiveBad fast samples -> gate closes, strict head.
 	for i := 0; i < cfg.ConsecutiveBad; i++ {
-		RecordProxyTTFT(ch, model, "A", fast)
+		RecordProxyTTFT(ch, model, "A", fast, 0)
 	}
 	proxyTtftRandFloat = func() float64 { return 0.99 }
 	_, alias = ResolveChannelProxyWeighted(ch, aliases, "", model, true)
@@ -259,9 +259,9 @@ func TestProxyConnectLatencyRouting(t *testing.T) {
 
 	// TTFT fine and equal for all (so TTFT does not drive the gate or the split).
 	for i := 0; i < cfg.ConsecutiveBad; i++ {
-		RecordProxyTTFT(ch, model, "A", fastTtft)
-		RecordProxyTTFT(ch, model, "B", fastTtft)
-		RecordProxyTTFT(ch, model, "T", fastTtft)
+		RecordProxyTTFT(ch, model, "A", fastTtft, 0)
+		RecordProxyTTFT(ch, model, "B", fastTtft, 0)
+		RecordProxyTTFT(ch, model, "T", fastTtft, 0)
 	}
 	// Connect: head A slow, forward B fast, tp T slow-measured (should be ignored).
 	for i := 0; i < cfg.ConsecutiveBad; i++ {
@@ -304,7 +304,7 @@ func TestProxyTtftChannelStats(t *testing.T) {
 
 	// Open the diversion gate (head A consistently slow).
 	for i := 0; i < cfg.ConsecutiveBad; i++ {
-		RecordProxyTTFT(ch, model, "A", slow)
+		RecordProxyTTFT(ch, model, "A", slow, 0)
 	}
 	// Three resolves land on A (low draw), two on B (high draw) -> known picks.
 	proxyTtftRandFloat = func() float64 { return 0.0 }
@@ -334,6 +334,35 @@ func TestProxyTtftChannelStats(t *testing.T) {
 	assert.Equal(t, int64(2), byAlias["B"].Picks, "B chosen on high draws")
 }
 
+// TestProxyTtftTokenSpeed verifies prompt_tokens/ttft (tokens/sec) is recorded
+// alongside TTFT, surfaced both per-channel (ProxyTtftChannelStats) and in the
+// global per-alias health snapshot (ProxyHealthSnapshot), and that samples with
+// no prompt token count leave the token-speed aggregate untouched.
+func TestProxyTtftTokenSpeed(t *testing.T) {
+	resetProxyHealthStateForTest(t, []system_setting.ProxyEntry{
+		{Alias: "A", URL: "http://a:1"},
+	})
+	const ch = 40
+	const model = "gpt-x"
+
+	RecordProxyTTFT(ch, model, "A", 2.0, 1000) // 500 tokens/sec
+	RecordProxyTTFT(ch, model, "A", 2.0, 2000) // 1000 tokens/sec
+	RecordProxyTTFT(ch, model, "A", 2.0, 0)    // no prompt token count: TTFT sample counted, ratio skipped
+
+	stats := ProxyTtftChannelStats(ch, []string{"A"}, true)
+	require.Len(t, stats, 1)
+	require.Len(t, stats[0].Aliases, 1)
+	row := stats[0].Aliases[0]
+	assert.Equal(t, 3, row.Samples, "all three TTFT samples counted")
+	assert.Equal(t, 2, row.TokenSpeedSamples, "only samples with a prompt token count feed the ratio")
+	assert.InDelta(t, 750.0, row.AvgTokenSpeed, 0.01, "mean of 500 and 1000 tokens/sec")
+
+	snapshot := ProxyHealthSnapshot()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, 2, snapshot[0].TokenSpeedSamples)
+	assert.InDelta(t, 750.0, snapshot[0].TokenSpeedAvg, 0.01)
+}
+
 // never diverts when the channel has it off or only one alias is eligible.
 func TestProxyTtftDisabledAndSingleEligibleStayStrict(t *testing.T) {
 	resetProxyHealthStateForTest(t, []system_setting.ProxyEntry{
@@ -348,7 +377,7 @@ func TestProxyTtftDisabledAndSingleEligibleStayStrict(t *testing.T) {
 
 	// Make the head consistently slow so a diversion would fire if enabled.
 	for i := 0; i < cfg.ConsecutiveBad+1; i++ {
-		RecordProxyTTFT(ch, model, "A", slow)
+		RecordProxyTTFT(ch, model, "A", slow, 0)
 	}
 
 	// Toggle off: strict head regardless of TTFT.

@@ -44,8 +44,16 @@ const OPERATIONS_SECTIONS = [
             settings['metadata_injection_disable_setting.rules'],
           'cache_breakpoint_fix_setting.rules':
             settings['cache_breakpoint_fix_setting.rules'],
+          'stable_base_breakpoint_setting.rules':
+            settings['stable_base_breakpoint_setting.rules'],
+          'fallback_cache_breakpoint_setting.rules':
+            settings['fallback_cache_breakpoint_setting.rules'],
+          'retain_previous_breakpoint_setting.rules':
+            settings['retain_previous_breakpoint_setting.rules'],
           'prompt_cache_key_injection_setting.rules':
             settings['prompt_cache_key_injection_setting.rules'],
+          'claude_volatile_tail_pattern_setting.patterns':
+            settings['claude_volatile_tail_pattern_setting.patterns'],
           'client_disconnect_setting.rules':
             settings['client_disconnect_setting.rules'],
           'debug_scope_setting.rules': settings['debug_scope_setting.rules'],

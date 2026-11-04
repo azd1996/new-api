@@ -20,6 +20,7 @@ var (
 	relayDuration    *prometheus.HistogramVec
 	relayTtft        *prometheus.HistogramVec
 	proxyTtft        *prometheus.HistogramVec
+	proxyTokenSpeed  *prometheus.HistogramVec
 	proxyConnect     *prometheus.HistogramVec
 	quotaUsed        *prometheus.CounterVec
 	quotaPerUnit     prometheus.Gauge
@@ -79,6 +80,11 @@ func Init() {
 			Help:    "Streaming time-to-first-token in seconds per outbound proxy alias, for TTFT-aware proxy routing.",
 			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60},
 		}, []string{"channel", "proxy", "model"})
+		proxyTokenSpeed = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "newapi_proxy_prompt_tokens_per_ttft_second",
+			Help:    "Prompt tokens divided by streaming time-to-first-token (tokens/sec) per outbound proxy alias; a rough transport-speed signal for large prompts.",
+			Buckets: []float64{10, 50, 100, 250, 500, 1000, 2500, 5000, 10000},
+		}, []string{"channel", "proxy", "model"})
 		proxyConnect = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "newapi_proxy_connect_seconds",
 			Help:    "Connection establish latency (dial + TLS) in seconds per outbound proxy alias. Model-independent. Separate from the in-memory routing stats; a histogram for dashboards.",
@@ -109,7 +115,7 @@ func Init() {
 			Help: "Reporting-only cumulative profit in quota units (customer-discounted minus channel-discounted) over customer-bearing requests; may decrease and resets on restart.",
 		}, []string{"model", "group", "channel"})
 		registry.MustRegister(httpRequests, httpDuration, relayRequests,
-			promptTokens, completionTokens, relayDuration, relayTtft, proxyTtft, proxyConnect, quotaUsed, quotaPerUnit, errorsTotal,
+			promptTokens, completionTokens, relayDuration, relayTtft, proxyTtft, proxyTokenSpeed, proxyConnect, quotaUsed, quotaPerUnit, errorsTotal,
 			channelStatQuota, customerStatQuota, profitQuota)
 	})
 }
@@ -191,12 +197,17 @@ func RecordRelay(model, group, channel, result string,
 
 // RecordProxyTtft records one streaming TTFT sample attributed to the outbound
 // proxy alias that served the request, for TTFT-aware proxy routing dashboards.
-// ttftSeconds must be positive. No-op when metrics are disabled.
-func RecordProxyTtft(channel, proxy, model string, ttftSeconds float64) {
+// ttftSeconds must be positive. When tokenSpeed is positive (prompt_tokens /
+// ttftSeconds), it is also recorded as a rough proxy transport-speed signal for
+// large prompts. No-op when metrics are disabled.
+func RecordProxyTtft(channel, proxy, model string, ttftSeconds, tokenSpeed float64) {
 	if registry == nil || ttftSeconds <= 0 {
 		return
 	}
 	proxyTtft.WithLabelValues(channel, proxy, model).Observe(ttftSeconds)
+	if tokenSpeed > 0 {
+		proxyTokenSpeed.WithLabelValues(channel, proxy, model).Observe(tokenSpeed)
+	}
 }
 
 // RecordProxyConnect records one connection-establish latency sample (dial +

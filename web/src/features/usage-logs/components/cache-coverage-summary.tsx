@@ -104,6 +104,11 @@ export function ByteCacheCoverageSummary(props: {
           'Normalized estimated bytes exclude cache_control and compare independent histories. Actual token hit is shown separately.'
         )}
       </p>
+      <p className='text-muted-foreground'>
+        {t(
+          'Byte-based approximation, not an exact token reconciliation; byte-to-token ratios vary by language and content type. Do not use these figures as a billing reconciliation source.'
+        )}
+      </p>
     </section>
   )
 }

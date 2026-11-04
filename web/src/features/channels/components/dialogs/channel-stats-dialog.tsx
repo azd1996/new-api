@@ -167,6 +167,7 @@ function ProxyRoutingModelBlock(props: ProxyRoutingModelBlockProps) {
             <TableHead>{t('Picks')}</TableHead>
             <TableHead>{t('Samples')}</TableHead>
             <TableHead>{t('Avg TTFT')}</TableHead>
+            <TableHead>{t('Prompt tokens/s')}</TableHead>
             <TableHead>{t('Connect P50')}</TableHead>
             <TableHead>{`${t('Connect P90')} *`}</TableHead>
             <TableHead>{t('Connect P99')}</TableHead>
@@ -191,6 +192,13 @@ function ProxyRoutingModelBlock(props: ProxyRoutingModelBlockProps) {
                 {alias.samples === 0
                   ? '-'
                   : `${Math.round(alias.avg_ttft_ms)} ms`}
+              </TableCell>
+              <TableCell>
+                {alias.token_speed_samples === 0
+                  ? '-'
+                  : t('{{value}} tokens/s', {
+                      value: props.integer.format(alias.avg_token_speed),
+                    })}
               </TableCell>
               <TableCell>
                 {alias.connect_p50_ms > 0

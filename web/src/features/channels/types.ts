@@ -261,6 +261,10 @@ export type ProxyAliasRoutingStat = {
   picks: number
   samples: number
   avg_ttft_ms: number
+  // Mean prompt_tokens/ttft (tokens/sec) across samples with a known prompt
+  // token count; a rough proxy transport-speed signal for large prompts.
+  avg_token_speed: number
+  token_speed_samples: number
   is_tp: boolean
   connect_p50_ms: number
   connect_p90_ms: number

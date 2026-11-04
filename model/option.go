@@ -198,6 +198,10 @@ func InitOptionMap() {
 
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
+	// Options not yet persisted to the DB (fresh install, or the in-code
+	// defaults) never reach handleConfigUpdate above, so run the self-check
+	// once more here to cover that case too.
+	operation_setting.CheckClaudeCacheAffinityCoverage()
 }
 
 func loadOptionsFromDatabase() {
@@ -755,6 +759,24 @@ func handleConfigUpdate(key, value string) bool {
 		// changed alias address does not keep serving a stale endpoint.
 		system_setting.NotifyProxyPoolChanged()
 	}
+	if claudeCacheAffinityCoverageConfigNames[configName] {
+		// A change to either side of the cache/affinity pairing can silently
+		// break Claude prompt-cache hit rates: re-run the coverage self-check.
+		operation_setting.CheckClaudeCacheAffinityCoverage()
+	}
 
 	return true // 已处理
+}
+
+// claudeCacheAffinityCoverageConfigNames lists the config names whose change
+// should re-run operation_setting.CheckClaudeCacheAffinityCoverage: the five
+// global Claude cache-optimization settings, and channel_affinity_setting
+// itself (disabling it, or editing its rules, can also break coverage).
+var claudeCacheAffinityCoverageConfigNames = map[string]bool{
+	"channel_affinity_setting":           true,
+	"extended_cache_ttl_setting":         true,
+	"cache_breakpoint_fix_setting":       true,
+	"stable_base_breakpoint_setting":     true,
+	"fallback_cache_breakpoint_setting":  true,
+	"retain_previous_breakpoint_setting": true,
 }

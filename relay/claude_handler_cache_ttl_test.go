@@ -6,12 +6,22 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+// deleteClaudeCacheBreakpointStateForTest removes a key from the cache
+// backing claude_cache_breakpoint_state.go, so tests that write a breakpoint
+// state under t.Name() do not leak between runs or pollute other tests.
+func deleteClaudeCacheBreakpointStateForTest(t *testing.T, key string) {
+	t.Helper()
+	_, err := getClaudeCacheBreakpointStatesCache().DeleteMany([]string{key})
+	require.NoError(t, err)
+}
 
 func TestRetainedClaudePrefixIdentity(t *testing.T) {
 	const body = `{"model":"claude","messages":[{"role":"user","content":[{"type":"text","text":"first"},{"type":"text","text":"anchor","cache_control":{"type":"ephemeral"}}]}]}`
@@ -52,12 +62,43 @@ func TestResolveClaudeCacheOptimization(t *testing.T) {
 		for _, name := range []string{"claude-sonnet", "alias"} {
 			got := resolveClaudeCacheOptimization(nil, "default", name)
 			assert.Equal(t, operation_setting.ShouldForceExtendedCacheTTL("default", name), got.ForceExtendedTTL.Enabled)
-			fix := operation_setting.ShouldFixCacheBreakpoints("default", name)
-			assert.Equal(t, fix, got.FixVolatileBreakpoint.Enabled)
-			assert.Equal(t, fix, got.StableBaseBreakpoint.Enabled)
-			assert.False(t, got.RetainPreviousBreakpoint.Enabled)
-			assert.False(t, got.FallbackCacheBreakpoint.Enabled, "legacy customers do not opt into fallback")
+			assert.Equal(t, operation_setting.ShouldFixCacheBreakpoints("default", name), got.FixVolatileBreakpoint.Enabled)
+			assert.Equal(t, operation_setting.ShouldUseStableBaseBreakpoint("default", name), got.StableBaseBreakpoint.Enabled)
+			assert.Equal(t, operation_setting.ShouldRetainPreviousBreakpoint("default", name), got.RetainPreviousBreakpoint.Enabled)
+			assert.Equal(t, operation_setting.ShouldUseFallbackCacheBreakpoint("default", name), got.FallbackCacheBreakpoint.Enabled)
 		}
+	})
+	t.Run("global rules are independent, not coupled through fix or diagnostics", func(t *testing.T) {
+		fixSetting := operation_setting.GetCacheBreakpointFixSetting()
+		stableSetting := operation_setting.GetStableBaseBreakpointSetting()
+		retainSetting := operation_setting.GetRetainPreviousBreakpointSetting()
+		fallbackSetting := operation_setting.GetFallbackCacheBreakpointSetting()
+		t.Cleanup(func() {
+			fixSetting.Rules, stableSetting.Rules = nil, nil
+			retainSetting.Rules, fallbackSetting.Rules = nil, nil
+		})
+		// Enable only FixVolatileBreakpoint globally; the rest must stay off.
+		fixSetting.Rules = []operation_setting.GroupModelRule{{Group: "default", Models: []string{"*"}}}
+		got := resolveClaudeCacheOptimization(nil, "default", "claude-sonnet")
+		assert.True(t, got.FixVolatileBreakpoint.Enabled)
+		assert.False(t, got.StableBaseBreakpoint.Enabled, "stable base must not inherit the fix-volatile-breakpoint setting")
+		assert.False(t, got.RetainPreviousBreakpoint.Enabled)
+		assert.False(t, got.FallbackCacheBreakpoint.Enabled)
+
+		// Enabling RetainPreviousBreakpoint globally must not depend on
+		// CacheSkeletonEnabled(), which this test forces off via the env var.
+		require.False(t, model.CacheSkeletonEnabled())
+		retainSetting.Rules = []operation_setting.GroupModelRule{{Group: "default", Models: []string{"*"}}}
+		got = resolveClaudeCacheOptimization(nil, "default", "claude-sonnet")
+		assert.True(t, got.RetainPreviousBreakpoint.Enabled)
+
+		// StableBaseBreakpoint and FallbackCacheBreakpoint each have their own
+		// independent global knob.
+		stableSetting.Rules = []operation_setting.GroupModelRule{{Group: "default", Models: []string{"*"}}}
+		fallbackSetting.Rules = []operation_setting.GroupModelRule{{Group: "default", Models: []string{"*"}}}
+		got = resolveClaudeCacheOptimization(nil, "default", "claude-sonnet")
+		assert.True(t, got.StableBaseBreakpoint.Enabled)
+		assert.True(t, got.FallbackCacheBreakpoint.Enabled)
 	})
 	t.Run("explicit all off", func(t *testing.T) {
 		assert.Equal(t, model.CustomerClaudeCacheOptimization{},
@@ -99,6 +140,28 @@ func TestResolveClaudeCacheOptimization(t *testing.T) {
 		config.FallbackCacheBreakpoint.Enabled = false
 		assert.False(t, resolveClaudeCacheOptimization(config, "default", "custom-alias").FallbackCacheBreakpoint.Enabled)
 	})
+}
+
+// TestClaudeCacheOptimizationConfigured covers the pass-through-mode
+// diagnostic marker: pass-through skips all five cache-optimization rules
+// silently, so a customer's configured policy must only be flagged as skipped
+// when at least one rule would otherwise have run.
+func TestClaudeCacheOptimizationConfigured(t *testing.T) {
+	assert.False(t, claudeCacheOptimizationConfigured(model.CustomerClaudeCacheOptimization{}))
+	for _, tc := range []struct {
+		name   string
+		policy model.CustomerClaudeCacheOptimization
+	}{
+		{"force extended ttl", model.CustomerClaudeCacheOptimization{ForceExtendedTTL: model.CustomerClaudeCacheOptimizationRule{Enabled: true}}},
+		{"fix volatile breakpoint", model.CustomerClaudeCacheOptimization{FixVolatileBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: true}}},
+		{"stable base breakpoint", model.CustomerClaudeCacheOptimization{StableBaseBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: true}}},
+		{"retain previous breakpoint", model.CustomerClaudeCacheOptimization{RetainPreviousBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: true}}},
+		{"fallback cache breakpoint", model.CustomerClaudeCacheOptimization{FallbackCacheBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: true}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.True(t, claudeCacheOptimizationConfigured(tc.policy))
+		})
+	}
 }
 
 func TestClaudeFallbackCacheBreakpoint(t *testing.T) {
@@ -148,6 +211,44 @@ func TestClaudeFallbackCacheBreakpoint(t *testing.T) {
 	}
 }
 
+// TestClaudeFallbackCacheBreakpointSkipsVolatileTail covers a prior gap: the
+// fallback path picked the last cacheable block without checking whether it
+// was a known per-turn-changing reminder, unlike the stable-base and
+// fix-volatile-breakpoint paths. A breakpoint placed there would be a cache
+// write on every turn and never a read.
+func TestClaudeFallbackCacheBreakpointSkipsVolatileTail(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"stable question"},{"type":"text","text":"<total_tokens>9 left</total_tokens>"}]}]}`)
+	out, added, err := addClaudeFallbackCacheBreakpoint(body)
+	require.NoError(t, err)
+	require.True(t, added)
+	assert.Equal(t, "ephemeral", gjson.GetBytes(out, "messages.0.content.0.cache_control.type").String(),
+		"breakpoint should land on the stable block, not the volatile reminder")
+	assert.False(t, gjson.GetBytes(out, "messages.0.content.1.cache_control").Exists())
+}
+
+// TestClaudeVolatileTailPatternsConfigurable covers the admin override of
+// claude_volatile_tail_pattern_setting: a custom marker is recognized, and an
+// empty override falls back to the built-in default.
+func TestClaudeVolatileTailPatternsConfigurable(t *testing.T) {
+	setting, ok := config.GlobalConfig.Get("claude_volatile_tail_pattern_setting").(*operation_setting.ClaudeVolatileTailPatternSetting)
+	require.True(t, ok)
+	t.Cleanup(func() { *setting = operation_setting.ClaudeVolatileTailPatternSetting{} })
+	body := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"stable question"},{"type":"text","text":"custom-reminder-123"}]}]}`)
+
+	out, added, err := addClaudeFallbackCacheBreakpoint(body)
+	require.NoError(t, err)
+	require.True(t, added)
+	assert.True(t, gjson.GetBytes(out, "messages.0.content.1.cache_control").Exists(),
+		"without an override, the custom marker is not recognized as volatile")
+
+	*setting = operation_setting.ClaudeVolatileTailPatternSetting{Patterns: []string{"custom-reminder-"}}
+	out, added, err = addClaudeFallbackCacheBreakpoint(body)
+	require.NoError(t, err)
+	require.True(t, added)
+	assert.Equal(t, "ephemeral", gjson.GetBytes(out, "messages.0.content.0.cache_control.type").String())
+	assert.False(t, gjson.GetBytes(out, "messages.0.content.1.cache_control").Exists())
+}
+
 func TestClaudeRetentionWithoutDiagnostics(t *testing.T) {
 	t.Setenv("CACHE_SKELETON_ENABLED", "false")
 	require.False(t, model.CacheSkeletonEnabled())
@@ -155,11 +256,7 @@ func TestClaudeRetentionWithoutDiagnostics(t *testing.T) {
 	row := buildClaudeCacheSkeleton(body)
 	row.Status, row.CacheCreation = "ok", 1
 	key := t.Name()
-	t.Cleanup(func() {
-		claudeCacheBreakpointStates.Lock()
-		delete(claudeCacheBreakpointStates.items, key)
-		claudeCacheBreakpointStates.Unlock()
-	})
+	t.Cleanup(func() { deleteClaudeCacheBreakpointStateForTest(t, key) })
 	rememberClaudeCacheBreakpointState(key, row)
 	state := getClaudeCacheBreakpointState(key, time.Now())
 	require.NotNil(t, state)
@@ -172,11 +269,7 @@ func TestClaudeRetentionWithoutDiagnostics(t *testing.T) {
 
 func TestClaudeRetentionExpiresEachAnchorAndRejectsOlderSnapshot(t *testing.T) {
 	key := t.Name()
-	t.Cleanup(func() {
-		claudeCacheBreakpointStates.Lock()
-		delete(claudeCacheBreakpointStates.items, key)
-		claudeCacheBreakpointStates.Unlock()
-	})
+	t.Cleanup(func() { deleteClaudeCacheBreakpointStateForTest(t, key) })
 	body := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"a","cache_control":{"type":"ephemeral","ttl":"1h"}},{"type":"text","text":"b","cache_control":{"type":"ephemeral","ttl":"5m"}}]}]}`)
 	row := buildClaudeCacheSkeleton(body)
 	row.Ts = time.Now().Add(-10 * time.Minute)

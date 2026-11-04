@@ -38,3 +38,15 @@ func TestShouldForceExtendedCacheTTL(t *testing.T) {
 		})
 	}
 }
+
+func TestGetClaudeVolatileTailPatterns(t *testing.T) {
+	t.Cleanup(func() { claudeVolatileTailPatternSetting = ClaudeVolatileTailPatternSetting{} })
+
+	claudeVolatileTailPatternSetting = ClaudeVolatileTailPatternSetting{}
+	assert.Equal(t, []string{"<total_tokens>"}, GetClaudeVolatileTailPatterns())
+
+	claudeVolatileTailPatternSetting = ClaudeVolatileTailPatternSetting{
+		Patterns: []string{"<custom_marker>", "<other_marker>"},
+	}
+	assert.Equal(t, []string{"<custom_marker>", "<other_marker>"}, GetClaudeVolatileTailPatterns())
+}

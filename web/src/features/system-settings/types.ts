@@ -403,6 +403,10 @@ export type ProxyHealthEntry = {
   // Aggregate TTFT across every channel/model that used this alias.
   ttft_avg_ms: number
   ttft_samples: number
+  // Mean prompt_tokens/ttft (tokens/sec) across samples with a known prompt
+  // token count; a rough proxy transport-speed signal for large prompts.
+  token_speed_avg: number
+  token_speed_samples: number
 }
 
 export type ProxyHealthResponse = {
@@ -435,7 +439,11 @@ export type OperationsSettings = {
   'extended_cache_ttl_setting.rules': GroupModelRule[]
   'metadata_injection_disable_setting.rules': GroupModelRule[]
   'cache_breakpoint_fix_setting.rules': GroupModelRule[]
+  'stable_base_breakpoint_setting.rules': GroupModelRule[]
+  'fallback_cache_breakpoint_setting.rules': GroupModelRule[]
+  'retain_previous_breakpoint_setting.rules': GroupModelRule[]
   'prompt_cache_key_injection_setting.rules': GroupModelRule[]
+  'claude_volatile_tail_pattern_setting.patterns': string[]
   'client_disconnect_setting.rules': ClientDisconnectRule[]
   'debug_scope_setting.rules': DebugScopeRule[]
   QuotaRemindEnabled: boolean

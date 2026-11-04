@@ -601,6 +601,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 	if upID := resp.Header.Get(upstreamRequestIdHeader); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
+		if c.Writer != nil {
+			c.Writer.Header().Set(common2.UpstreamRequestIdKey, upID)
+		}
 	}
 
 	_ = req.Body.Close()

@@ -43,21 +43,30 @@ const minProxyTtftSeconds = 0.001
 
 // proxyTtftStat is one alias's recent TTFT history for a (channel, model).
 type proxyTtftStat struct {
-	samples []float64 // TTFT seconds, bounded ring
-	badRun  int       // consecutive samples at or above the slow threshold
-	goodRun int       // consecutive samples below the slow threshold
-	picks   int64     // cumulative times this alias was actually selected (this node)
+	samples     []float64 // TTFT seconds, bounded ring
+	tokenSpeeds []float64 // prompt_tokens / TTFT seconds, bounded ring; approximates proxy transport speed for large prompts
+	badRun      int       // consecutive samples at or above the slow threshold
+	goodRun     int       // consecutive samples below the slow threshold
+	picks       int64     // cumulative times this alias was actually selected (this node)
 }
 
 func (s *proxyTtftStat) mean() float64 {
-	if len(s.samples) == 0 {
+	return meanOf(s.samples)
+}
+
+func (s *proxyTtftStat) tokenSpeedMean() float64 {
+	return meanOf(s.tokenSpeeds)
+}
+
+func meanOf(samples []float64) float64 {
+	if len(samples) == 0 {
 		return 0
 	}
 	var sum float64
-	for _, v := range s.samples {
+	for _, v := range samples {
 		sum += v
 	}
-	return sum / float64(len(s.samples))
+	return sum / float64(len(samples))
 }
 
 // proxyModelRouting holds every alias's TTFT stats for one (channel, model) plus
@@ -230,7 +239,11 @@ func buildProxyConnectSnapshot(channelID int, percentileAliases, eligible []stri
 // RecordProxyTTFT feeds one request's streaming TTFT into the per
 // (channel, model, alias) tracker and the Prometheus histogram. ttftSeconds <= 0
 // (non-streaming or no first token observed) and an empty alias are ignored.
-func RecordProxyTTFT(channelID int, model, alias string, ttftSeconds float64) {
+// promptTokens is the request's final prompt/input token count; when positive
+// it also records prompt_tokens/ttft (tokens per second), a rough proxy
+// transport-speed signal for large prompts. promptTokens <= 0 skips that part
+// only, leaving the TTFT sample itself unaffected.
+func RecordProxyTTFT(channelID int, model, alias string, ttftSeconds float64, promptTokens int) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" || ttftSeconds <= 0 {
 		return
@@ -256,9 +269,17 @@ func RecordProxyTTFT(channelID int, model, alias string, ttftSeconds float64) {
 		st.goodRun++
 		st.badRun = 0
 	}
+	var tokenSpeed float64
+	if promptTokens > 0 {
+		tokenSpeed = float64(promptTokens) / ttftSeconds
+		st.tokenSpeeds = append(st.tokenSpeeds, tokenSpeed)
+		if len(st.tokenSpeeds) > cfg.SampleWindow {
+			st.tokenSpeeds = st.tokenSpeeds[len(st.tokenSpeeds)-cfg.SampleWindow:]
+		}
+	}
 	proxyTtftMu.Unlock()
 
-	prommetrics.RecordProxyTtft(strconv.Itoa(channelID), alias, model, ttftSeconds)
+	prommetrics.RecordProxyTtft(strconv.Itoa(channelID), alias, model, ttftSeconds, tokenSpeed)
 }
 
 // pickProxyByTtft chooses one alias from the eligible list (already in priority
@@ -394,8 +415,10 @@ func computeProxyTtftWeightsLocked(r *proxyModelRouting, eligible []string, cfg 
 // ProxyTtftAliasSummary is the UI-facing per-alias TTFT aggregate, averaged
 // across every (channel, model) that used the alias.
 type ProxyTtftAliasSummary struct {
-	AvgMs   float64
-	Samples int
+	AvgMs             float64
+	Samples           int
+	AvgTokenSpeed     float64 // mean prompt_tokens/ttft (tokens/sec) across samples that had a prompt token count
+	TokenSpeedSamples int
 }
 
 // proxyTtftAliasSummaries aggregates TTFT samples per alias across all
@@ -404,8 +427,10 @@ func proxyTtftAliasSummaries() map[string]ProxyTtftAliasSummary {
 	proxyTtftMu.Lock()
 	defer proxyTtftMu.Unlock()
 	type acc struct {
-		sum   float64
-		count int
+		sum             float64
+		count           int
+		tokenSpeedSum   float64
+		tokenSpeedCount int
 	}
 	totals := make(map[string]*acc)
 	for _, r := range proxyTtftState {
@@ -419,6 +444,10 @@ func proxyTtftAliasSummaries() map[string]ProxyTtftAliasSummary {
 				a.sum += v
 				a.count++
 			}
+			for _, v := range st.tokenSpeeds {
+				a.tokenSpeedSum += v
+				a.tokenSpeedCount++
+			}
 		}
 	}
 	out := make(map[string]ProxyTtftAliasSummary, len(totals))
@@ -426,7 +455,12 @@ func proxyTtftAliasSummaries() map[string]ProxyTtftAliasSummary {
 		if a.count == 0 {
 			continue
 		}
-		out[alias] = ProxyTtftAliasSummary{AvgMs: a.sum / float64(a.count) * 1000, Samples: a.count}
+		summary := ProxyTtftAliasSummary{AvgMs: a.sum / float64(a.count) * 1000, Samples: a.count}
+		if a.tokenSpeedCount > 0 {
+			summary.AvgTokenSpeed = a.tokenSpeedSum / float64(a.tokenSpeedCount)
+			summary.TokenSpeedSamples = a.tokenSpeedCount
+		}
+		out[alias] = summary
 	}
 	return out
 }
@@ -472,6 +506,11 @@ type ProxyAliasRoutingStat struct {
 	Picks       int64   `json:"picks"`
 	Samples     int     `json:"samples"`
 	AvgTtftMs   float64 `json:"avg_ttft_ms"`
+	// AvgTokenSpeed is the mean prompt_tokens/ttft (tokens/sec) across samples
+	// that had a known prompt token count; a rough proxy transport-speed signal
+	// for large prompts. Zero when TokenSpeedSamples is zero.
+	AvgTokenSpeed     float64 `json:"avg_token_speed"`
+	TokenSpeedSamples int     `json:"token_speed_samples"`
 	// Connect-latency percentiles (ms) for this (channel, alias), model-independent.
 	// Forward proxies weight by P90; tp proxies are excluded from comparison.
 	ConnectP50Ms float64 `json:"connect_p50_ms"`
@@ -555,6 +594,10 @@ func ProxyTtftChannelStats(channelID int, configuredAliases []string, ttftEnable
 				row.Picks = st.picks
 				row.Samples = len(st.samples)
 				row.AvgTtftMs = st.mean() * 1000
+				if n := len(st.tokenSpeeds); n > 0 {
+					row.AvgTokenSpeed = st.tokenSpeedMean()
+					row.TokenSpeedSamples = n
+				}
 			}
 			rows = append(rows, row)
 		}

@@ -1,6 +1,11 @@
 package operation_setting
 
-import "github.com/QuantumNous/new-api/setting/config"
+import (
+	"regexp"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/config"
+)
 
 type ChannelAffinityKeySource struct {
 	Type string `json:"type"` // context_int, context_string, request_header, gjson
@@ -160,4 +165,73 @@ func init() {
 
 func GetChannelAffinitySetting() *ChannelAffinitySetting {
 	return &channelAffinitySetting
+}
+
+// claudeAffinityProbeModel is a representative Claude model name used only to
+// test whether a configured channel-affinity rule's ModelRegex would match
+// Claude traffic. It is not a real request.
+const claudeAffinityProbeModel = "claude-sonnet-4-5"
+
+// channelAffinityRegexMatchesAny reports whether any pattern matches s. Used
+// here only for the startup/config-change self-check below; the hot request
+// path has its own cached matcher in service/channel_affinity.go.
+func channelAffinityRegexMatchesAny(patterns []string, s string) bool {
+	for _, pattern := range patterns {
+		if re, err := regexp.Compile(pattern); err == nil && re.MatchString(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// channelAffinityCoversClaudeModels reports whether channel affinity is
+// enabled and has at least one rule that would match Claude model traffic.
+func channelAffinityCoversClaudeModels() bool {
+	if !channelAffinitySetting.Enabled {
+		return false
+	}
+	for _, rule := range channelAffinitySetting.Rules {
+		if channelAffinityRegexMatchesAny(rule.ModelRegex, claudeAffinityProbeModel) {
+			return true
+		}
+	}
+	return false
+}
+
+// claudeCacheOptimizationGloballyConfigured reports whether any of the global
+// Claude cache-optimization settings has at least one (group, model) rule.
+// Customer-level overrides (model.CustomerClaudeCacheOptimization) are not
+// visible from this package and are intentionally not checked here.
+func claudeCacheOptimizationGloballyConfigured() bool {
+	return len(extendedCacheTTLSetting.Rules) > 0 ||
+		len(cacheBreakpointFixSetting.Rules) > 0 ||
+		len(stableBaseBreakpointSetting.Rules) > 0 ||
+		len(fallbackCacheBreakpointSetting.Rules) > 0 ||
+		len(retainPreviousBreakpointSetting.Rules) > 0
+}
+
+// CheckClaudeCacheAffinityCoverage warns when a Claude prompt-cache
+// optimization rule is configured globally but no enabled channel-affinity
+// rule would route Claude traffic to a sticky upstream channel/key. Cache
+// hits depend on consecutive turns of the same session landing on the same
+// upstream; without affinity, the configured optimization's effective hit
+// rate is likely near zero regardless of how aggressively breakpoints are
+// placed. This is a best-effort heuristic against a representative model
+// name, not a guarantee: a customer-level override or a model-specific
+// affinity rule this probe does not match can still leave a real gap, or
+// close one this check flags.
+func CheckClaudeCacheAffinityCoverage() {
+	if !claudeCacheOptimizationGloballyConfigured() {
+		return
+	}
+	if channelAffinityCoversClaudeModels() {
+		return
+	}
+	common.SysLog(common.LogText(
+		"warning: a global Claude prompt-cache optimization rule (extended_cache_ttl_setting, " +
+			"cache_breakpoint_fix_setting, stable_base_breakpoint_setting, fallback_cache_breakpoint_setting " +
+			"or retain_previous_breakpoint_setting) is configured, but channel_affinity_setting has no enabled " +
+			"rule matching Claude models; cache hits depend on repeat requests landing on the same upstream " +
+			"channel/key, so the cache optimization's effective hit rate may be near zero until affinity is " +
+			"configured to cover Claude traffic"))
 }

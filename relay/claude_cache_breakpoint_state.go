@@ -6,7 +6,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/hot"
+
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/cachex"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
@@ -22,14 +26,41 @@ type claudeCacheBreakpointState struct {
 	Expires   time.Time
 }
 
-const claudeCacheBreakpointStateLimit = 4096
+const (
+	claudeCacheBreakpointStateLimit     = 4096
+	claudeCacheBreakpointStateNamespace = "new-api:claude_cache_breakpoint_state:v1"
+)
 
-var claudeCacheBreakpointStates = struct {
-	sync.Mutex
-	items     map[string]claudeCacheBreakpointState
-	nextSweep time.Time
-}{
-	items: make(map[string]claudeCacheBreakpointState),
+// claudeCacheBreakpointStates is a Redis-backed cache when Redis is enabled,
+// falling back to a process-local, capacity-bounded cache otherwise. A
+// process-local cache only lets a retained breakpoint survive across requests
+// that land on the same instance: on a multi-instance deployment it reflects
+// state this instance alone wrote, not a global view, unless Redis is
+// enabled or the load balancer keeps a session on one instance.
+var claudeCacheBreakpointStatesOnce sync.Once
+var claudeCacheBreakpointStatesCache *cachex.HybridCache[claudeCacheBreakpointState]
+
+func getClaudeCacheBreakpointStatesCache() *cachex.HybridCache[claudeCacheBreakpointState] {
+	claudeCacheBreakpointStatesOnce.Do(func() {
+		claudeCacheBreakpointStatesCache = cachex.NewHybridCache[claudeCacheBreakpointState](cachex.HybridCacheConfig[claudeCacheBreakpointState]{
+			Namespace: cachex.Namespace(claudeCacheBreakpointStateNamespace),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[claudeCacheBreakpointState]{},
+			Memory: func() *hot.HotCache[string, claudeCacheBreakpointState] {
+				return hot.NewHotCache[string, claudeCacheBreakpointState](hot.LRU, claudeCacheBreakpointStateLimit).
+					// WithTTL only sets the janitor's sweep interval and the
+					// default used by Set(); every write here goes through
+					// SetWithTTL with its own per-entry expiry instead.
+					WithTTL(5 * time.Minute).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return claudeCacheBreakpointStatesCache
 }
 
 // The caller scopes this key with the trace customer ID.
@@ -48,43 +79,15 @@ func claudeCacheBreakpointStateKey(info *relaycommon.RelayInfo, row *model.Cache
 	}, "\x1f")
 }
 
-// sweepClaudeCacheBreakpointStates runs under the state lock, at most once per
-// minute of activity. Idle stores remain bounded by the hard entry limit.
-func sweepClaudeCacheBreakpointStates(now time.Time) {
-	if now.Before(claudeCacheBreakpointStates.nextSweep) {
-		return
-	}
-	for key, state := range claudeCacheBreakpointStates.items {
-		if !now.Before(state.Expires) {
-			delete(claudeCacheBreakpointStates.items, key)
-		}
-	}
-	claudeCacheBreakpointStates.nextSweep = now.Add(time.Minute)
-}
-
 func getClaudeCacheBreakpointState(key string, now time.Time) *claudeCacheBreakpointState {
 	if key == "" {
 		return nil
 	}
-	claudeCacheBreakpointStates.Lock()
-	defer claudeCacheBreakpointStates.Unlock()
-	sweepClaudeCacheBreakpointStates(now)
-	state, ok := claudeCacheBreakpointStates.items[key]
-	if !ok || !now.Before(state.Expires) {
-		delete(claudeCacheBreakpointStates.items, key)
+	state, found, err := getClaudeCacheBreakpointStatesCache().Get(key)
+	if err != nil || !found || !now.Before(state.Expires) {
 		return nil
 	}
-	return &claudeCacheBreakpointState{
-		ParamFp:   state.ParamFp,
-		Ts:        state.Ts,
-		BlkHash:   append([]uint64(nil), state.BlkHash...),
-		BlkKind:   append([]string(nil), state.BlkKind...),
-		MsgStart:  append([]uint16(nil), state.MsgStart...),
-		BpIdx:     append([]uint16(nil), state.BpIdx...),
-		BpTtl:     append([]string(nil), state.BpTtl...),
-		BpExpires: append([]time.Time(nil), state.BpExpires...),
-		Expires:   state.Expires,
-	}
+	return &state
 }
 
 func rememberClaudeCacheBreakpointState(key string, row *model.CacheSkeleton) {
@@ -138,23 +141,20 @@ func rememberClaudeCacheBreakpointState(key string, row *model.CacheSkeleton) {
 			state.MsgStart = append(state.MsgStart, start)
 		}
 	}
-	claudeCacheBreakpointStates.Lock()
-	defer claudeCacheBreakpointStates.Unlock()
-	sweepClaudeCacheBreakpointStates(now)
-	if previous, ok := claudeCacheBreakpointStates.items[key]; ok {
-		if row.Ts.Before(previous.Ts) {
-			return
-		}
-	} else if len(claudeCacheBreakpointStates.items) >= claudeCacheBreakpointStateLimit {
-		// Evict the snapshot that expires first; capacity never grows.
-		oldestKey := ""
-		var oldest time.Time
-		for candidate, previous := range claudeCacheBreakpointStates.items {
-			if oldest.IsZero() || previous.Expires.Before(oldest) {
-				oldestKey, oldest = candidate, previous.Expires
-			}
-		}
-		delete(claudeCacheBreakpointStates.items, oldestKey)
+
+	cache := getClaudeCacheBreakpointStatesCache()
+	ttl := time.Until(state.Expires)
+	if ttl <= 0 {
+		return
 	}
-	claudeCacheBreakpointStates.items[key] = state
+	// A newer write for the same key must not be clobbered by a stale,
+	// slower-arriving request still in flight for an older attempt. This
+	// read-modify-write is not atomic against a concurrent writer on another
+	// instance when Redis is enabled; losing that narrow race only means an
+	// older snapshot is kept a little longer; it never serves a snapshot
+	// newer than what was actually written.
+	if previous, found, err := cache.Get(key); err == nil && found && row.Ts.Before(previous.Ts) {
+		return
+	}
+	_ = cache.SetWithTTL(key, state, ttl)
 }

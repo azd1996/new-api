@@ -370,6 +370,17 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
                                   {health.ttft_samples})
                                 </span>
                               )}
+                              {health && health.token_speed_samples > 0 && (
+                                <span className='text-muted-foreground'>
+                                  {t('Prompt tokens/s')}:{' '}
+                                  {t('{{value}} tokens/s', {
+                                    value: Math.round(
+                                      health.token_speed_avg
+                                    ),
+                                  })}{' '}
+                                  ({health.token_speed_samples})
+                                </span>
+                              )}
                             </>
                           )
                         })()}

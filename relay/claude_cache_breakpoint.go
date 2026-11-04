@@ -9,6 +9,8 @@ import (
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
 const (
@@ -20,12 +22,12 @@ const (
 
 	cacheBreakpointAdded = "added"
 	cacheBreakpointMoved = "moved"
+	// cacheBreakpointPassThrough marks a skeleton recorded while the request
+	// body was forwarded unmodified (pass-through mode): none of the customer
+	// or global cache-optimization rules below ran, even when configured, so
+	// this is not silently indistinguishable from "no breakpoint changed".
+	cacheBreakpointPassThrough = "pass_through"
 )
-
-// claudeVolatileTailPatterns mark a trailing reminder whose text changes every
-// turn (Claude Code's per-turn token budget), so a breakpoint on it is never
-// read back.
-var claudeVolatileTailPatterns = []string{"<total_tokens>"}
 
 // prepareClaudeTurnScopedMessages makes clear_at messages valid upstream: the
 // beta header is required, and a turn-scoped (next_user_message) message may
@@ -85,6 +87,14 @@ func claudeCacheableBlock(block gjson.Result) bool {
 	return true
 }
 
+// claudeClearAtCacheable reports whether a message's clear_at value still
+// permits a breakpoint: absent, or "never" (which the API never clears).
+// Any other value scopes the message to the current turn, and a breakpoint
+// placed there would be stripped by prepareClaudeTurnScopedMessages anyway.
+func claudeClearAtCacheable(clearAt gjson.Result) bool {
+	return !clearAt.Exists() || clearAt.String() == "never"
+}
+
 // lastClaudeCacheableBlock finds the last block of message msg before block
 // index `before` (len(content) for the whole message) that may carry a
 // breakpoint.
@@ -100,6 +110,17 @@ func lastClaudeCacheableBlock(messages gjson.Result, msg, before int) (claudeBlo
 		}
 	}
 	return claudeBlockRef{}, false
+}
+
+// claudeTextHasVolatilePattern reports whether text matches a configured
+// per-turn-changing reminder marker (operation_setting.GetClaudeVolatileTailPatterns).
+func claudeTextHasVolatilePattern(text string) bool {
+	for _, pattern := range operation_setting.GetClaudeVolatileTailPatterns() {
+		if pattern != "" && strings.Contains(text, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // addClaudeFallbackCacheBreakpoint opts an otherwise unmarked prompt into caching.
@@ -129,11 +150,8 @@ func addClaudeFallbackCacheBreakpoint(body []byte) ([]byte, bool, error) {
 	for i := len(refs) - 1; i >= 0; i-- {
 		ref := refs[i]
 		path := ref.path()
-		if ref.prefix == "" {
-			clearAt := messages[ref.msg].Get("clear_at")
-			if clearAt.Exists() && clearAt.String() != "never" {
-				continue
-			}
+		if ref.prefix == "" && !claudeClearAtCacheable(messages[ref.msg].Get("clear_at")) {
+			continue
 		}
 		if ref.block < 0 {
 			path = ref.prefix
@@ -142,6 +160,9 @@ func addClaudeFallbackCacheBreakpoint(body []byte) ([]byte, bool, error) {
 			}
 			text := root.Get(path)
 			if text.Type != gjson.String || text.String() == "" {
+				continue
+			}
+			if claudeTextHasVolatilePattern(text.String()) {
 				continue
 			}
 			block, err := sjson.Set(`{"type":"text"}`, "text", text.String())
@@ -153,7 +174,8 @@ func addClaudeFallbackCacheBreakpoint(body []byte) ([]byte, bool, error) {
 				return body, false, err
 			}
 			path += ".0"
-		} else if block := root.Get(path); !block.IsObject() || !claudeCacheableBlock(block) {
+		} else if block := root.Get(path); !block.IsObject() || !claudeCacheableBlock(block) ||
+			claudeTextHasVolatilePattern(block.Get("text").String()) {
 			continue
 		}
 		out, err := sjson.SetRawBytes(body, path+".cache_control",
@@ -189,11 +211,11 @@ func addClaudeStableBaseBreakpoint(body []byte) ([]byte, bool, error) {
 		// Do not skip a dynamic leading block and call a later block stable.
 		first := system.Get("0")
 		if first.IsObject() && claudeCacheableBlock(first) &&
-			!strings.Contains(first.Get("text").String(), "<total_tokens>") {
+			!claudeTextHasVolatilePattern(first.Get("text").String()) {
 			path = "system.0"
 		}
 	} else if system.Type == gjson.String && system.String() != "" &&
-		!strings.Contains(system.String(), "<total_tokens>") {
+		!claudeTextHasVolatilePattern(system.String()) {
 		block, err := sjson.Set(`{"type":"text"}`, "text", system.String())
 		if err != nil {
 			return body, false, err
@@ -244,10 +266,8 @@ func fixClaudeCacheBreakpoints(jsonData []byte) ([]byte, string, error) {
 			if block.Get("cache_control").IsObject() {
 				tail = claudeBlockRef{msg: lastIdx, block: j}
 			}
-			for _, pattern := range claudeVolatileTailPatterns {
-				if strings.Contains(block.Get("text").String(), pattern) {
-					volatileText = true
-				}
+			if claudeTextHasVolatilePattern(block.Get("text").String()) {
+				volatileText = true
 			}
 		}
 	}
@@ -367,7 +387,7 @@ func retainClaudeCacheBreakpoints(jsonData []byte, previous *claudeCacheBreakpoi
 		if !claudeCacheableBlock(gjson.GetBytes(jsonData, refs[index].path())) {
 			continue
 		}
-		if refs[index].prefix == "" && gjson.GetBytes(jsonData, fmt.Sprintf("messages.%d.clear_at", refs[index].msg)).Exists() {
+		if refs[index].prefix == "" && !claudeClearAtCacheable(gjson.GetBytes(jsonData, fmt.Sprintf("messages.%d.clear_at", refs[index].msg))) {
 			continue
 		}
 		if gjson.GetBytes(jsonData, path).IsObject() {

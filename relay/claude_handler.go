@@ -122,6 +122,16 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if model.CacheSkeletonEnabled() {
 			if raw, err := storage.Bytes(); err == nil {
 				cacheSkeleton = buildClaudeCacheSkeleton(raw)
+				// Pass-through mode forwards the body unmodified: none of the
+				// cache-optimization rules below ran. Flag it only when a
+				// policy was actually configured, so an operator comparing
+				// this customer's Fixed column against their configured
+				// rules does not read silence as "nothing to do".
+				policy := resolveClaudeCacheOptimization(
+					model.GetCustomerClaudeCacheOptimization(cacheCustomerID), claudeRequestGroup(c), cacheSkeleton.Model)
+				if claudeCacheOptimizationConfigured(policy) {
+					cacheSkeleton.Fixed = cacheBreakpointPassThrough
+				}
 			}
 		}
 		requestBody = common.NewReplayableBodyReader(storage)
@@ -145,12 +155,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		// Resolve the request's using-group (auto cross-group retry resolves to
 		// the concrete group) and the outbound model once, for the group+model
 		// gated Claude behaviors below.
-		claudeGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-		if claudeGroup == "auto" {
-			if ag := common.GetContextKeyString(c, constant.ContextKeyAutoGroup); ag != "" {
-				claudeGroup = ag
-			}
-		}
+		claudeGroup := claudeRequestGroup(c)
 		claudeModel := gjson.GetBytes(jsonData, "model").String()
 
 		// Remember whether the client supplied its own metadata.user_id, so the
@@ -201,35 +206,38 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		// For configured (group, model) rules, move a breakpoint that sits on a
 		// volatile trailing reminder onto the last stable block before it. Runs
 		// before the forced TTL so a new breakpoint is raised to 1h as well.
+		// Each step below is a best-effort optimization: the request is already
+		// protocol-valid without it, so a step's own error is logged and the
+		// step is skipped rather than failing the whole request.
 		cacheBreakpointFix := ""
 		if cachePolicy.FallbackCacheBreakpoint.Enabled {
-			var fallbackAdded bool
-			jsonData, fallbackAdded, err = addClaudeFallbackCacheBreakpoint(jsonData)
-			if err != nil {
-				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-			}
-			if fallbackAdded {
-				cacheBreakpointFix = cacheBreakpointAdded
+			if out, fallbackAdded, ferr := addClaudeFallbackCacheBreakpoint(jsonData); ferr != nil {
+				logClaudeCacheStepError(c, "fallback_cache_breakpoint", ferr)
+			} else {
+				jsonData = out
+				if fallbackAdded {
+					cacheBreakpointFix = cacheBreakpointAdded
+				}
 			}
 		}
 		if cachePolicy.FixVolatileBreakpoint.Enabled {
-			var volatileFix string
-			jsonData, volatileFix, err = fixClaudeCacheBreakpoints(jsonData)
-			if err != nil {
-				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-			}
-			if volatileFix != "" {
-				cacheBreakpointFix = volatileFix
+			if out, volatileFix, ferr := fixClaudeCacheBreakpoints(jsonData); ferr != nil {
+				logClaudeCacheStepError(c, "fix_volatile_breakpoint", ferr)
+			} else {
+				jsonData = out
+				if volatileFix != "" {
+					cacheBreakpointFix = volatileFix
+				}
 			}
 		}
 		if cachePolicy.StableBaseBreakpoint.Enabled {
-			var baseAdded bool
-			jsonData, baseAdded, err = addClaudeStableBaseBreakpoint(jsonData)
-			if err != nil {
-				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-			}
-			if baseAdded && cacheBreakpointFix == "" {
-				cacheBreakpointFix = cacheBreakpointAdded
+			if out, baseAdded, ferr := addClaudeStableBaseBreakpoint(jsonData); ferr != nil {
+				logClaudeCacheStepError(c, "stable_base_breakpoint", ferr)
+			} else {
+				jsonData = out
+				if baseAdded && cacheBreakpointFix == "" {
+					cacheBreakpointFix = cacheBreakpointAdded
+				}
 			}
 		}
 		if retainPreviousBreakpoint {
@@ -241,9 +249,10 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 			previous := getClaudeCacheBreakpointState(key, time.Now())
 			if previous != nil {
-				jsonData, _, err = retainClaudeCacheBreakpoints(jsonData, previous)
-				if err != nil {
-					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+				if out, _, ferr := retainClaudeCacheBreakpoints(jsonData, previous); ferr != nil {
+					logClaudeCacheStepError(c, "retain_previous_breakpoint", ferr)
+				} else {
+					jsonData = out
 				}
 			}
 		}
@@ -339,16 +348,39 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	return nil
 }
 
+// logClaudeCacheStepError records a prompt-cache optimization step's failure.
+// These steps are best-effort: the request is already protocol-valid before
+// they run, so a step's error is logged and the step is skipped rather than
+// failing the whole request.
+func logClaudeCacheStepError(c *gin.Context, step string, err error) {
+	logger.LogError(c, common.LogText("claude cache optimization step %s failed: %s", step, err.Error()))
+}
+
+// claudeRequestGroup resolves the request's using-group for group+model gated
+// Claude behaviors: auto cross-group retry resolves to the concrete group.
+func claudeRequestGroup(c *gin.Context) string {
+	group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	if group == "auto" {
+		if ag := common.GetContextKeyString(c, constant.ContextKeyAutoGroup); ag != "" {
+			group = ag
+		}
+	}
+	return group
+}
+
 // resolveClaudeCacheOptimization turns the customer's complete override into
-// independent decisions for this model. Only an absent override inherits globals.
+// independent decisions for this model. Only an absent override inherits
+// globals, and each of the five rules has its own independent global setting
+// (operation_setting.Should*): an operator enabling one does not implicitly
+// enable another.
 func resolveClaudeCacheOptimization(config *model.CustomerClaudeCacheOptimization, group, modelName string) model.CustomerClaudeCacheOptimization {
 	if config == nil {
-		fix := operation_setting.ShouldFixCacheBreakpoints(group, modelName)
 		return model.CustomerClaudeCacheOptimization{
 			ForceExtendedTTL:         model.CustomerClaudeCacheOptimizationRule{Enabled: operation_setting.ShouldForceExtendedCacheTTL(group, modelName)},
-			FixVolatileBreakpoint:    model.CustomerClaudeCacheOptimizationRule{Enabled: fix},
-			StableBaseBreakpoint:     model.CustomerClaudeCacheOptimizationRule{Enabled: fix},
-			RetainPreviousBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: model.CacheSkeletonEnabled()},
+			FixVolatileBreakpoint:    model.CustomerClaudeCacheOptimizationRule{Enabled: operation_setting.ShouldFixCacheBreakpoints(group, modelName)},
+			StableBaseBreakpoint:     model.CustomerClaudeCacheOptimizationRule{Enabled: operation_setting.ShouldUseStableBaseBreakpoint(group, modelName)},
+			RetainPreviousBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: operation_setting.ShouldRetainPreviousBreakpoint(group, modelName)},
+			FallbackCacheBreakpoint:  model.CustomerClaudeCacheOptimizationRule{Enabled: operation_setting.ShouldUseFallbackCacheBreakpoint(group, modelName)},
 		}
 	}
 	return model.CustomerClaudeCacheOptimization{
@@ -358,6 +390,15 @@ func resolveClaudeCacheOptimization(config *model.CustomerClaudeCacheOptimizatio
 		RetainPreviousBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: config.RetainPreviousBreakpoint.Matches(modelName)},
 		FallbackCacheBreakpoint:  model.CustomerClaudeCacheOptimizationRule{Enabled: config.FallbackCacheBreakpoint.Matches(modelName)},
 	}
+}
+
+// claudeCacheOptimizationConfigured reports whether any of the five rules is
+// enabled, i.e. whether skipping them (pass-through mode) actually skips
+// configured behavior rather than a no-op.
+func claudeCacheOptimizationConfigured(policy model.CustomerClaudeCacheOptimization) bool {
+	return policy.ForceExtendedTTL.Enabled || policy.FixVolatileBreakpoint.Enabled ||
+		policy.StableBaseBreakpoint.Enabled || policy.RetainPreviousBreakpoint.Enabled ||
+		policy.FallbackCacheBreakpoint.Enabled
 }
 
 // claudeDerivedDeviceIDLen is the number of trailing API-key characters used as

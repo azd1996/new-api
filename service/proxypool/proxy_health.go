@@ -47,6 +47,10 @@ type ProxyAliasStatus struct {
 	// samples means TTFT routing has not observed this alias yet.
 	TtftAvgMs   float64 `json:"ttft_avg_ms"`
 	TtftSamples int     `json:"ttft_samples"`
+	// Mean prompt_tokens/ttft (tokens/sec) across samples with a known prompt
+	// token count; a rough proxy transport-speed signal for large prompts.
+	TokenSpeedAvg     float64 `json:"token_speed_avg"`
+	TokenSpeedSamples int     `json:"token_speed_samples"`
 }
 
 type proxyHealth struct {
@@ -226,6 +230,8 @@ func ProxyHealthSnapshot() []ProxyAliasStatus {
 		if t, ok := ttftByAlias[alias]; ok {
 			s.TtftAvgMs = t.AvgMs
 			s.TtftSamples = t.Samples
+			s.TokenSpeedAvg = t.AvgTokenSpeed
+			s.TokenSpeedSamples = t.TokenSpeedSamples
 		}
 		out = append(out, s)
 	}

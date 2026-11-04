@@ -119,6 +119,11 @@ export function CacheLossBreakdown(props: { summary?: SkeletonLossSummary }) {
           'Channel switches show correlation, not a confirmed cache-domain change. Concurrent overlap uses a conservative end-time bound. Upstream gaps are unexplained estimates, not proof of upstream fault.'
         )}
       </p>
+      <p className='text-muted-foreground'>
+        {t(
+          'Byte-based approximation, not an exact token reconciliation; byte-to-token ratios vary by language and content type. Do not use these figures as a billing reconciliation source.'
+        )}
+      </p>
     </section>
   )
 }

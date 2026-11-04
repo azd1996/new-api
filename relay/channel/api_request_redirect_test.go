@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -85,4 +86,57 @@ func TestDoRequestReturnsUpstreamRedirectWithoutFollowing(t *testing.T) {
 	}
 
 	assert.Equal(t, originalRedirectPolicy, reflect.ValueOf(sharedClient.CheckRedirect).Pointer(), "the cached client must not be mutated")
+}
+
+func TestDoRequestSetsUpstreamRequestIdResponseHeader(t *testing.T) {
+	service.InitHttpClient()
+	gin.SetMode(gin.TestMode)
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(common.RequestIdKey, "upstream-id-123")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer source.Close()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
+
+	req, err := http.NewRequest(http.MethodPost, source.URL, bytes.NewReader(nil))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	resp, err := doRequest(ctx, req, info)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, "upstream-id-123", ctx.GetString(common.UpstreamRequestIdKey))
+	assert.Equal(t, "upstream-id-123", ctx.Writer.Header().Get(common.UpstreamRequestIdKey))
+}
+
+func TestDoRequestUsesConfiguredUpstreamRequestIdHeader(t *testing.T) {
+	service.InitHttpClient()
+	gin.SetMode(gin.TestMode)
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Custom-Request-Id", "custom-id-456")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer source.Close()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
+
+	req, err := http.NewRequest(http.MethodPost, source.URL, bytes.NewReader(nil))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	info.ChannelSetting.UpstreamRequestIdHeader = "X-Custom-Request-Id"
+
+	resp, err := doRequest(ctx, req, info)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, "custom-id-456", ctx.GetString(common.UpstreamRequestIdKey))
+	assert.Equal(t, "custom-id-456", ctx.Writer.Header().Get(common.UpstreamRequestIdKey))
 }

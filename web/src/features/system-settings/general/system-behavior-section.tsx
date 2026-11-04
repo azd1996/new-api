@@ -48,6 +48,7 @@ import type {
   DebugScopeRule,
   GroupModelRule,
 } from '../types'
+import { ClaudeVolatileTailPatternsField } from './claude-volatile-tail-patterns-field'
 import { ClientDisconnectRulesField } from './client-disconnect-rules-field'
 import { DebugScopeRulesField } from './debug-scope-rules-field'
 import { GroupModelRulesField } from './group-model-rules-field'
@@ -67,7 +68,11 @@ type SystemBehaviorSectionProps = {
     'extended_cache_ttl_setting.rules': GroupModelRule[]
     'metadata_injection_disable_setting.rules': GroupModelRule[]
     'cache_breakpoint_fix_setting.rules': GroupModelRule[]
+    'stable_base_breakpoint_setting.rules': GroupModelRule[]
+    'fallback_cache_breakpoint_setting.rules': GroupModelRule[]
+    'retain_previous_breakpoint_setting.rules': GroupModelRule[]
     'prompt_cache_key_injection_setting.rules': GroupModelRule[]
+    'claude_volatile_tail_pattern_setting.patterns': string[]
     'client_disconnect_setting.rules': ClientDisconnectRule[]
     'debug_scope_setting.rules': DebugScopeRule[]
   }
@@ -101,8 +106,20 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
   const [breakpointFixRules, setBreakpointFixRules] = useState(
     props.defaultValues['cache_breakpoint_fix_setting.rules']
   )
+  const [stableBaseRules, setStableBaseRules] = useState(
+    props.defaultValues['stable_base_breakpoint_setting.rules']
+  )
+  const [fallbackBreakpointRules, setFallbackBreakpointRules] = useState(
+    props.defaultValues['fallback_cache_breakpoint_setting.rules']
+  )
+  const [retainPreviousRules, setRetainPreviousRules] = useState(
+    props.defaultValues['retain_previous_breakpoint_setting.rules']
+  )
   const [promptCacheKeyRules, setPromptCacheKeyRules] = useState(
     props.defaultValues['prompt_cache_key_injection_setting.rules']
+  )
+  const [volatileTailPatterns, setVolatileTailPatterns] = useState(
+    props.defaultValues['claude_volatile_tail_pattern_setting.patterns']
   )
   const [clientDisconnectRules, setClientDisconnectRules] = useState(
     props.defaultValues['client_disconnect_setting.rules']
@@ -121,8 +138,20 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
     setBreakpointFixRules(
       props.defaultValues['cache_breakpoint_fix_setting.rules']
     )
+    setStableBaseRules(
+      props.defaultValues['stable_base_breakpoint_setting.rules']
+    )
+    setFallbackBreakpointRules(
+      props.defaultValues['fallback_cache_breakpoint_setting.rules']
+    )
+    setRetainPreviousRules(
+      props.defaultValues['retain_previous_breakpoint_setting.rules']
+    )
     setPromptCacheKeyRules(
       props.defaultValues['prompt_cache_key_injection_setting.rules']
+    )
+    setVolatileTailPatterns(
+      props.defaultValues['claude_volatile_tail_pattern_setting.patterns']
     )
     setClientDisconnectRules(
       props.defaultValues['client_disconnect_setting.rules']
@@ -179,6 +208,45 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
       })
     }
 
+    const stableBaseSerialized = JSON.stringify(stableBaseRules)
+    if (
+      stableBaseSerialized !==
+      JSON.stringify(props.defaultValues['stable_base_breakpoint_setting.rules'])
+    ) {
+      updates.push({
+        key: 'stable_base_breakpoint_setting.rules',
+        value: stableBaseSerialized,
+      })
+    }
+
+    const fallbackBreakpointSerialized = JSON.stringify(
+      fallbackBreakpointRules
+    )
+    if (
+      fallbackBreakpointSerialized !==
+      JSON.stringify(
+        props.defaultValues['fallback_cache_breakpoint_setting.rules']
+      )
+    ) {
+      updates.push({
+        key: 'fallback_cache_breakpoint_setting.rules',
+        value: fallbackBreakpointSerialized,
+      })
+    }
+
+    const retainPreviousSerialized = JSON.stringify(retainPreviousRules)
+    if (
+      retainPreviousSerialized !==
+      JSON.stringify(
+        props.defaultValues['retain_previous_breakpoint_setting.rules']
+      )
+    ) {
+      updates.push({
+        key: 'retain_previous_breakpoint_setting.rules',
+        value: retainPreviousSerialized,
+      })
+    }
+
     const promptCacheKeySerialized = JSON.stringify(promptCacheKeyRules)
     if (
       promptCacheKeySerialized !==
@@ -189,6 +257,21 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
       updates.push({
         key: 'prompt_cache_key_injection_setting.rules',
         value: promptCacheKeySerialized,
+      })
+    }
+
+    const volatileTailPatternsSerialized = JSON.stringify(
+      volatileTailPatterns
+    )
+    if (
+      volatileTailPatternsSerialized !==
+      JSON.stringify(
+        props.defaultValues['claude_volatile_tail_pattern_setting.patterns']
+      )
+    ) {
+      updates.push({
+        key: 'claude_volatile_tail_pattern_setting.patterns',
+        value: volatileTailPatternsSerialized,
       })
     }
 
@@ -394,10 +477,42 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
             <GroupModelRulesField
               label={t('Fix Misplaced Cache Breakpoints')}
               description={t(
-                'For the listed group and model combinations (Claude), move a prompt-cache breakpoint placed on a volatile trailing reminder (such as <total_tokens>) onto the last stable block before it. Leave empty to disable.'
+                'For the listed group and model combinations (Claude), move a prompt-cache breakpoint placed on a volatile trailing reminder (such as <total_tokens>) onto the last stable block before it. Leave empty to disable. Independent of Stable Base Breakpoint below.'
               )}
               value={breakpointFixRules}
               onChange={setBreakpointFixRules}
+            />
+
+            <GroupModelRulesField
+              label={t('Stable Base Breakpoint')}
+              description={t(
+                'For the listed group and model combinations (Claude), add an independent cache breakpoint protecting the tools/system prefix, regardless of growing message history. Leave empty to disable. Independent of Fix Misplaced Cache Breakpoints above.'
+              )}
+              value={stableBaseRules}
+              onChange={setStableBaseRules}
+            />
+
+            <GroupModelRulesField
+              label={t('Fallback Cache Breakpoint')}
+              description={t(
+                'For the listed group and model combinations (Claude), add a cache breakpoint when the request carries no cache marker at all. Leave empty to disable.'
+              )}
+              value={fallbackBreakpointRules}
+              onChange={setFallbackBreakpointRules}
+            />
+
+            <GroupModelRulesField
+              label={t('Retain Previous Cache Breakpoint')}
+              description={t(
+                'For the listed group and model combinations (Claude), restore the previous turn’s cache breakpoint when the matching prefix is unchanged. Leave empty to disable. Independent of whether cache diagnostics logging is on.'
+              )}
+              value={retainPreviousRules}
+              onChange={setRetainPreviousRules}
+            />
+
+            <ClaudeVolatileTailPatternsField
+              value={volatileTailPatterns}
+              onChange={setVolatileTailPatterns}
             />
 
             <GroupModelRulesField

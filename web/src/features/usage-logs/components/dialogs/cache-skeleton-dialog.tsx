@@ -56,6 +56,12 @@ function SkeletonAttempt(props: { item: CacheSkeleton; showAttempt: boolean }) {
       ? `${((item.cache_read / totalInput) * 100).toFixed(1)}%`
       : '—'
   const groups = buildSkeletonGroups(item)
+  const fixedLabels: Record<string, string> = {
+    added: t('Added'),
+    moved: t('Moved'),
+    pass_through: t('Skipped: pass-through mode'),
+  }
+  const fixedLabel = item.fixed ? (fixedLabels[item.fixed] ?? item.fixed) : '-'
 
   return (
     <section className='space-y-2'>
@@ -87,7 +93,7 @@ function SkeletonAttempt(props: { item: CacheSkeleton; showAttempt: boolean }) {
           <div>
             {t('Breakpoints')} {item.bp_idx.length} (
             {item.bp_ttl.join(', ') || '-'}) · {t('Gateway rewrite')}{' '}
-            {item.fixed || '-'}
+            {fixedLabel}
           </div>
         )}
         <div>
