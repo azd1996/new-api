@@ -116,20 +116,35 @@ func skeletonTurnLosses(row, prev *CacheSkeleton, turn *SkeletonTurn, minTokens 
 			stableBytes += uint64(row.BlkLen[i])
 		}
 	}
+	oldTokens := int64(float64(turn.TotalTokens) * float64(oldBytes) / float64(turn.TotalBytes))
+	stableTokens := int64(float64(turn.TotalTokens) * float64(stableBytes) / float64(turn.TotalBytes))
+
 	reason := ""
 	if row.ParamFp != prev.ParamFp {
 		reason = SkeletonReasonParamChanged
-		stableBytes = 0
+		// A parameter change invalidates the whole old-history prefix, even
+		// the byte-identical part: it changes what gets rendered ahead of it.
+		stableTokens = 0
 	} else if turn.DivergeIdx >= 0 && turn.DivergeIdx < end {
 		reason = SkeletonReasonPrefixChanged
 	}
+
+	// The old-history bytes the hash comparison confirms are byte-identical
+	// to the previous turn must be readable from cache; none of the waterfall
+	// candidates above know about this structural fact, only about simulated
+	// cache state. Any shortfall below stableTokens is therefore not new
+	// content and not a structural change: it is the provider failing to
+	// return a prefix the skeleton can prove was still intact.
+	if stableTokens > covered {
+		items = append(items, SkeletonLossAmount{Reason: upstream, Tokens: stableTokens - covered, Turns: 1})
+		covered = stableTokens
+	}
+
 	if reason != "" {
-		oldTokens := int64(float64(turn.TotalTokens) * float64(oldBytes) / float64(turn.TotalBytes))
-		stableTokens := int64(float64(turn.TotalTokens) * float64(stableBytes) / float64(turn.TotalBytes))
-		amount := max(0, oldTokens-max(stableTokens, covered))
+		amount := max(0, oldTokens-covered)
 		if amount > 0 {
 			items = append(items, SkeletonLossAmount{Reason: reason, Tokens: amount, Turns: 1})
-			covered += amount
+			covered = oldTokens
 		}
 	}
 	if covered < turn.TotalTokens {

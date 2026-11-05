@@ -133,6 +133,22 @@ it('puts node, retry, status code and error keyword on their own row', async () 
   expect(nodeRow).not.toBe(rowOf('Customer Name'))
 })
 
+it('keeps Session ID Source beside Session ID in the first advanced row', async () => {
+  await renderAdminFilter()
+
+  const sessionIdRow = rowOf('Session ID')
+  expect(rowOf('Session ID Source')).toBe(sessionIdRow)
+
+  const fields = [...sessionIdRow.children]
+  const sessionIdIndex = fields.findIndex((field) =>
+    field.contains(screen.getByPlaceholderText('Session ID'))
+  )
+  const sourceIndex = fields.findIndex((field) =>
+    field.contains(screen.getByRole('combobox', { name: 'Session ID Source' }))
+  )
+  expect(sourceIndex).toBe(sessionIdIndex + 1)
+})
+
 it('keeps common log filter columns adaptive instead of splitting them into twelve narrow tracks', async () => {
   await renderAdminFilter()
 

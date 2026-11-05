@@ -770,30 +770,6 @@ export function CommonLogsFilterBar<TData>(
             onKeyDown={handleKeyDown}
           />
         </LogsFilterField>
-      </LogsFilterRow>
-      <LogsFilterRow>
-        {isAdmin && (
-          <LogsFilterField wide>
-            <div className='flex min-w-0 gap-1'>
-              <MultiSelect
-                options={nodeOptions}
-                selected={getFilterValues(filters.node)}
-                onChange={(values) =>
-                  handleChange('node', serializeFilterValues(values))
-                }
-                placeholder={t('Node Name')}
-                emptyText={t('No option found.')}
-                allowCreate
-                className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
-              />
-              <LogFilterModeButton
-                fieldLabel={t('Node Name')}
-                operator={filters.nodeOp}
-                onChange={(value) => handleChange('nodeOp', value)}
-              />
-            </div>
-          </LogsFilterField>
-        )}
         {isAdmin && (
           <LogsFilterField wide>
             <div className='flex min-w-0 gap-1'>
@@ -814,6 +790,30 @@ export function CommonLogsFilterBar<TData>(
                 fieldLabel={t('Session ID Source')}
                 operator={filters.sessionIdSourceOp}
                 onChange={(value) => handleChange('sessionIdSourceOp', value)}
+              />
+            </div>
+          </LogsFilterField>
+        )}
+      </LogsFilterRow>
+      <LogsFilterRow>
+        {isAdmin && (
+          <LogsFilterField wide>
+            <div className='flex min-w-0 gap-1'>
+              <MultiSelect
+                options={nodeOptions}
+                selected={getFilterValues(filters.node)}
+                onChange={(values) =>
+                  handleChange('node', serializeFilterValues(values))
+                }
+                placeholder={t('Node Name')}
+                emptyText={t('No option found.')}
+                allowCreate
+                className='max-h-16 min-h-8 min-w-0 flex-1 overflow-y-auto text-sm leading-5'
+              />
+              <LogFilterModeButton
+                fieldLabel={t('Node Name')}
+                operator={filters.nodeOp}
+                onChange={(value) => handleChange('nodeOp', value)}
               />
             </div>
           </LogsFilterField>

@@ -178,6 +178,91 @@ type SessionCacheRangeAnalysis struct {
 	Truncated   bool                `json:"truncated"`
 	LossSummary SkeletonLossSummary `json:"loss_summary"`
 	Coverage    SkeletonCoverage    `json:"coverage"`
+	SourceStats SessionSourceStats  `json:"source_stats"`
+}
+
+type SessionSourceSummary struct {
+	SessionCount int64        `json:"session_count"`
+	RequestCount int64        `json:"request_count"`
+	TokenCount   int64        `json:"token_count"`
+	Cache        LogCacheCell `json:"cache"`
+}
+
+type SessionSourceStats struct {
+	ContentFallback    SessionSourceSummary `json:"content_fallback"`
+	NonContentFallback SessionSourceSummary `json:"non_content_fallback"`
+}
+
+type sessionSourceSummaryRow struct {
+	Category     string `gorm:"column:category"`
+	SessionCount int64  `gorm:"column:session_count"`
+	RequestCount int64  `gorm:"column:request_count"`
+	TokenCount   int64  `gorm:"column:token_count"`
+	CacheRead    int64  `gorm:"column:cache_read"`
+	CacheInput   int64  `gorm:"column:cache_input"`
+	CacheHit     int    `gorm:"column:cache_hit"`
+	ColdWrite    int    `gorm:"column:cold_write"`
+}
+
+func getSessionSourceStats(filter LogFilter) (SessionSourceStats, error) {
+	filter.Type = LogTypeUnknown
+	tx, err := filter.apply(LOG_DB)
+	if err != nil {
+		return SessionSourceStats{}, err
+	}
+
+	var rows []sessionSourceSummaryRow
+	err = tx.Model(&Log{}).
+		Where("logs.type IN ?", []int{LogTypeConsume, LogTypeError}).
+		Where("logs.session_id NOT IN ?", []string{"", logSessionNotFound}).
+		Select(`
+			if(JSONExtractString(logs.other, 'session_id_source') = 'content-fallback',
+				'content_fallback', 'non_content_fallback') AS category,
+			uniqExactIf(logs.session_id,
+				logs.session_id != '' AND logs.session_id != 'notfound') AS session_count,
+			count(*) AS request_count,
+			sum(logs.prompt_tokens + logs.completion_tokens) AS token_count,
+			sumIf(if(logs.type = ?, toInt64(JSONExtractFloat(logs.other, 'cache_tokens')), 0), logs.type = ?) AS cache_read,
+			sumIf(if(logs.type = ?,
+				toInt64(logs.prompt_tokens) +
+					if(JSONExtractBool(logs.other, 'claude'),
+						toInt64(JSONExtractFloat(logs.other, 'cache_tokens')) +
+							toInt64(JSONExtractFloat(logs.other, 'cache_creation_tokens')), 0),
+				0), logs.type = ?) AS cache_input,
+			countIf(logs.type = ? AND JSONExtractFloat(logs.other, 'cache_tokens') > 0) AS cache_hit,
+			countIf(logs.type = ? AND JSONExtractFloat(logs.other, 'cache_tokens') <= 0
+				AND JSONExtractFloat(logs.other, 'cache_creation_tokens') > 0) AS cold_write`,
+			LogTypeConsume, LogTypeConsume,
+			LogTypeConsume, LogTypeConsume,
+			LogTypeConsume, LogTypeConsume,
+		).
+		Group("category").
+		Scan(&rows).Error
+	if err != nil {
+		return SessionSourceStats{}, err
+	}
+
+	var stats SessionSourceStats
+	for _, row := range rows {
+		summary := SessionSourceSummary{
+			SessionCount: row.SessionCount,
+			RequestCount: row.RequestCount,
+			TokenCount:   row.TokenCount,
+			Cache: LogCacheCell{
+				GrossRate: logCacheHitRate(row.CacheRead, row.CacheInput),
+				CacheRead: row.CacheRead,
+				InputAll:  row.CacheInput,
+				Hit:       row.CacheHit,
+				ColdWrite: row.ColdWrite,
+			},
+		}
+		if row.Category == "content_fallback" {
+			stats.ContentFallback = summary
+		} else {
+			stats.NonContentFallback = summary
+		}
+	}
+	return stats, nil
 }
 
 // GetSessionCacheRangeAnalysis replays skeletons for sessions matching the
@@ -193,6 +278,10 @@ func GetSessionCacheRangeAnalysis(userId int, filter LogFilter) (*SessionCacheRa
 		return nil, err
 	}
 	result := &SessionCacheRangeAnalysis{}
+	result.SourceStats, err = getSessionSourceStats(filter)
+	if err != nil {
+		return nil, err
+	}
 	if len(sessionIDs) > skeletonRangeSessionLimit {
 		sessionIDs = sessionIDs[:skeletonRangeSessionLimit]
 		result.Truncated = true

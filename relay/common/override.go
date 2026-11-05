@@ -17,6 +17,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"golang.org/x/net/http/httpguts"
 )
 
 var negativeIndexRegexp = regexp.MustCompile(`\.(-\d+)`)
@@ -78,11 +79,12 @@ type ParamOperation struct {
 }
 
 type ParamOverrideReturnError struct {
-	Message    string
-	StatusCode int
-	Code       string
-	Type       string
-	SkipRetry  bool
+	Message         string
+	StatusCode      int
+	Code            string
+	Type            string
+	SkipRetry       bool
+	ResponseHeaders map[string]string
 }
 
 func (e *ParamOverrideReturnError) Error() string {
@@ -140,11 +142,13 @@ func NewAPIErrorFromParamOverride(err *ParamOverrideReturnError) *types.NewAPIEr
 		opts = append(opts, types.ErrOptionWithSkipRetry())
 	}
 
-	return types.WithOpenAIError(types.OpenAIError{
+	apiError := types.WithOpenAIError(types.OpenAIError{
 		Message: message,
 		Type:    errorType,
 		Code:    errorCode,
 	}, statusCode, opts...)
+	apiError.ResponseHeaders = maps.Clone(err.ResponseHeaders)
+	return apiError
 }
 
 func ApplyParamOverride(jsonData []byte, paramOverride map[string]any, conditionContext map[string]any) ([]byte, error) {
@@ -1209,6 +1213,31 @@ func parseParamOverrideReturnError(value any) (*ParamOverrideReturnError, error)
 		}
 		if skipRetry, ok := raw["skip_retry"].(bool); ok {
 			result.SkipRetry = skipRetry
+		}
+		if headersRaw, exists := raw["response_headers"]; exists {
+			headers, ok := headersRaw.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("return_error response_headers must be an object with string values")
+			}
+			result.ResponseHeaders = make(map[string]string, len(headers))
+			for name, rawValue := range headers {
+				if !httpguts.ValidHeaderFieldName(name) {
+					return nil, fmt.Errorf("return_error response_headers contains invalid header name %q", name)
+				}
+				value, ok := rawValue.(string)
+				if !ok || !httpguts.ValidHeaderFieldValue(value) {
+					return nil, fmt.Errorf("return_error response_headers contains invalid value for %q", name)
+				}
+				name = http.CanonicalHeaderKey(name)
+				switch name {
+				case "Content-Length", "Transfer-Encoding", "Connection", "Keep-Alive", "Trailer", "Upgrade", "Proxy-Connection", "Content-Type", "Content-Encoding":
+					return nil, fmt.Errorf("return_error response_headers cannot override managed header %q", name)
+				}
+				if _, duplicate := result.ResponseHeaders[name]; duplicate {
+					return nil, fmt.Errorf("return_error response_headers contains duplicate header %q", name)
+				}
+				result.ResponseHeaders[name] = value
+			}
 		}
 
 		if statusCodeRaw, exists := raw["status_code"]; exists {

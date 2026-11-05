@@ -374,8 +374,8 @@ func TestLogSessionsClickHouse(t *testing.T) {
 	require.NoError(t, migrateClickHouseLogDB())
 	require.NoError(t, migrateClickHouseLogDB())
 
-	claudeHit := `{"claude":true,"cache_tokens":3000,"cache_creation_tokens":0}`
-	claudeCold := `{"claude":true,"cache_tokens":0,"cache_creation_tokens":2000}`
+	claudeHit := `{"claude":true,"cache_tokens":3000,"cache_creation_tokens":0,"session_id_source":"prompt_cache_key"}`
+	claudeCold := `{"claude":true,"cache_tokens":0,"cache_creation_tokens":2000,"session_id_source":"prompt_cache_key"}`
 	// Live rows land after the view was created; created_at tracks insert
 	// time in production, so keep them past the backfill cutoff.
 	var cutoff int64
@@ -385,7 +385,7 @@ func TestLogSessionsClickHouse(t *testing.T) {
 		{Id: 3, UserId: 1, Username: "alice", TokenName: "k1", ModelName: "claude-x", ChannelId: 3, Group: "vip", Type: LogTypeConsume, SessionID: "s-a", CreatedAt: now - 300, Quota: 10, PromptTokens: 100, CompletionTokens: 5, Other: claudeCold},
 		{Id: 4, UserId: 1, Username: "alice", TokenName: "k1", ModelName: "claude-x", ChannelId: 3, Group: "vip", Type: LogTypeError, SessionID: "s-a", CreatedAt: now - 299},
 		{Id: 5, UserId: 1, Username: "alice", TokenName: "k1", ModelName: "claude-x", ChannelId: 3, Group: "vip", Type: LogTypeConsume, SessionID: "s-a", CreatedAt: now - 270, Quota: 20, PromptTokens: 100, CompletionTokens: 7, Other: claudeHit},
-		{Id: 6, UserId: 2, Username: "bob", TokenName: "k2", ModelName: "gpt-x", ChannelId: 4, Group: "default", CustomerName: "Acme", Type: LogTypeConsume, SessionID: "s-b", CreatedAt: now - 100, Quota: 5, PromptTokens: 50},
+		{Id: 6, UserId: 2, Username: "bob", TokenName: "k2", ModelName: "gpt-x", ChannelId: 4, Group: "default", CustomerName: "Acme", Type: LogTypeConsume, SessionID: "s-b", CreatedAt: now - 100, Quota: 5, PromptTokens: 50, Other: `{"session_id_source":"metadata.user_id"}`},
 		{Id: 7, UserId: 2, Username: "bob", Type: LogTypeConsume, SessionID: "notfound", CreatedAt: now},
 		{Id: 8, UserId: 2, Username: "bob", Type: LogTypeConsume, SessionID: "", CreatedAt: now},
 		{Id: 9, UserId: 2, Username: "bob", Type: LogTypeTopup, SessionID: "s-c", CreatedAt: now},
@@ -399,7 +399,7 @@ func TestLogSessionsClickHouse(t *testing.T) {
 		return out
 	}
 
-	sessions, total, totalTokens, err := GetLogSessions(0, LogFilter{}, 0, 10, LogSessionSortOptions{})
+	sessions, total, totalTokens, _, err := GetLogSessions(0, LogFilter{}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, total)
 	require.Equal(t, []string{"s-b", "s-a"}, ids(sessions))
@@ -422,25 +422,36 @@ func TestLogSessionsClickHouse(t *testing.T) {
 	assert.EqualValues(t, 212, a.TotalTokens)
 	assert.EqualValues(t, 50, sessions[0].TotalTokens) // s-b: 50 prompt, no completion
 	assert.EqualValues(t, 262, totalTokens)
+	assert.EqualValues(t, 262, sessions[0].RangeTotalTokens+sessions[1].RangeTotalTokens)
+
+	sessions, _, _, rangeTotalTokens, err := GetLogSessions(0, LogFilter{
+		StartTimestamp: now - 350,
+		EndTimestamp:   now - 90,
+	}, 0, 10, NewLogSessionSortOptions("range_total_tokens", "desc"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"s-a", "s-b"}, ids(sessions))
+	assert.EqualValues(t, 262, rangeTotalTokens)
+	assert.EqualValues(t, 212, sessions[0].RangeTotalTokens)
+	assert.EqualValues(t, 50, sessions[1].RangeTotalTokens)
 
 	// Lifetime overlap: a window after s-a's last request lists only s-b;
 	// a window ending before s-b started lists only s-a.
-	sessions, _, _, err = GetLogSessions(0, LogFilter{StartTimestamp: now - 200}, 0, 10, LogSessionSortOptions{})
+	sessions, _, _, _, err = GetLogSessions(0, LogFilter{StartTimestamp: now - 200}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s-b"}, ids(sessions))
-	sessions, _, _, err = GetLogSessions(0, LogFilter{EndTimestamp: now - 280}, 0, 10, LogSessionSortOptions{})
+	sessions, _, _, _, err = GetLogSessions(0, LogFilter{EndTimestamp: now - 280}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s-a"}, ids(sessions))
 
 	// Sorting by total tokens overrides the default newest-activity order.
-	sessions, _, _, err = GetLogSessions(0, LogFilter{}, 0, 10, NewLogSessionSortOptions("total_tokens", "desc"))
+	sessions, _, _, _, err = GetLogSessions(0, LogFilter{}, 0, 10, NewLogSessionSortOptions("total_tokens", "desc"))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s-a", "s-b"}, ids(sessions))
-	sessions, _, _, err = GetLogSessions(0, LogFilter{}, 0, 10, NewLogSessionSortOptions("total_tokens", "asc"))
+	sessions, _, _, _, err = GetLogSessions(0, LogFilter{}, 0, 10, NewLogSessionSortOptions("total_tokens", "asc"))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s-b", "s-a"}, ids(sessions))
 	// An unrecognized sort_by falls back to the default order.
-	sessions, _, _, err = GetLogSessions(0, LogFilter{}, 0, 10, NewLogSessionSortOptions("quota", "desc"))
+	sessions, _, _, _, err = GetLogSessions(0, LogFilter{}, 0, 10, NewLogSessionSortOptions("quota", "desc"))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s-b", "s-a"}, ids(sessions))
 
@@ -456,16 +467,18 @@ func TestLogSessionsClickHouse(t *testing.T) {
 		{"group", LogFilter{Group: LogFieldFilter{Values: []string{"vip"}}}, []string{"s-a"}},
 		{"customer", LogFilter{CustomerName: "Acme"}, []string{"s-b"}},
 		{"session id", LogFilter{SessionId: "s-a"}, []string{"s-a"}},
+		{"session source", LogFilter{SessionIdSource: LogFieldFilter{Values: []string{"prompt_cache_key"}}}, []string{"s-a"}},
+		{"session source exclude", LogFilter{SessionIdSource: LogFieldFilter{Values: []string{"prompt_cache_key"}, Exclude: true}}, []string{"s-b"}},
 		{"ignored field", LogFilter{RequestId: "nope", StatusCode: 500}, []string{"s-b", "s-a"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sessions, _, _, err := GetLogSessions(0, tc.filter, 0, 10, LogSessionSortOptions{})
+			sessions, _, _, _, err := GetLogSessions(0, tc.filter, 0, 10, LogSessionSortOptions{})
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, ids(sessions))
 		})
 	}
 
-	own, total, _, err := GetLogSessions(2, LogFilter{}, 0, 10, LogSessionSortOptions{})
+	own, total, _, _, err := GetLogSessions(2, LogFilter{}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, total)
 	assert.Equal(t, []string{"s-b"}, ids(own))
@@ -477,7 +490,7 @@ func TestLogSessionsClickHouse(t *testing.T) {
 	assert.Empty(t, status.LastError)
 	assert.Len(t, status.Skipped, 2)
 
-	sessions, total, totalTokens, err = GetLogSessions(0, LogFilter{}, 0, 10, LogSessionSortOptions{})
+	sessions, total, totalTokens, rangeTotalTokens, err = GetLogSessions(0, LogFilter{}, 0, 10, LogSessionSortOptions{})
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, total)
 	require.Equal(t, []string{"s-b", "s-a", "s-old"}, ids(sessions))
@@ -489,6 +502,7 @@ func TestLogSessionsClickHouse(t *testing.T) {
 	assert.EqualValues(t, 312, sessions[1].TotalTokens)
 	assert.EqualValues(t, 10, sessions[2].TotalTokens) // s-old: 10 prompt, 0 completion
 	assert.EqualValues(t, 312+50+10, totalTokens)
+	assert.EqualValues(t, 312+50+10, rangeTotalTokens)
 }
 
 type requestKeyRenameLogRow struct {

@@ -301,6 +301,135 @@ func TestRelayStreamErrorAfterKeepAlive(t *testing.T) {
 	}
 }
 
+func TestParamOverrideResponseHeaders(t *testing.T) {
+	const rule = `{"operations":[{
+		"mode":"return_error",
+		"conditions":[
+			{"path":"tools.#(type==\"web_search_20250305\").type","mode":"full","value":"web_search_20250305"},
+			{"path":"tools.#(type==\"web_search\").type","mode":"full","value":"web_search"},
+			{"path":"tools.#(type==\"web_search_preview\").type","mode":"full","value":"web_search_preview"}
+		],
+		"logic":"OR",
+		"value":{
+			"status_code":403,
+			"message":"Web search tools are not permitted on this channel.",
+			"code":"web_search_not_allowed",
+			"type":"invalid_request_error",
+			"response_headers":{"x-web-search-blocked":"true","X-Block-Reason":"web_search_not_allowed","Retry-After":"60"}
+		}
+	}]}`
+	var override map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(rule, &override))
+	for _, tool := range []string{"web_search_20250305", "web_search", "web_search_preview"} {
+		for _, format := range []types.RelayFormat{types.RelayFormatClaude, types.RelayFormatOpenAI, types.RelayFormatGemini} {
+			t.Run(tool+"/"+string(format), func(t *testing.T) {
+				input := []byte(`{"tools":[{"type":"function","name":"other"},{"type":"` + tool + `","name":"web_search"}]}`)
+				_, err := relaycommon.ApplyParamOverride(input, override, nil)
+				require.Error(t, err)
+				returnErr, ok := relaycommon.AsParamOverrideReturnError(err)
+				require.True(t, ok)
+				apiError := relaycommon.NewAPIErrorFromParamOverride(returnErr)
+				assert.True(t, types.IsSkipRetryError(apiError))
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
+				writeRelayError(c, format, apiError, nil)
+				assert.Equal(t, http.StatusForbidden, recorder.Code)
+				assert.Equal(t, "true", recorder.Result().Header.Get("X-Web-Search-Blocked"))
+				assert.Equal(t, "web_search_not_allowed", recorder.Result().Header.Get("X-Block-Reason"))
+				assert.Equal(t, "60", recorder.Result().Header.Get("Retry-After"))
+				assert.Equal(t, "application/json; charset=utf-8", recorder.Result().Header.Get("Content-Type"))
+				if format == types.RelayFormatClaude {
+					assert.JSONEq(t, `{"type":"error","error":{"type":"web_search_not_allowed","message":"Web search tools are not permitted on this channel."}}`, recorder.Body.String())
+				} else {
+					assert.JSONEq(t, `{"error":{"type":"invalid_request_error","code":"web_search_not_allowed","message":"Web search tools are not permitted on this channel.","param":""}}`, recorder.Body.String())
+				}
+			})
+		}
+	}
+	t.Run("unmatched tools pass through", func(t *testing.T) {
+		for _, input := range []string{`{}`, `{"tools":[]}`, `{"tools":[{"type":"function","name":"other"}]}`} {
+			output, err := relaycommon.ApplyParamOverride([]byte(input), override, nil)
+			require.NoError(t, err)
+			assert.JSONEq(t, input, string(output))
+		}
+	})
+	t.Run("only terminal error headers are applied", func(t *testing.T) {
+		_, err := relaycommon.ApplyParamOverride([]byte(`{"tools":[{"type":"web_search"}]}`), override, nil)
+		returnErr, ok := relaycommon.AsParamOverrideReturnError(err)
+		require.True(t, ok)
+		returnErr.SkipRetry = false
+		firstError := relaycommon.NewAPIErrorFromParamOverride(returnErr)
+		assert.False(t, types.IsSkipRetryError(firstError))
+		// Converting an intermediate error must not write headers to the response.
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
+		assert.Empty(t, recorder.Header())
+		finalError := types.NewErrorWithStatusCode(errors.New("later failure"), types.ErrorCodeBadResponse, http.StatusBadGateway)
+		writeRelayError(c, types.RelayFormatOpenAI, finalError, nil)
+		assert.Empty(t, recorder.Result().Header.Get("X-Web-Search-Blocked"))
+		assert.Equal(t, http.StatusBadGateway, recorder.Code)
+	})
+	t.Run("committed stream retains its headers", func(t *testing.T) {
+		_, err := relaycommon.ApplyParamOverride([]byte(`{"tools":[{"type":"web_search"}]}`), override, nil)
+		returnErr, ok := relaycommon.AsParamOverrideReturnError(err)
+		require.True(t, ok)
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
+		helper.SetEventStreamHeaders(c)
+		require.NoError(t, helper.PingData(c))
+		writeRelayError(c, types.RelayFormatClaude, relaycommon.NewAPIErrorFromParamOverride(returnErr), nil)
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Empty(t, recorder.Header().Get("X-Web-Search-Blocked"))
+		assert.Equal(t, "text/event-stream", recorder.Result().Header.Get("Content-Type"))
+		assert.Contains(t, recorder.Body.String(), "event: error\n")
+	})
+}
+
+func TestParamOverrideResponseHeaderValidation(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		value   string
+		invalid bool
+	}{
+		{name: "legacy string", value: `"blocked"`},
+		{name: "legacy object", value: `{"message":"blocked"}`},
+		{name: "empty headers", value: `{"message":"blocked","response_headers":{}}`},
+		{name: "empty header value", value: `{"message":"blocked","response_headers":{"X-Empty":""}}`},
+		{name: "non object", value: `{"message":"blocked","response_headers":[]}`, invalid: true},
+		{name: "null", value: `{"message":"blocked","response_headers":null}`, invalid: true},
+		{name: "numeric value", value: `{"message":"blocked","response_headers":{"Retry-After":60}}`, invalid: true},
+		{name: "newline in name", value: `{"message":"blocked","response_headers":{"X-Bad\r\nInjected":"x"}}`, invalid: true},
+		{name: "newline in value", value: `{"message":"blocked","response_headers":{"X-Bad":"x\r\nInjected: yes"}}`, invalid: true},
+		{name: "duplicate names", value: `{"message":"blocked","response_headers":{"X-Flag":"a","x-flag":"b"}}`, invalid: true},
+		{name: "content length", value: `{"message":"blocked","response_headers":{"content-length":"0"}}`, invalid: true},
+		{name: "transfer encoding", value: `{"message":"blocked","response_headers":{"Transfer-Encoding":"chunked"}}`, invalid: true},
+		{name: "connection", value: `{"message":"blocked","response_headers":{"Connection":"X-Flag"}}`, invalid: true},
+		{name: "content type", value: `{"message":"blocked","response_headers":{"Content-Type":"text/event-stream"}}`, invalid: true},
+		{name: "content encoding", value: `{"message":"blocked","response_headers":{"Content-Encoding":"gzip"}}`, invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var override map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(`{"operations":[{"mode":"return_error","value":`+test.value+`}]}`, &override))
+			output, err := relaycommon.ApplyParamOverride([]byte(`{}`), override, nil)
+			if test.invalid {
+				// Preserve the rule engine's existing behavior: invalid operations
+				// are skipped, without exposing any configured response headers.
+				require.NoError(t, err)
+				assert.JSONEq(t, `{}`, string(output))
+				return
+			}
+			require.Error(t, err)
+			returnErr, ok := relaycommon.AsParamOverrideReturnError(err)
+			require.True(t, ok)
+			assert.Equal(t, http.StatusBadRequest, returnErr.StatusCode)
+			assert.True(t, returnErr.SkipRetry)
+		})
+	}
+}
+
 func TestStreamKeepAliveCancellation(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

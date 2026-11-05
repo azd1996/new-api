@@ -6177,6 +6177,7 @@
     "Session": "会话",
     "Session behavior": "会话保持",
     "Session behavior prevents switching channels": "会话保持设置阻止切换渠道",
+    "Session count": "会话数",
     "Session defaults": "会话默认设置",
     "Session expired!": "会话已过期！",
     "Session expired?": "会话已过期？",
@@ -7002,6 +7003,7 @@
     "Token": "令牌",
     "token (unit)": "token",
     "Token Breakdown": "Token 明细",
+    "Token count": "Token 数",
     "Token count exceeds the limit. Only exact search is allowed, do not use the % wildcard": "令牌数量超过上限，仅允许精确搜索，请勿使用 % 通配符",
     "Token Endpoint": "令牌端点",
     "Token Endpoint (Optional)": "Token 端点（可选）",
@@ -7897,6 +7899,9 @@
     "Zhipu": "智谱",
     "Zhipu GLM": "智谱GLM",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Aggregate hit rate": "汇总命中率",
+    "Content fallback comparison": "内容兜底对比",
+    "Non-content fallback": "非内容兜底"
   }
 }

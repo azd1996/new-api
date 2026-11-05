@@ -126,6 +126,7 @@ type LogSession struct {
 	PromptTokens     int64                `json:"prompt_tokens"`
 	CompletionTokens int64                `json:"completion_tokens"`
 	TotalTokens      int64                `json:"total_tokens"`
+	RangeTotalTokens int64                `json:"range_total_tokens"`
 	Username         string               `json:"username"`
 	UserCount        int64                `json:"user_count"`
 	TokenName        string               `json:"token_name"`
@@ -162,6 +163,7 @@ type logSessionAggRow struct {
 	CacheInput       int64    `gorm:"column:s_cache_input"`
 	CacheHit         uint64   `gorm:"column:s_cache_hit"`
 	CacheColdWrite   uint64   `gorm:"column:s_cache_cold_write"`
+	RangeTotalTokens int64    `gorm:"column:range_total_tokens"`
 	UserCount        uint64   `gorm:"column:s_user_count"`
 	Username         string   `gorm:"column:s_username"`
 	TokenName        string   `gorm:"column:s_token_name"`
@@ -257,6 +259,34 @@ func logSessionQuery(userId int, filter LogFilter) (string, []any, error) {
 		where = append(where, "session_id = ?")
 		args = append(args, filter.SessionId)
 	}
+	if len(filter.SessionIdSource.Values) > 0 {
+		sourceConditions := make([]string, 0, len(filter.SessionIdSource.Values))
+		sourceArgs := make([]any, 0, len(filter.SessionIdSource.Values))
+		for _, source := range filter.SessionIdSource.Values {
+			if source == "" {
+				continue
+			}
+			sourceConditions = append(
+				sourceConditions,
+				"JSONExtractString(logs.other, 'session_id_source') = ?",
+			)
+			sourceArgs = append(sourceArgs, source)
+		}
+		if len(sourceConditions) > 0 {
+			sourceCondition := "(" + strings.Join(sourceConditions, " OR ") + ")"
+			sourceWhere := "logs.type IN (2, 5)"
+			if userId > 0 {
+				sourceWhere += " AND logs.user_id = ?"
+				args = append(args, userId)
+			}
+			args = append(args, sourceArgs...)
+			sourceQuery := "session_id IN (SELECT logs.session_id FROM logs WHERE " + sourceWhere + " AND " + sourceCondition + ")"
+			if filter.SessionIdSource.Exclude {
+				sourceQuery = "session_id NOT IN (SELECT logs.session_id FROM logs WHERE " + sourceWhere + " AND " + sourceCondition + ")"
+			}
+			where = append(where, sourceQuery)
+		}
+	}
 
 	var having []string
 	var havingArgs []any
@@ -303,30 +333,55 @@ func logSessionQuery(userId int, filter LogFilter) (string, []any, error) {
 		having = append(having, condition)
 	}
 
-	var sql strings.Builder
-	sql.WriteString(logSessionAggSelect)
+	var baseQuery strings.Builder
+	baseQuery.WriteString(logSessionAggSelect)
 	if len(where) > 0 {
-		sql.WriteString(" WHERE " + strings.Join(where, " AND "))
+		baseQuery.WriteString(" WHERE " + strings.Join(where, " AND "))
 	}
-	sql.WriteString(" GROUP BY session_id")
+	baseQuery.WriteString(" GROUP BY session_id")
 	if len(having) > 0 {
-		sql.WriteString(" HAVING " + strings.Join(having, " AND "))
+		baseQuery.WriteString(" HAVING " + strings.Join(having, " AND "))
 	}
-	return sql.String(), append(args, havingArgs...), nil
+	rangeWhere := []string{"logs.type IN (2, 5)"}
+	rangeArgs := make([]any, 0, 3)
+	if userId > 0 {
+		rangeWhere = append(rangeWhere, "logs.user_id = ?")
+		rangeArgs = append(rangeArgs, userId)
+	}
+	if filter.StartTimestamp != 0 {
+		rangeWhere = append(rangeWhere, "logs.created_at >= ?")
+		rangeArgs = append(rangeArgs, filter.StartTimestamp)
+	}
+	if filter.EndTimestamp != 0 {
+		rangeWhere = append(rangeWhere, "logs.created_at <= ?")
+		rangeArgs = append(rangeArgs, filter.EndTimestamp)
+	}
+	rangeQuery := "SELECT logs.session_id, sum(logs.prompt_tokens + logs.completion_tokens) AS range_total_tokens FROM logs WHERE " +
+		strings.Join(rangeWhere, " AND ") +
+		" GROUP BY logs.session_id"
+	query := "SELECT base.*, ifNull(ranges.range_total_tokens, 0) AS range_total_tokens FROM (" +
+		baseQuery.String() +
+		") AS base LEFT JOIN (" +
+		rangeQuery +
+		") AS ranges ON base.session_id = ranges.session_id"
+	return query, append(append(args, havingArgs...), rangeArgs...), nil
 }
 
 // LogSessionSortOptions orders the session list. SortBy "" (the default)
 // keeps the original newest-activity-first order; "total_tokens" sorts by the
 // session's lifetime prompt+completion tokens.
 type LogSessionSortOptions struct {
-	SortBy    string
-	SortOrder string
+	SortBy         string
+	SortOrder      string
+	StartTimestamp int64
+	EndTimestamp   int64
 }
 
 // logSessionSortColumns maps a validated SortBy to the aggregated expression
 // it orders by, referencing the outer SELECT's own aliases.
 var logSessionSortColumns = map[string]string{
-	"total_tokens": "s_prompt_tokens + s_completion_tokens",
+	"total_tokens":       "s_prompt_tokens + s_completion_tokens",
+	"range_total_tokens": "range_total_tokens",
 }
 
 func NewLogSessionSortOptions(sortBy string, sortOrder string) LogSessionSortOptions {
@@ -356,33 +411,34 @@ func (options LogSessionSortOptions) orderByClause() string {
 // logSessionTotals is the count and token sum over every session matching the
 // filter, independent of the page being listed.
 type logSessionTotals struct {
-	Total       int64 `gorm:"column:total"`
-	TotalTokens int64 `gorm:"column:total_tokens"`
+	Total            int64 `gorm:"column:total"`
+	TotalTokens      int64 `gorm:"column:total_tokens"`
+	RangeTotalTokens int64 `gorm:"column:range_total_tokens"`
 }
 
 // GetLogSessions lists sessions ordered by sortOptions (newest activity first
 // by default) from log_sessions. userId > 0 limits the result to that user's
 // requests. The returned token sum covers every session matching filter, not
 // only the listed page.
-func GetLogSessions(userId int, filter LogFilter, startIdx int, num int, sortOptions LogSessionSortOptions) ([]*LogSession, int64, int64, error) {
+func GetLogSessions(userId int, filter LogFilter, startIdx int, num int, sortOptions LogSessionSortOptions) ([]*LogSession, int64, int64, int64, error) {
 	query, args, err := logSessionQuery(userId, filter)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
 	var totals logSessionTotals
-	totalsSQL := "SELECT count() AS total, sum(s_prompt_tokens + s_completion_tokens) AS total_tokens FROM (" + query + ")"
+	totalsSQL := "SELECT count() AS total, sum(s_prompt_tokens + s_completion_tokens) AS total_tokens, sum(range_total_tokens) AS range_total_tokens FROM (" + query + ")"
 	if err := LOG_DB.Raw(totalsSQL, args...).Scan(&totals).Error; err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
 	sessions := make([]*LogSession, 0, num)
 	if totals.Total == 0 {
-		return sessions, 0, 0, nil
+		return sessions, 0, 0, 0, nil
 	}
 
 	var rows []logSessionAggRow
 	pageArgs := append(slices.Clone(args), num, startIdx)
 	if err := LOG_DB.Raw(query+sortOptions.orderByClause()+" LIMIT ? OFFSET ?", pageArgs...).Scan(&rows).Error; err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
 	customerIDs := make([]string, 0)
 	for _, row := range rows {
@@ -394,7 +450,7 @@ func GetLogSessions(userId int, filter LogFilter, startIdx int, num int, sortOpt
 	if len(customerIDs) > 0 {
 		var customers []Customer
 		if err := DB.Select("customer_id", "name").Where("customer_id IN ?", customerIDs).Find(&customers).Error; err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, 0, err
 		}
 		for _, customer := range customers {
 			customerNames[customer.CustomerId] = customer.Name
@@ -420,6 +476,7 @@ func GetLogSessions(userId int, filter LogFilter, startIdx int, num int, sortOpt
 			PromptTokens:     r.PromptTokens,
 			CompletionTokens: r.CompletionTokens,
 			TotalTokens:      r.PromptTokens + r.CompletionTokens,
+			RangeTotalTokens: r.RangeTotalTokens,
 			Username:         r.Username,
 			UserCount:        int64(r.UserCount),
 			TokenName:        r.TokenName,
@@ -437,12 +494,12 @@ func GetLogSessions(userId int, filter LogFilter, startIdx int, num int, sortOpt
 		sessions = append(sessions, s)
 	}
 	if len(sessions) == 0 {
-		return sessions, totals.Total, totals.TotalTokens, nil
+		return sessions, totals.Total, totals.TotalTokens, totals.RangeTotalTokens, nil
 	}
 	if err := fillLogSessionIntervals(userId, sessions); err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
-	return sessions, totals.Total, totals.TotalTokens, nil
+	return sessions, totals.Total, totals.TotalTokens, totals.RangeTotalTokens, nil
 }
 
 // logSessionTimeRow holds the columns the interval statistics need.

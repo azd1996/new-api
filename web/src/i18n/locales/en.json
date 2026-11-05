@@ -6177,6 +6177,7 @@
     "Session": "Session",
     "Session behavior": "Session behavior",
     "Session behavior prevents switching channels": "Session behavior prevents switching channels",
+    "Session count": "Session count",
     "Session defaults": "Session defaults",
     "Session expired!": "Session expired!",
     "Session expired?": "Session expired?",
@@ -7002,6 +7003,7 @@
     "Token": "Token",
     "token (unit)": "token",
     "Token Breakdown": "Token Breakdown",
+    "Token count": "Token count",
     "Token count exceeds the limit. Only exact search is allowed, do not use the % wildcard": "Token count exceeds the limit. Only exact search is allowed, do not use the % wildcard",
     "Token Endpoint": "Token Endpoint",
     "Token Endpoint (Optional)": "Token Endpoint (Optional)",
@@ -7897,6 +7899,9 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Aggregate hit rate": "Aggregate hit rate",
+    "Content fallback comparison": "Content fallback comparison",
+    "Non-content fallback": "Non-content fallback"
   }
 }

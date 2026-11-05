@@ -425,7 +425,11 @@ func TestClaudeCacheLossSummary(t *testing.T) {
 				next.BlkHash[1] = 99
 			},
 			want: []SkeletonLossAmount{
-				{SkeletonReasonPrefixChanged, 12000, 1}, {SkeletonReasonNewContent, 18000, 1},
+				// Block 0 (1000/5000 bytes = 6000 tokens) is byte-identical to
+				// the previous turn and the channel/key did not change, so it
+				// is attributed to upstream_miss rather than folded into
+				// prefix_changed or new_content.
+				{SkeletonReasonUpstreamMiss, 6000, 1}, {SkeletonReasonPrefixChanged, 12000, 1}, {SkeletonReasonNewContent, 12000, 1},
 			},
 		},
 		{
@@ -493,6 +497,35 @@ func TestClaudeCacheLossLookbackBoundary(t *testing.T) {
 			}, turn.Losses)
 		})
 	}
+}
+
+// TestClaudeCacheLossStablePrefixSurvivesExhaustedSimulatorCeilings covers a
+// turn where every simulated-hit ceiling (current/adjusted/adjusted1h/lookback)
+// is exhausted (the gap exceeds both the lookback window and the 1h TTL), yet
+// the hash comparison proves the old-history prefix is byte-identical to the
+// previous turn. None of the waterfall's simulated-cache candidates can
+// explain this turn's shortfall, so before the stableTokens clamp this would
+// have silently fallen into new_content even though the content never
+// changed. This is the shape of "the upstream account pool rotated under a
+// stable channel/key": the gateway cannot name the real cause, but it must
+// not misreport it as new input.
+func TestClaudeCacheLossStablePrefixSurvivesExhaustedSimulatorCeilings(t *testing.T) {
+	t0 := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
+	first := skeletonFixture(t0, 1, []uint64{1, 2, 3}, []string{"tool", "system.text", "user.text"}, []uint16{2}, 2, 0)
+	next := skeletonFixture(t0.Add(2*time.Hour), 1, []uint64{1, 2, 3, 4, 5}, []string{"tool", "system.text", "user.text", "assistant.text", "user.text"}, []uint16{2, 3, 4}, 4, 0)
+	analysis := AnalyzeCacheSkeletons([]*CacheSkeleton{first, next})
+	require.Len(t, analysis.Lanes, 1)
+	turns := analysis.Lanes[0].Turns
+	require.Len(t, turns, 2)
+
+	turn := turns[1]
+	assert.Zero(t, turn.ExpectedCurrent, "the 2h gap exceeds the 1h adjusted1h ceiling too")
+	assert.Equal(t, -1, turn.DivergeIdx, "the old-history prefix (blocks 0-2) is byte-identical")
+	// Same channel/key as the previous turn, so the unexplained shortfall is
+	// upstream_miss rather than channel_switch.
+	assert.Equal(t, []SkeletonLossAmount{
+		{SkeletonReasonUpstreamMiss, 18000, 1}, {SkeletonReasonNewContent, 12000, 1},
+	}, turn.Losses)
 }
 
 func TestClaudeCacheLossExcludesErrorsAndOpenAI(t *testing.T) {

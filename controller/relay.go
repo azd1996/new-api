@@ -101,28 +101,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			service.RecordRequestPolicyTermination(c, newAPIError)
 			logger.LogError(c, common.LogText("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
-			upstreamURLs := common.UpstreamAddresses(c)
-			if relayFormat != types.RelayFormatOpenAIRealtime && c.Writer.Written() &&
-				strings.HasPrefix(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
-				writeRelayStreamError(c, relayFormat, newAPIError)
-				return
-			}
-			if relayFormat != types.RelayFormatOpenAIRealtime {
-				c.Header("Content-Type", "application/json; charset=utf-8")
-			}
-			switch relayFormat {
-			case types.RelayFormatOpenAIRealtime:
-				helper.WssError(c, ws, newAPIError.ToOpenAIError(upstreamURLs...))
-			case types.RelayFormatClaude:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"type":  "error",
-					"error": newAPIError.ToClaudeError(upstreamURLs...),
-				})
-			default:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"error": newAPIError.ToOpenAIError(upstreamURLs...),
-				})
-			}
+			writeRelayError(c, relayFormat, newAPIError, ws)
 		}
 	}()
 
@@ -318,6 +297,29 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		retryLogStr := common.LogText("retry: %s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
 	}
+}
+
+func writeRelayError(c *gin.Context, format types.RelayFormat, apiError *types.NewAPIError, ws *websocket.Conn) {
+	upstreamURLs := common.UpstreamAddresses(c)
+	if format == types.RelayFormatOpenAIRealtime {
+		helper.WssError(c, ws, apiError.ToOpenAIError(upstreamURLs...))
+		return
+	}
+	if c.Writer.Written() && strings.HasPrefix(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+		writeRelayStreamError(c, format, apiError)
+		return
+	}
+	if !c.Writer.Written() {
+		for name, value := range apiError.ResponseHeaders {
+			c.Writer.Header().Set(name, value)
+		}
+	}
+	c.Header("Content-Type", "application/json; charset=utf-8")
+	if format == types.RelayFormatClaude {
+		c.JSON(apiError.StatusCode, gin.H{"type": "error", "error": apiError.ToClaudeError(upstreamURLs...)})
+		return
+	}
+	c.JSON(apiError.StatusCode, gin.H{"error": apiError.ToOpenAIError(upstreamURLs...)})
 }
 
 func writeRelayStreamError(c *gin.Context, format types.RelayFormat, apiError *types.NewAPIError) {

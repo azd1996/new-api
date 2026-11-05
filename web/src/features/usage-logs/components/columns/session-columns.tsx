@@ -55,7 +55,9 @@ export function useSessionColumns(
   isAdmin: boolean,
   expanded: ReadonlySet<string>,
   onToggle: (sessionId: string) => void,
-  totalTokensSum?: number
+  totalTokensSum?: number,
+  sensitiveVisible = true,
+  rangeTotalTokensSum?: number
 ): ColumnDef<LogSession>[] {
   const { t } = useTranslation()
 
@@ -162,44 +164,48 @@ export function useSessionColumns(
       })
     }
 
-    columns.push(
-      {
-        id: 'customers',
-        header: t('Customer ID'),
-        accessorFn: (row) =>
-          (row.customers ?? [])
-            .map((customer) => customer.customer_id)
-            .join(', '),
-        cell: ({ row }) => {
-          const customers = row.original.customers ?? []
-          if (customers.length === 0) {
-            return <span className='text-muted-foreground'>-</span>
-          }
-          const customerLabels = customers.map((customer) =>
-            customer.name
-              ? `${customer.customer_id}（${customer.name}）`
-              : customer.customer_id
-          )
-          return (
-            <span
-              className='block max-w-60 truncate'
-              title={customerLabels.join(', ')}
-            >
-              {customerLabels.join(', ')}
-            </span>
-          )
-        },
-        enableSorting: false,
-        size: 200,
+    columns.push({
+      id: 'customers',
+      header: t('Customer ID'),
+      accessorFn: (row) =>
+        (row.customers ?? [])
+          .map((customer) => customer.customer_id)
+          .join(', '),
+      cell: ({ row }) => {
+        const customers = row.original.customers ?? []
+        if (customers.length === 0) {
+          return <span className='text-muted-foreground'>-</span>
+        }
+        const customerLabels = customers.map((customer) =>
+          sensitiveVisible && customer.name
+            ? `${customer.customer_id}（${customer.name}）`
+            : customer.customer_id
+        )
+        return (
+          <span
+            className='block max-w-60 truncate'
+            title={customerLabels.join(', ')}
+          >
+            {customerLabels.join(', ')}
+          </span>
+        )
       },
-      {
+      enableSorting: false,
+      size: 200,
+    })
+
+    if (sensitiveVisible) {
+      columns.push({
         accessorKey: 'token_name',
         header: t('Token'),
         cell: ({ row }) =>
           renderMultiValue(row.original.token_name, row.original.token_count),
         enableSorting: false,
         size: 120,
-      },
+      })
+    }
+
+    columns.push(
       {
         accessorKey: 'model_name',
         header: t('Model'),
@@ -243,6 +249,33 @@ export function useSessionColumns(
           )
         },
         size: 120,
+      },
+      {
+        accessorKey: 'range_total_tokens',
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={`${t('Total Tokens')} (${t('Time')})`}
+          />
+        ),
+        cell: ({ row }) => {
+          const total = row.original.range_total_tokens
+          const share =
+            rangeTotalTokensSum && rangeTotalTokensSum > 0
+              ? (total / rangeTotalTokensSum) * 100
+              : undefined
+          return (
+            <div className='flex flex-col gap-0.5'>
+              <span className='tabular-nums'>{formatTokens(total)}</span>
+              {share !== undefined && (
+                <span className='text-muted-foreground text-xs tabular-nums'>
+                  {t('Share')}: {formatPercent(share)}
+                </span>
+              )}
+            </div>
+          )
+        },
+        size: 130,
       },
       {
         accessorKey: 'quota',
@@ -295,5 +328,13 @@ export function useSessionColumns(
     )
 
     return columns
-  }, [t, isAdmin, expanded, onToggle, totalTokensSum])
+  }, [
+    t,
+    isAdmin,
+    expanded,
+    onToggle,
+    totalTokensSum,
+    sensitiveVisible,
+    rangeTotalTokensSum,
+  ])
 }

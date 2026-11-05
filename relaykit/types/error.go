@@ -97,6 +97,8 @@ type NewAPIError struct {
 	errorCode      ErrorCode
 	StatusCode     int
 	Metadata       json.RawMessage
+	// ResponseHeaders are applied only when this error is returned to the client.
+	ResponseHeaders map[string]string `json:"-"`
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.

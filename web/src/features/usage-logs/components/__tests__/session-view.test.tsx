@@ -33,6 +33,7 @@ import {
   within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -43,7 +44,7 @@ import type {
   SessionCacheAnalysisResponse,
   SkeletonLossSummary,
 } from '../../types'
-import { UsageLogsProvider } from '../usage-logs-provider'
+import { UsageLogsProvider, useUsageLogsContext } from '../usage-logs-provider'
 import { UsageLogsSessions } from '../usage-logs-sessions'
 
 const session = {
@@ -57,6 +58,7 @@ const session = {
   prompt_tokens: 200,
   completion_tokens: 30,
   total_tokens: 230,
+  range_total_tokens: 180,
   username: 'alice',
   user_count: 1,
   token_name: 'key-a',
@@ -130,6 +132,40 @@ function mockApi(
               adjusted: 763,
               adjusted_1h: 763,
             },
+            source_stats: {
+              content_fallback: {
+                session_count: 2,
+                request_count: 3,
+                token_count: 1200,
+                cache: {
+                  gross_rate: 0.25,
+                  eligible_rate: 0.25,
+                  cache_read: 300,
+                  input_all: 1200,
+                  input_eligible: 1200,
+                  hit: 1,
+                  cold_write: 1,
+                  too_small: 0,
+                  other_miss: 1,
+                },
+              },
+              non_content_fallback: {
+                session_count: 5,
+                request_count: 8,
+                token_count: 2400,
+                cache: {
+                  gross_rate: 0.5,
+                  eligible_rate: 0.5,
+                  cache_read: 1200,
+                  input_all: 2400,
+                  input_eligible: 2400,
+                  hit: 4,
+                  cold_write: 2,
+                  too_small: 0,
+                  other_miss: 2,
+                },
+              },
+            },
             truncated: false,
           },
         },
@@ -149,6 +185,7 @@ function mockApi(
             page: 1,
             page_size: 20,
             total_tokens_sum: enabled ? 1150 : 0,
+            range_total_tokens_sum: enabled ? 720 : 0,
           },
         },
       }
@@ -179,7 +216,16 @@ function mockApi(
   })
 }
 
-async function renderSessions(search = '') {
+function SensitiveToggle() {
+  const { setSensitiveVisible } = useUsageLogsContext()
+  return (
+    <button type='button' onClick={() => setSensitiveVisible(false)}>
+      Hide sensitive data
+    </button>
+  )
+}
+
+async function renderSessions(search = '', toolbar: ReactNode = null) {
   const root = createRootRoute()
   const auth = createRoute({ getParentRoute: () => root, id: '_authenticated' })
   const logs = createRoute({
@@ -187,7 +233,7 @@ async function renderSessions(search = '') {
     path: '/usage-logs/$section',
     component: () => (
       <UsageLogsProvider>
-        <UsageLogsSessions toolbar={null} />
+        <UsageLogsSessions toolbar={toolbar} />
       </UsageLogsProvider>
     ),
     validateSearch: (search: Record<string, unknown>) => search,
@@ -241,6 +287,18 @@ it('lists sessions collapsed and loads no session requests before expanding', as
   expect(screen.getByText('Prefix-match ceiling')).toBeVisible()
   expect(screen.getByText('With one prompt_cache_key')).toBeVisible()
   expect(screen.getByText('One key + 24h retention')).toBeVisible()
+  expect(screen.getByText('Content fallback comparison')).toBeInTheDocument()
+  expect(screen.getByText('Non-content fallback')).toBeVisible()
+  expect(
+    within(
+      screen.getByRole('table', { name: 'Content fallback comparison' })
+    ).getByText('25.0%')
+  ).toBeVisible()
+  expect(
+    within(
+      screen.getByRole('table', { name: 'Content fallback comparison' })
+    ).getByText('50.0%')
+  ).toBeVisible()
   expect(
     screen.queryByRole('region', { name: 'Cache loss breakdown' })
   ).not.toBeInTheDocument()
@@ -250,7 +308,7 @@ it('lists sessions collapsed and loads no session requests before expanding', as
   expect(screen.getByText('cust-1（Acme）, cust-2')).toBeVisible()
 })
 
-it('shows each session\'s total tokens with its share of the filtered total', async () => {
+it("shows each session's total tokens with its share of the filtered total", async () => {
   mockApi(true)
   useAuthStore
     .getState()
@@ -260,6 +318,28 @@ it('shows each session\'s total tokens with its share of the filtered total', as
   await screen.findByText('sess-abc')
   expect(screen.getByText('230')).toBeVisible()
   expect(screen.getByText('Share: 20%')).toBeVisible()
+  expect(screen.getByText('180')).toBeVisible()
+  expect(screen.getByText('Share: 25%')).toBeVisible()
+})
+
+it('hides the token column and customer names when sensitive data is hidden', async () => {
+  mockApi(true)
+  await renderSessions('', <SensitiveToggle />)
+
+  await screen.findByText('sess-abc')
+  expect(screen.getByText('key-a')).toBeVisible()
+  expect(screen.getByText('cust-1（Acme）, cust-2')).toBeVisible()
+
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Hide sensitive data' })
+  )
+
+  await waitFor(() => {
+    expect(screen.queryByText('key-a')).not.toBeInTheDocument()
+    expect(screen.queryByText('Token')).not.toBeInTheDocument()
+    expect(screen.getByText('cust-1, cust-2')).toBeVisible()
+  })
+  expect(screen.queryByText('Acme')).not.toBeInTheDocument()
 })
 
 it('sorts sessions by total tokens when the column header is clicked', async () => {
@@ -271,8 +351,11 @@ it('sorts sessions by total tokens when the column header is clicked', async () 
   await screen.findByText('sess-abc')
 
   const user = userEvent.setup()
+  const tables = screen.getAllByRole('table')
+  const sessionTable = tables.at(-1)
+  if (!sessionTable) throw new Error('Session table not found')
   await user.click(
-    within(screen.getByRole('table')).getByRole('button', {
+    within(sessionTable).getByRole('button', {
       name: 'Total Tokens',
     })
   )

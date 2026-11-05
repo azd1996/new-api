@@ -153,30 +153,34 @@ func GetLogsAnalysis(c *gin.Context) {
 func GetLogSessions(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	if !model.LogSessionsEnabled() {
-		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0, 0)
+		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0, 0, 0)
 		return
 	}
 	sortOptions := model.NewLogSessionSortOptions(c.Query("sort_by"), c.Query("sort_order"))
-	sessions, total, totalTokens, err := model.GetLogSessions(0, logFilterFromQuery(c, true), pageInfo.GetStartIdx(), pageInfo.GetPageSize(), sortOptions)
+	filter := logFilterFromQuery(c, true)
+	sortOptions.StartTimestamp = filter.StartTimestamp
+	sortOptions.EndTimestamp = filter.EndTimestamp
+	sessions, total, totalTokens, rangeTotalTokens, err := model.GetLogSessions(0, filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), sortOptions)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	respondLogSessions(c, pageInfo, true, sessions, total, totalTokens)
+	respondLogSessions(c, pageInfo, true, sessions, total, totalTokens, rangeTotalTokens)
 }
 
 // respondLogSessions writes a session page. enabled=false means the log
 // database is not ClickHouse, so this deployment keeps no session table.
 // totalTokens is the lifetime prompt+completion token sum over every session
 // matching the filter, not only the listed page.
-func respondLogSessions(c *gin.Context, pageInfo *common.PageInfo, enabled bool, sessions []*model.LogSession, total int64, totalTokens int64) {
+func respondLogSessions(c *gin.Context, pageInfo *common.PageInfo, enabled bool, sessions []*model.LogSession, total int64, totalTokens int64, rangeTotalTokens int64) {
 	common.ApiSuccess(c, gin.H{
-		"enabled":          enabled,
-		"page":             pageInfo.GetPage(),
-		"page_size":        pageInfo.GetPageSize(),
-		"total":            total,
-		"total_tokens_sum": totalTokens,
-		"items":            sessions,
+		"enabled":                enabled,
+		"page":                   pageInfo.GetPage(),
+		"page_size":              pageInfo.GetPageSize(),
+		"total":                  total,
+		"total_tokens_sum":       totalTokens,
+		"range_total_tokens_sum": rangeTotalTokens,
+		"items":                  sessions,
 	})
 }
 
@@ -216,17 +220,19 @@ func GetUserLogSessions(c *gin.Context) {
 		filter.StartTimestamp = startTimestamp
 	}
 	if !model.LogSessionsEnabled() {
-		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0, 0)
+		respondLogSessions(c, pageInfo, false, []*model.LogSession{}, 0, 0, 0)
 		return
 	}
 	sortOptions := model.NewLogSessionSortOptions(c.Query("sort_by"), c.Query("sort_order"))
-	sessions, total, totalTokens, err := model.GetLogSessions(c.GetInt("id"), filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), sortOptions)
+	sortOptions.StartTimestamp = filter.StartTimestamp
+	sortOptions.EndTimestamp = filter.EndTimestamp
+	sessions, total, totalTokens, rangeTotalTokens, err := model.GetLogSessions(c.GetInt("id"), filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), sortOptions)
 	if err != nil {
 		common.SysError(common.LogText("failed to query user log sessions: %s", err.Error()))
 		common.ApiErrorT(c, "Failed to query logs")
 		return
 	}
-	respondLogSessions(c, pageInfo, true, sessions, total, totalTokens)
+	respondLogSessions(c, pageInfo, true, sessions, total, totalTokens, rangeTotalTokens)
 }
 
 func GetUserLogs(c *gin.Context) {
@@ -509,6 +515,7 @@ func GetCacheSkeletonSessionsAnalysis(c *gin.Context) {
 		"provider":     analysis.Provider,
 		"loss_summary": analysis.LossSummary,
 		"coverage":     analysis.Coverage,
+		"source_stats": analysis.SourceStats,
 		"truncated":    analysis.Truncated,
 	})
 }

@@ -849,7 +849,20 @@ export interface SessionCacheRangeAnalysisResponse {
     provider?: string
     loss_summary?: SkeletonLossSummary
     truncated?: boolean
+    source_stats?: SessionSourceStats
   }
+}
+
+export interface SessionSourceSummary {
+  session_count: number
+  request_count: number
+  token_count: number
+  cache: LogCacheCell
+}
+
+export interface SessionSourceStats {
+  content_fallback: SessionSourceSummary
+  non_content_fallback: SessionSourceSummary
 }
 
 export interface SkeletonLossItem {
@@ -881,6 +894,7 @@ export interface LogSession {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
+  range_total_tokens: number
   username: string
   user_count: number
   token_name: string
@@ -896,7 +910,7 @@ export interface LogSession {
 
 // Sort key for the session list; 'last_at' (the default) keeps newest
 // activity first.
-export type LogSessionSortBy = 'last_at' | 'total_tokens'
+export type LogSessionSortBy = 'last_at' | 'total_tokens' | 'range_total_tokens'
 export type LogSessionSortOrder = 'asc' | 'desc'
 
 // Session backfill run of the node that served the request (root only).
@@ -928,6 +942,7 @@ export interface GetLogSessionsResponse {
     // Lifetime prompt+completion token sum over every session matching the
     // filter, not only the listed page; used to show each session's share.
     total_tokens_sum?: number
+    range_total_tokens_sum?: number
   }
 }
 

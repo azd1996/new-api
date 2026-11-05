@@ -40,7 +40,7 @@ import { CacheLossBreakdown } from './cache-loss-breakdown'
 import { useSessionColumns } from './columns/session-columns'
 import { SessionCacheDiagnosis } from './session-cache-diagnosis'
 import { SessionRequestsTable } from './session-requests-table'
-import { useLogsViewScope } from './usage-logs-provider'
+import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 
@@ -49,9 +49,13 @@ const DEFAULT_SESSIONS_DATA = {
   items: [] as LogSession[],
   total: 0,
   total_tokens_sum: 0,
+  range_total_tokens_sum: 0,
 }
 
-const SESSION_SORTABLE_COLUMNS = new Set<LogSessionSortBy>(['total_tokens'])
+const SESSION_SORTABLE_COLUMNS = new Set<LogSessionSortBy>([
+  'total_tokens',
+  'range_total_tokens',
+])
 
 interface UsageLogsSessionsProps {
   toolbar: ReactNode
@@ -62,6 +66,7 @@ interface UsageLogsSessionsProps {
 export function UsageLogsSessions(props: UsageLogsSessionsProps) {
   const { t } = useTranslation()
   const { isAdminView, viewAccess } = useLogsViewScope()
+  const { sensitiveVisible } = useUsageLogsContext()
   const searchParams = route.useSearch()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [sorting, setSorting] = useState<SortingState>([])
@@ -161,10 +166,13 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
     isAdminView,
     expanded,
     toggleSession,
-    data?.total_tokens_sum
+    data?.total_tokens_sum,
+    sensitiveVisible,
+    data?.range_total_tokens_sum
   )
   const cacheSummary = cacheSummaryQuery.data
   const cacheSummaryRates = cacheSummary?.summary
+  const sourceStats = cacheSummary?.source_stats
   const cacheSummaryLabels =
     cacheSummary?.provider === 'mixed'
       ? {
@@ -273,6 +281,65 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                 )}
                 {cacheSummary?.enabled && (
                   <>
+                    {sourceStats && (
+                      <div className='basis-full overflow-x-auto pt-1'>
+                        <table className='min-w-[520px] border-collapse text-xs'>
+                          <caption className='sr-only'>
+                            {t('Content fallback comparison')}
+                          </caption>
+                          <thead>
+                            <tr className='text-muted-foreground text-left'>
+                              <th className='pr-4 font-normal' />
+                              <th className='pr-4 font-normal'>
+                                {t('Session count')}
+                              </th>
+                              <th className='pr-4 font-normal'>
+                                {t('Requests')}
+                              </th>
+                              <th className='pr-4 font-normal'>
+                                {t('Token count')}
+                              </th>
+                              <th className='font-normal'>
+                                {t('Aggregate hit rate')}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[
+                              {
+                                label: t('Claude content fallback'),
+                                summary: sourceStats.content_fallback,
+                              },
+                              {
+                                label: t('Non-content fallback'),
+                                summary: sourceStats.non_content_fallback,
+                              },
+                            ].map((item) => (
+                              <tr key={item.label} className='border-t'>
+                                <th className='py-1 pr-4 text-left font-medium'>
+                                  {item.label}
+                                </th>
+                                <td className='py-1 pr-4'>
+                                  {item.summary.session_count}
+                                </td>
+                                <td className='py-1 pr-4'>
+                                  {item.summary.request_count}
+                                </td>
+                                <td className='py-1 pr-4'>
+                                  {item.summary.token_count}
+                                </td>
+                                <td className='py-1'>
+                                  {skeletonRate(
+                                    item.summary.cache.cache_read,
+                                    item.summary.cache.input_all
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                     <ByteCacheCoverageSummary
                       coverage={cacheSummary.coverage}
                     />
