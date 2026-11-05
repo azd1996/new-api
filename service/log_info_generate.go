@@ -74,6 +74,8 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	other.SetAdmin("use_channel", ctx.GetStringSlice("use_channel"))
 	other.SetAdmin("node_name", common.NodeName)
 	if relayInfo != nil {
+		// Preserve the real retry index; request_id alone identifies all attempts.
+		other.SetAdmin("relay_attempt", relayInfo.RetryIndex)
 		if billingModel := relayInfo.GetBillingModelName(); billingModel != "" && billingModel != relayInfo.OriginModelName {
 			other.SetAdmin("billing_model", billingModel)
 		}

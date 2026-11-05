@@ -510,12 +510,16 @@ func GetCacheSkeletonSessionsAnalysis(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, gin.H{
-		"enabled":      true,
-		"summary":      analysis.Summary,
-		"provider":     analysis.Provider,
-		"loss_summary": analysis.LossSummary,
-		"coverage":     analysis.Coverage,
-		"source_stats": analysis.SourceStats,
-		"truncated":    analysis.Truncated,
+		"enabled":       true,
+		"summary":       analysis.Summary,
+		"provider":      analysis.Provider,
+		"loss_summary":  analysis.LossSummary,
+		"coverage":      analysis.Coverage,
+		"source_stats":  analysis.SourceStats,
+		"actual":        analysis.Actual,
+		"consume_count": analysis.ConsumeCount,
+		"sample_count":  analysis.SampleCount,
+		"sample_input":  analysis.SampleInput,
+		"truncated":     analysis.Truncated,
 	})
 }

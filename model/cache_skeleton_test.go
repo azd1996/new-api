@@ -9,9 +9,12 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/clickhouse"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 )
@@ -26,6 +29,205 @@ func TestCacheSkeletonSchemaParses(t *testing.T) {
 	assert.Empty(t, s.Relationships.Relations)
 	for _, column := range []string{"blk_hash", "blk_kind", "blk_name", "blk_len", "msg_start", "bp_idx", "bp_ttl"} {
 		assert.NotNil(t, s.LookUpField(column), column)
+	}
+}
+
+func TestRangeReplaySelectsAttemptsAfterHistory(t *testing.T) {
+	at := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	first := skeletonFixture(at, 1, []uint64{1, 2, 3}, []string{"tool", "system.text", "user.text"}, []uint16{2}, 2, 29000)
+	next := skeletonFixture(at.Add(time.Minute), 1, []uint64{1, 2, 3, 4, 5}, []string{"tool", "system.text", "user.text", "assistant.text", "user.text"}, []uint16{2, 3, 4}, 4, 0)
+	next.Attempt = 1
+	retry := *next
+	retry.Attempt, retry.Status = 0, "error"
+	rows := []*CacheSkeleton{first, &retry, next}
+	selected := map[*CacheSkeleton]bool{next: true}
+	got := analyzeSelectedCacheSkeletons(rows, selected)
+	assert.Equal(t, int64(30000), got.Summary.Total)
+	assert.Zero(t, got.Summary.Actual, "outside-window hit must not enter the numerator")
+	assert.Equal(t, int64(18000), got.Summary.Current, "historical writes still warm the replay")
+	assert.Equal(t, int64(1), got.LossSummary.AnalyzedTurns)
+	assert.Equal(t, int64(30000), got.LossSummary.TotalTokens)
+	assert.Equal(t, int64(60000), AnalyzeCacheSkeletons(rows).Summary.Total, "detail remains lifetime")
+	before := coverageFixture(at, 2, nil, []uint16{1})
+	after := coverageFixture(at.Add(time.Minute), 3, nil, []uint16{2})
+	coverage := analyzeSelectedCacheSkeletons([]*CacheSkeleton{before, after}, map[*CacheSkeleton]bool{after: true})
+	assert.Equal(t, SkeletonCoverage{OptimizedCovered: 200, Delta: 200, TotalBytes: 300, ComparableTurns: 1}, coverage.Coverage)
+}
+
+func TestRangeSessionHistoryBounds(t *testing.T) {
+	at := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	var rows []*CacheSkeleton
+	var logs []*Log
+	for i := range 4 {
+		row := skeletonFixture(at.Add(time.Duration(i)*time.Minute), 1,
+			[]uint64{1, 2, 3}, []string{"tool", "system.text", "user.text"}, []uint16{2}, 2, 0)
+		rows = append(rows, row)
+		logs = append(logs, &Log{RequestId: row.RequestId, ChannelId: 1, PromptTokens: 30000,
+			Other: `{"admin_info":{"relay_attempt":0}}`})
+	}
+	t.Run("zero sample does not replay history", func(t *testing.T) {
+		got, input := analyzeSessionCacheRange(rows, []*Log{{Other: `{}`}}, 2)
+		assert.Empty(t, got.Lanes)
+		assert.Zero(t, got.Summary.Total)
+		assert.Zero(t, input)
+		assert.False(t, got.Truncated)
+	})
+	t.Run("last selected excludes future lanes", func(t *testing.T) {
+		future := *rows[3]
+		future.Lane = 99
+		got, input := analyzeSessionCacheRange([]*CacheSkeleton{rows[0], rows[1], rows[2], &future}, logs[1:2], 2)
+		require.Len(t, got.Lanes, 1)
+		require.Len(t, got.Lanes[0].Turns, 1)
+		assert.Equal(t, rows[1].RequestId, got.Lanes[0].Turns[0].RequestId)
+		assert.Equal(t, int64(30000), got.Summary.Current, "nearest history warms the selected request")
+		assert.Equal(t, int64(30000), input)
+		assert.False(t, got.Truncated, "future rows do not consume history budget")
+	})
+	t.Run("budget keeps nearest history and recounts retained samples", func(t *testing.T) {
+		got, input := analyzeSessionCacheRange(rows, []*Log{logs[0], logs[2]}, 2)
+		assert.True(t, got.Truncated)
+		require.Len(t, got.Lanes, 1)
+		require.Len(t, got.Lanes[0].Turns, 1)
+		assert.Equal(t, rows[2].RequestId, got.Lanes[0].Turns[0].RequestId)
+		assert.Equal(t, int64(30000), got.Summary.Total)
+		assert.Equal(t, int64(30000), got.Summary.Current, "row before the latest selected request is retained")
+		assert.Equal(t, int64(30000), input, "discarded selected requests contribute no sample input")
+	})
+	t.Run("trimming cannot turn ambiguous identity into a match", func(t *testing.T) {
+		duplicate := *rows[0]
+		duplicate.Ts = rows[1].Ts
+		got, input := analyzeSessionCacheRange([]*CacheSkeleton{rows[0], &duplicate, rows[2]}, []*Log{logs[0], logs[2]}, 2)
+		require.Len(t, got.Lanes, 1)
+		assert.Len(t, got.Lanes[0].Turns, 1)
+		assert.Equal(t, int64(30000), input)
+	})
+}
+
+func TestRangeConsumeAttemptDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres", "clickhouse"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(":memory:")
+			case "mysql":
+				if os.Getenv("TEST_MYSQL_DSN") == "" {
+					t.Skip("TEST_MYSQL_DSN unset")
+				}
+				driver = mysql.Open(os.Getenv("TEST_MYSQL_DSN"))
+			case "postgres":
+				if os.Getenv("TEST_POSTGRES_DSN") == "" {
+					t.Skip("TEST_POSTGRES_DSN unset")
+				}
+				driver = postgres.Open(os.Getenv("TEST_POSTGRES_DSN"))
+			case "clickhouse":
+				if os.Getenv("TEST_CLICKHOUSE_DSN") == "" {
+					t.Skip("TEST_CLICKHOUSE_DSN unset")
+				}
+				driver = clickhouse.Open(os.Getenv("TEST_CLICKHOUSE_DSN"))
+			}
+			db, err := gorm.Open(driver, &gorm.Config{})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+			oldDB, oldType := LOG_DB, common.LogDatabaseType()
+			LOG_DB = db
+			common.SetLogDatabaseType(common.DatabaseType(dialect))
+			t.Cleanup(func() { LOG_DB = oldDB; common.SetLogDatabaseType(oldType) })
+			var version string
+			versionSQL := "SELECT version()"
+			if dialect == "sqlite" {
+				versionSQL = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionSQL).Scan(&version).Error)
+			t.Logf("%s: %s", dialect, version)
+			require.False(t, db.Migrator().HasTable(&Log{}), "use an empty scratch database")
+			if dialect == "clickhouse" {
+				require.NoError(t, db.Exec(clickHouseLogCreateTableSQL(0)).Error)
+			} else {
+				require.NoError(t, db.AutoMigrate(&Log{}))
+			}
+			t.Cleanup(func() { assert.NoError(t, db.Migrator().DropTable(&Log{})) })
+			at := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+			logs := []Log{
+				{Id: 1, Type: LogTypeConsume, CreatedAt: at.Unix() - 60, RequestId: "warmup", SessionID: "s", ModelName: "claude-x", ChannelId: 1, PromptTokens: 100, Other: `{"claude":true,"cache_tokens":29900,"session_id_source":"content-fallback","admin_info":{"relay_attempt":0}}`},
+				{Id: 2, Type: LogTypeConsume, CreatedAt: at.Unix(), RequestId: "retry", SessionID: "s", ModelName: "claude-x", ChannelId: 1, PromptTokens: 100, Other: `{"claude":true,"cache_tokens":200,"cache_creation_tokens":700,"session_id_source":"content-fallback","admin_info":{"relay_attempt":1}}`},
+				{Id: 3, Type: LogTypeConsume, CreatedAt: at.Unix(), RequestId: "missing", SessionID: "s", ModelName: "gpt-x", ChannelId: 2, PromptTokens: 2000, Other: `{"cache_tokens":1000,"session_id_source":"prompt_cache_key","admin_info":{"relay_attempt":0}}`},
+				{Id: 4, Type: LogTypeError, CreatedAt: at.Unix(), RequestId: "retry", SessionID: "s", ModelName: "claude-x", ChannelId: 1, Other: `{"session_id_source":"content-fallback","admin_info":{"relay_attempt":0}}`},
+				{Id: 5, Type: LogTypeConsume, CreatedAt: at.Unix(), RequestId: "legacy", SessionID: "s", ModelName: "claude-x", ChannelId: 1, PromptTokens: 1000, Other: `{}`},
+			}
+			require.NoError(t, db.Create(&logs).Error)
+			row := skeletonFixture(at, 1, []uint64{1, 2, 3}, []string{"tool", "system.text", "user.text"}, []uint16{2}, 2, 200)
+			row.RequestId, row.SessionId, row.Attempt, row.Input, row.CacheCreation = "retry", "s", 1, 100, 700
+			wrong := *row
+			wrong.Attempt = 0
+			legacy := *row
+			legacy.RequestId = "legacy"
+			for _, tc := range []struct {
+				name   string
+				filter LogFilter
+				want   int
+			}{
+				{"all", LogFilter{}, 3},
+				{"model", LogFilter{ModelName: LogFieldFilter{Values: []string{"claude-x"}}}, 2},
+				{"channel", LogFilter{Channel: LogChannelFilter{Values: []int{2}}}, 1},
+				{"source", LogFilter{SessionIdSource: LogFieldFilter{Values: []string{"content-fallback"}}}, 1},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					filter := tc.filter
+					filter.Type, filter.StartTimestamp, filter.EndTimestamp = LogTypeConsume, at.Unix(), at.Unix()
+					tx, err := filter.apply(db.Model(&Log{}))
+					require.NoError(t, err)
+					var selectedLogs []*Log
+					require.NoError(t, tx.Find(&selectedLogs).Error)
+					assert.Len(t, selectedLogs, tc.want)
+					selected, input := matchSkeletonConsumes([]*CacheSkeleton{&wrong, row, &legacy}, selectedLogs)
+					if tc.name == "channel" {
+						assert.Empty(t, selected)
+						return
+					}
+					assert.Equal(t, map[*CacheSkeleton]bool{row: true}, selected)
+					assert.Equal(t, int64(1000), input)
+				})
+			}
+			if dialect != "clickhouse" {
+				return
+			}
+			t.Setenv("CACHE_SKELETON_STORAGE_POLICY", "")
+			require.NoError(t, MigrateCacheSkeletons())
+			t.Cleanup(func() { assert.NoError(t, db.Exec("DROP TABLE cache_skeletons SYNC").Error) })
+			first := *row
+			first.RequestId, first.Ts, first.EndTs = "warmup", at.Add(-time.Minute), at.Add(-50*time.Second)
+			first.Attempt, first.Input, first.CacheRead, first.CacheCreation = 0, 100, 29900, 0
+			require.NoError(t, db.Create([]*CacheSkeleton{&first, &wrong, row, &legacy}).Error)
+			got, err := GetSessionCacheRangeAnalysis(0, LogFilter{StartTimestamp: at.Unix(), EndTimestamp: at.Unix()})
+			require.NoError(t, err)
+			assert.Equal(t, int64(4000), got.Actual.InputAll)
+			assert.Equal(t, int64(1200), got.Actual.CacheRead)
+			assert.Equal(t, got.Actual.InputAll, got.SourceStats.ContentFallback.Cache.InputAll+got.SourceStats.NonContentFallback.Cache.InputAll)
+			assert.Equal(t, got.Actual.CacheRead, got.SourceStats.ContentFallback.Cache.CacheRead+got.SourceStats.NonContentFallback.Cache.CacheRead)
+			assert.Equal(t, int64(3), got.ConsumeCount)
+			assert.Equal(t, int64(1), got.SampleCount)
+			assert.Equal(t, int64(1000), got.SampleInput)
+			assert.Equal(t, int64(1000), got.Summary.Total)
+			assert.Equal(t, int64(200), got.Summary.Actual)
+			assert.Greater(t, got.Summary.Current, got.Summary.Actual)
+			assert.Equal(t, int64(1), got.LossSummary.AnalyzedTurns)
+			for _, filter := range []LogFilter{
+				{ModelName: LogFieldFilter{Values: []string{"claude-x"}}},
+				{Channel: LogChannelFilter{Values: []int{1}}},
+				{SessionIdSource: LogFieldFilter{Values: []string{"content-fallback"}}},
+			} {
+				filter.StartTimestamp, filter.EndTimestamp = at.Unix(), at.Unix()
+				filtered, err := GetSessionCacheRangeAnalysis(0, filter)
+				require.NoError(t, err)
+				assert.Equal(t, int64(200), filtered.Actual.CacheRead)
+				assert.Equal(t, int64(1), filtered.SampleCount)
+			}
+			selected, _ := matchSkeletonConsumes([]*CacheSkeleton{row, row}, []*Log{&logs[1]})
+			assert.Empty(t, selected, "ambiguous skeleton identity is never guessed")
+		})
 	}
 }
 

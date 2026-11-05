@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/cespare/xxhash/v2"
+	"gorm.io/gorm"
 )
 
 // Turn reasons, first match wins (see classifySkeletonTurn).
@@ -183,15 +185,20 @@ func GetSessionCacheAnalysis(sessionId string) (*SessionCacheAnalysis, error) {
 }
 
 type SessionCacheRangeAnalysis struct {
-	Summary     SkeletonRates       `json:"summary"`
-	Provider    string              `json:"provider"`
-	Truncated   bool                `json:"truncated"`
-	LossSummary SkeletonLossSummary `json:"loss_summary"`
-	Coverage    SkeletonCoverage    `json:"coverage"`
-	SourceStats SessionSourceStats  `json:"source_stats"`
+	Actual       LogCacheCell        `json:"actual"`
+	ConsumeCount int64               `json:"consume_count"`
+	SampleCount  int64               `json:"sample_count"`
+	SampleInput  int64               `json:"sample_input"`
+	Summary      SkeletonRates       `json:"summary"`
+	Provider     string              `json:"provider"`
+	Truncated    bool                `json:"truncated"`
+	LossSummary  SkeletonLossSummary `json:"loss_summary"`
+	Coverage     SkeletonCoverage    `json:"coverage"`
+	SourceStats  SessionSourceStats  `json:"source_stats"`
 }
 
 type SessionSourceSummary struct {
+	ConsumeCount int64        `json:"consume_count"`
 	SessionCount int64        `json:"session_count"`
 	RequestCount int64        `json:"request_count"`
 	TokenCount   int64        `json:"token_count"`
@@ -204,6 +211,7 @@ type SessionSourceStats struct {
 }
 
 type sessionSourceSummaryRow struct {
+	ConsumeCount int64  `gorm:"column:consume_count"`
 	Category     string `gorm:"column:category"`
 	SessionCount int64  `gorm:"column:session_count"`
 	RequestCount int64  `gorm:"column:request_count"`
@@ -214,11 +222,14 @@ type sessionSourceSummaryRow struct {
 	ColdWrite    int    `gorm:"column:cold_write"`
 }
 
-func getSessionSourceStats(filter LogFilter) (SessionSourceStats, error) {
+func getSessionSourceStats(userId int, filter LogFilter) (SessionSourceStats, error) {
 	filter.Type = LogTypeUnknown
 	tx, err := filter.apply(LOG_DB)
 	if err != nil {
 		return SessionSourceStats{}, err
+	}
+	if userId > 0 {
+		tx = tx.Where("logs.user_id = ?", userId)
 	}
 
 	var rows []sessionSourceSummaryRow
@@ -231,6 +242,7 @@ func getSessionSourceStats(filter LogFilter) (SessionSourceStats, error) {
 			uniqExactIf(logs.session_id,
 				logs.session_id != '' AND logs.session_id != 'notfound') AS session_count,
 			count(*) AS request_count,
+			countIf(logs.type = ?) AS consume_count,
 			sum(logs.prompt_tokens + logs.completion_tokens) AS token_count,
 			sumIf(if(logs.type = ?, toInt64(JSONExtractFloat(logs.other, 'cache_tokens')), 0), logs.type = ?) AS cache_read,
 			sumIf(if(logs.type = ?,
@@ -242,6 +254,7 @@ func getSessionSourceStats(filter LogFilter) (SessionSourceStats, error) {
 			countIf(logs.type = ? AND JSONExtractFloat(logs.other, 'cache_tokens') > 0) AS cache_hit,
 			countIf(logs.type = ? AND JSONExtractFloat(logs.other, 'cache_tokens') <= 0
 				AND JSONExtractFloat(logs.other, 'cache_creation_tokens') > 0) AS cold_write`,
+			LogTypeConsume,
 			LogTypeConsume, LogTypeConsume,
 			LogTypeConsume, LogTypeConsume,
 			LogTypeConsume, LogTypeConsume,
@@ -257,6 +270,7 @@ func getSessionSourceStats(filter LogFilter) (SessionSourceStats, error) {
 		summary := SessionSourceSummary{
 			SessionCount: row.SessionCount,
 			RequestCount: row.RequestCount,
+			ConsumeCount: row.ConsumeCount,
 			TokenCount:   row.TokenCount,
 			Cache: LogCacheCell{
 				GrossRate: logCacheHitRate(row.CacheRead, row.CacheInput),
@@ -275,29 +289,52 @@ func getSessionSourceStats(filter LogFilter) (SessionSourceStats, error) {
 	return stats, nil
 }
 
-// GetSessionCacheRangeAnalysis replays skeletons for sessions matching the
-// session-list filters. It is called independently from the paginated list.
+// GetSessionCacheRangeAnalysis measures filtered logs and replays retained
+// history, aggregating only consume attempts identified by those filtered logs.
 func GetSessionCacheRangeAnalysis(userId int, filter LogFilter) (*SessionCacheRangeAnalysis, error) {
-	query, args, err := logSessionQuery(userId, filter)
+	filter.Type = LogTypeUnknown
+	tx, err := filter.apply(LOG_DB)
 	if err != nil {
 		return nil, err
 	}
+	if userId > 0 {
+		tx = tx.Where("logs.user_id = ?", userId)
+	}
+	tx = tx.Model(&Log{}).Where("logs.type IN ?", []int{LogTypeConsume, LogTypeError}).
+		Where("logs.session_id NOT IN ?", []string{"", logSessionNotFound})
 	sessionIDs := make([]string, 0)
-	sessionArgs := append(slices.Clone(args), skeletonRangeSessionLimit+1)
-	if err := LOG_DB.Raw("SELECT session_id FROM ("+query+") ORDER BY s_last_at DESC, session_id DESC LIMIT ?", sessionArgs...).Scan(&sessionIDs).Error; err != nil {
+	if err := tx.Session(&gorm.Session{}).Distinct("logs.session_id").Order("logs.session_id").
+		Limit(skeletonRangeSessionLimit+1).Pluck("logs.session_id", &sessionIDs).Error; err != nil {
 		return nil, err
 	}
 	result := &SessionCacheRangeAnalysis{}
-	result.SourceStats, err = getSessionSourceStats(filter)
+	result.SourceStats, err = getSessionSourceStats(userId, filter)
 	if err != nil {
 		return nil, err
 	}
+	for _, source := range []SessionSourceSummary{result.SourceStats.ContentFallback, result.SourceStats.NonContentFallback} {
+		result.Actual.CacheRead += source.Cache.CacheRead
+		result.Actual.InputAll += source.Cache.InputAll
+		result.ConsumeCount += source.ConsumeCount
+	}
+	result.Actual.GrossRate = logCacheHitRate(result.Actual.CacheRead, result.Actual.InputAll)
 	if len(sessionIDs) > skeletonRangeSessionLimit {
 		sessionIDs = sessionIDs[:skeletonRangeSessionLimit]
 		result.Truncated = true
 	}
 	if len(sessionIDs) == 0 {
 		return result, nil
+	}
+	var logs []*Log
+	if err := tx.Session(&gorm.Session{}).Where("logs.type = ?", LogTypeConsume).
+		Where("logs.session_id IN ?", sessionIDs).
+		Select("logs.request_id, logs.session_id, logs.token_id, logs.channel_id, logs.node_name, logs.other, logs.prompt_tokens").
+		Order("logs.created_at ASC, logs.id ASC").Limit(skeletonRangeRowLimit + 1).Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	if len(logs) > skeletonRangeRowLimit {
+		logs = logs[:skeletonRangeRowLimit]
+		result.Truncated = true
 	}
 
 	rows := make([]*CacheSkeleton, 0)
@@ -314,18 +351,24 @@ func GetSessionCacheRangeAnalysis(userId int, filter LogFilter) (*SessionCacheRa
 	}
 
 	bySession := make(map[string][]*CacheSkeleton, len(sessionIDs))
-	providers := make(map[string]struct{})
 	for _, row := range rows {
 		bySession[row.SessionId] = append(bySession[row.SessionId], row)
-		providers[row.Provider] = struct{}{}
 	}
+	logsBySession := make(map[string][]*Log, len(sessionIDs))
+	for _, log := range logs {
+		logsBySession[log.SessionID] = append(logsBySession[log.SessionID], log)
+	}
+	providers := make(map[string]struct{})
 	for _, sessionID := range sessionIDs {
-		sessionRows := bySession[sessionID]
-		if len(sessionRows) > skeletonSessionRowLimit {
-			sessionRows = sessionRows[:skeletonSessionRowLimit]
-			result.Truncated = true
+		analysis, input := analyzeSessionCacheRange(bySession[sessionID], logsBySession[sessionID], skeletonSessionRowLimit)
+		result.SampleInput += input
+		result.Truncated = result.Truncated || analysis.Truncated
+		for _, lane := range analysis.Lanes {
+			result.SampleCount += int64(len(lane.Turns))
+			if len(lane.Turns) > 0 {
+				providers[lane.Provider] = struct{}{}
+			}
 		}
-		analysis := AnalyzeCacheSkeletons(sessionRows)
 		result.Summary.add(analysis.Summary)
 		result.LossSummary.add(analysis.LossSummary)
 		result.Coverage.add(analysis.Coverage)
@@ -341,6 +384,125 @@ func GetSessionCacheRangeAnalysis(userId int, filter LogFilter) (*SessionCacheRa
 		}
 	}
 	return result, nil
+}
+
+// analyzeSessionCacheRange replays only bounded history ending at the last
+// matched attempt. Truncated means warmup history or selected attempts were
+// omitted; its simulations are partial, not a fully warmed lifecycle replay.
+func analyzeSessionCacheRange(rows []*CacheSkeleton, logs []*Log, historyLimit int) (*SessionCacheAnalysis, int64) {
+	selected, _ := matchSkeletonConsumes(rows, logs)
+	last := -1
+	for i, row := range rows {
+		if selected[row] {
+			last = i
+		}
+	}
+	if last < 0 {
+		return &SessionCacheAnalysis{Lanes: []SkeletonLane{}}, 0
+	}
+	start := max(0, last+1-historyLimit)
+	rows = rows[start : last+1]
+	// Recount input only after clipping. Restrict candidates to identities that
+	// were already unique in the original scan, so clipping cannot resolve an
+	// ambiguous identity by accidentally discarding its duplicate.
+	retained := make([]*CacheSkeleton, 0, len(rows))
+	for _, row := range rows {
+		if selected[row] {
+			retained = append(retained, row)
+		}
+	}
+	selected, input := matchSkeletonConsumes(retained, logs)
+	analysis := analyzeSelectedCacheSkeletons(rows, selected)
+	analysis.Truncated = start > 0
+	return analysis, input
+}
+
+// analyzeSelectedCacheSkeletons restores history before restricting every
+// aggregate to the exact matched attempts. Session detail keeps the full replay.
+func analyzeSelectedCacheSkeletons(rows []*CacheSkeleton, selected map[*CacheSkeleton]bool) *SessionCacheAnalysis {
+	analysis := AnalyzeCacheSkeletons(rows)
+	// Keep the exact row-to-turn correspondence, including tied timestamps.
+	laneRows := make(map[string][]*CacheSkeleton)
+	for _, row := range rows {
+		lane := strconv.FormatUint(row.Lane, 16)
+		laneRows[lane] = append(laneRows[lane], row)
+	}
+	analysis.Summary, analysis.LossSummary, analysis.Coverage = SkeletonRates{}, SkeletonLossSummary{}, SkeletonCoverage{}
+	for i := range analysis.Lanes {
+		lane := &analysis.Lanes[i]
+		lane.Summary, lane.LossSummary, lane.Coverage = SkeletonRates{}, SkeletonLossSummary{}, SkeletonCoverage{}
+		turns := lane.Turns[:0]
+		for j, turn := range lane.Turns {
+			if !selected[laneRows[lane.Lane][j]] || turn.Reason == SkeletonReasonError {
+				continue
+			}
+			turns = append(turns, turn)
+			rates := SkeletonRates{Total: turn.TotalTokens, Actual: turn.ActualRead,
+				Current: max(turn.ActualRead, turn.ExpectedCurrent), Adjusted: max(turn.ActualRead, turn.ExpectedAdjusted),
+				Adjusted1h: max(turn.ActualRead, turn.ExpectedAdjusted1h)}
+			if lane.Provider != SkeletonProviderOpenAI {
+				rates.Advanced, rates.Advanced1h = max(turn.ActualRead, turn.ExpectedAdvanced), max(turn.ActualRead, turn.ExpectedAdvanced1h)
+				lane.LossSummary.add(SkeletonLossSummary{AnalyzedTurns: 1, TotalTokens: turn.TotalTokens,
+					ActualRead: turn.ActualRead, UncachedTokens: max(0, turn.TotalTokens-turn.ActualRead), Items: turn.Losses})
+			}
+			lane.Summary.add(rates)
+			if turn.CoverageAvailable {
+				lane.Coverage.add(SkeletonCoverage{BaselineCovered: turn.BaselineBytes, OptimizedCovered: turn.OptimizedBytes,
+					Delta: turn.CoverageDeltaBytes, TotalBytes: turn.CoverageTotalBytes, ComparableTurns: 1})
+			}
+		}
+		lane.Turns = turns
+		analysis.Summary.add(lane.Summary)
+		analysis.LossSummary.add(lane.LossSummary)
+		analysis.Coverage.add(lane.Coverage)
+	}
+	return analysis
+}
+
+// matchSkeletonConsumes requires an explicit attempt identity. Legacy logs lack
+// it: neither second-resolution completion timestamps nor use_channel prove
+// which attempt was recorded when skeletons are missing. Leave those uncovered.
+func matchSkeletonConsumes(rows []*CacheSkeleton, logs []*Log) (map[*CacheSkeleton]bool, int64) {
+	type identity struct {
+		request, session, node string
+		token, channel         int
+		attempt                int
+	}
+	candidates := make(map[identity][]*CacheSkeleton)
+	for _, row := range rows {
+		if row.Status != "ok" || len(row.BlkHash) == 0 || uint64(row.Input)+uint64(row.CacheRead)+uint64(row.CacheCreation) == 0 {
+			continue
+		}
+		key := identity{row.RequestId, row.SessionId, row.Node, int(row.TokenId), int(row.ChannelId), int(row.Attempt)}
+		candidates[key] = append(candidates[key], row)
+	}
+	selected := make(map[*CacheSkeleton]bool)
+	var input int64
+	for _, log := range logs {
+		var other struct {
+			Admin struct {
+				Attempt *int `json:"relay_attempt"`
+			} `json:"admin_info"`
+			Claude   bool  `json:"claude"`
+			Read     int64 `json:"cache_tokens"`
+			Creation int64 `json:"cache_creation_tokens"`
+		}
+		if common.UnmarshalJsonStr(log.Other, &other) != nil || other.Admin.Attempt == nil ||
+			*other.Admin.Attempt < 0 || *other.Admin.Attempt >= 255 || log.RequestId == "" {
+			continue
+		}
+		key := identity{log.RequestId, log.SessionID, log.NodeName, log.TokenId, log.ChannelId, *other.Admin.Attempt}
+		matches := candidates[key]
+		if len(matches) != 1 || selected[matches[0]] {
+			continue
+		}
+		selected[matches[0]] = true
+		input += int64(log.PromptTokens)
+		if other.Claude {
+			input += other.Read + other.Creation
+		}
+	}
+	return selected, input
 }
 
 // AnalyzeCacheSkeletons groups time-ordered skeletons by lane and replays

@@ -25,10 +25,13 @@ import { useTranslation } from 'react-i18next'
 import {
   DataTablePage,
   DataTableRow,
+  StaticDataTable,
   useDataTable,
 } from '@/components/data-table'
 import { TableCell, TableRow } from '@/components/ui/table'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber } from '@/lib/format'
 import { createServerError } from '@/lib/server-error-message'
 
 import { getLogSessions, getSessionCacheRangeAnalysis } from '../api'
@@ -64,7 +67,8 @@ interface UsageLogsSessionsProps {
 // UsageLogsSessions is the session view of the common logs: one row per
 // session_id, expanded in place to list the session's requests.
 export function UsageLogsSessions(props: UsageLogsSessionsProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const { isAdminView, viewAccess } = useLogsViewScope()
   const { sensitiveVisible } = useUsageLogsContext()
   const searchParams = route.useSearch()
@@ -240,9 +244,33 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                       {t('Actual hit rate')}{' '}
                       <b>
                         {skeletonRate(
+                          cacheSummary.actual?.cache_read ?? 0,
+                          cacheSummary.actual?.input_all ?? 0
+                        )}
+                      </b>
+                    </span>
+                    <span>
+                      {t('Sample actual hit rate')}{' '}
+                      <b>
+                        {skeletonRate(
                           cacheSummaryRates.actual,
                           cacheSummaryRates.total
                         )}
+                      </b>
+                    </span>
+                    <span>
+                      {t('Analyzable consume coverage')}{' '}
+                      <b>
+                        {t('{{requests}} requests / {{input}} input', {
+                          requests: skeletonRate(
+                            cacheSummary.sample_count ?? 0,
+                            cacheSummary.consume_count ?? 0
+                          ),
+                          input: skeletonRate(
+                            cacheSummary.sample_input ?? 0,
+                            cacheSummary.actual?.input_all ?? 0
+                          ),
+                        })}
                       </b>
                     </span>
                     <span>
@@ -305,7 +333,7 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                   <>
                     {sourceStats && (
                       <div className='basis-full overflow-x-auto pt-1'>
-                        <table className='min-w-[520px] border-collapse text-xs'>
+                        <StaticDataTable tableClassName='min-w-[520px] border-collapse text-xs'>
                           <caption className='sr-only'>
                             {t('Content fallback comparison')}
                           </caption>
@@ -319,7 +347,10 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                                 {t('Requests')}
                               </th>
                               <th className='pr-4 font-normal'>
-                                {t('Token count')}
+                                {t('Input total (consume)')}
+                              </th>
+                              <th className='pr-4 font-normal'>
+                                {t('Cache read (consume)')}
                               </th>
                               <th className='font-normal'>
                                 {t('Aggregate hit rate')}
@@ -342,13 +373,28 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                                   {item.label}
                                 </th>
                                 <td className='py-1 pr-4'>
-                                  {item.summary.session_count}
+                                  {formatNumber(
+                                    item.summary.session_count,
+                                    locale
+                                  )}
                                 </td>
                                 <td className='py-1 pr-4'>
-                                  {item.summary.request_count}
+                                  {formatNumber(
+                                    item.summary.request_count,
+                                    locale
+                                  )}
                                 </td>
                                 <td className='py-1 pr-4'>
-                                  {item.summary.token_count}
+                                  {formatNumber(
+                                    item.summary.cache.input_all,
+                                    locale
+                                  )}
+                                </td>
+                                <td className='py-1 pr-4'>
+                                  {formatNumber(
+                                    item.summary.cache.cache_read,
+                                    locale
+                                  )}
                                 </td>
                                 <td className='py-1'>
                                   {skeletonRate(
@@ -359,13 +405,23 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                               </tr>
                             ))}
                           </tbody>
-                        </table>
+                        </StaticDataTable>
+                        <p className='text-muted-foreground pt-1'>
+                          {t(
+                            'Requests include errors. Cache rates use consume logs only. Sessions may appear in both source groups.'
+                          )}
+                        </p>
                       </div>
                     )}
                     <ByteCacheCoverageSummary
                       coverage={cacheSummary.coverage}
                     />
                     <CacheLossBreakdown summary={cacheSummary.loss_summary} />
+                    <p className='text-muted-foreground basis-full'>
+                      {t(
+                        'Simulations, losses and byte coverage use matched consume attempts only, with retained history replayed for warmup. Logs without an exact attempt identity or skeleton are excluded from the sample.'
+                      )}
+                    </p>
                   </>
                 )}
               </section>

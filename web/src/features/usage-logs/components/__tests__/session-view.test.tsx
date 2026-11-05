@@ -116,6 +116,10 @@ function mockApi(
           success: true,
           data: {
             enabled: true,
+            actual: { cache_read: 1500, input_all: 3600 },
+            consume_count: 8,
+            sample_count: 2,
+            sample_input: 1000,
             provider: options?.provider ?? 'openai',
             loss_summary: options?.lossSummary,
             coverage: {
@@ -282,6 +286,16 @@ it('lists sessions collapsed and loads no session requests before expanding', as
   await act(async () => finishSummary())
   expect(await screen.findByText('Actual hit rate')).toBeVisible()
   expect(screen.getByText('75.0%')).toBeVisible()
+  expect(screen.getByText('41.7%')).toBeVisible()
+  expect(screen.getByText('Sample actual hit rate')).toBeVisible()
+  expect(screen.getByText('Analyzable consume coverage')).toBeVisible()
+  expect(screen.getByText('25.0% requests / 27.8% input')).toBeVisible()
+  expect(
+    screen.getByRole('columnheader', { name: 'Input total (consume)' })
+  ).toBeVisible()
+  expect(
+    screen.getByRole('columnheader', { name: 'Cache read (consume)' })
+  ).toBeVisible()
   expect(screen.getByText('80.0% → 50.0%')).toBeVisible()
   expect(screen.getByText('-30.0 pp / -300B')).toBeVisible()
   expect(screen.getByText('Prefix-match ceiling')).toBeVisible()

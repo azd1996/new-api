@@ -851,6 +851,10 @@ export interface SessionCacheRangeAnalysisResponse {
   message?: string
   data?: {
     enabled: boolean
+    actual?: LogCacheCell
+    consume_count?: number
+    sample_count?: number
+    sample_input?: number
     summary?: SkeletonRates
     coverage?: ByteCacheCoverage
     provider?: string

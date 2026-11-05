@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -286,4 +287,32 @@ func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {
 	AppendRelayLogAdminInfo(proxied, nil, withProxy)
 	assert.Equal(t, map[string]any{"url": "http://10.0.0.1:3128", "alias": "hk-1"},
 		withProxy.Snapshot()["admin_info"].(map[string]any)["proxy"], "the proxy-pool entry that carried the request is recorded for admins")
+}
+
+func TestRelayAttemptGeneratedInLogAdminJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		info *relaycommon.RelayInfo
+		want *int
+	}{
+		{name: "first attempt preserves zero", info: &relaycommon.RelayInfo{RetryIndex: 0}, want: new(0)},
+		{name: "retry preserves one", info: &relaycommon.RelayInfo{RetryIndex: 1}, want: new(1)},
+		{name: "nil relay does not invent an attempt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			other := model.NewLogOther()
+			AppendRelayLogAdminInfo(ctx, tc.info, other)
+			var stored struct {
+				AdminInfo struct {
+					Attempt *int `json:"relay_attempt"`
+				} `json:"admin_info"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(other.JSONString(), &stored))
+			assert.Equal(t, tc.want, stored.AdminInfo.Attempt)
+			var public map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(other.JSONString(), &public))
+			assert.NotContains(t, public, "relay_attempt", "attempt belongs only to admin_info")
+		})
+	}
 }
