@@ -230,7 +230,7 @@ describe('session cache diagnosis', () => {
     )
     assert.equal(
       skeletonTierLabels('claude').adjusted,
-      'After breakpoint adjustment'
+      'After tail breakpoint correction'
     )
     assert.equal(skeletonTierLabels('').adjustedLoss, 'Breakpoint misplaced')
   })

@@ -85,6 +85,18 @@ function RatesLine(props: {
         {t(labels.adjusted1h)}{' '}
         <b>{skeletonRate(rates.adjusted_1h, rates.total)}</b>
       </span>
+      {props.provider === 'claude' && (
+        <>
+          <span>
+            {t('After breakpoint advancement (simulated)')}{' '}
+            <b>{skeletonRate(rates.advanced, rates.total)}</b>
+          </span>
+          <span>
+            {t('Advancement + 1h TTL (simulated)')}{' '}
+            <b>{skeletonRate(rates.advanced_1h, rates.total)}</b>
+          </span>
+        </>
+      )}
       <span className='text-muted-foreground'>
         {t('Gateway channel switch')} {formatTokens(upstream.channelSwitch)} ·{' '}
         {t('Upstream miss')} {formatTokens(upstream.upstreamMiss)} ·{' '}
@@ -110,6 +122,16 @@ function LaneTurns(props: {
           <TableHead className='h-7 w-[40%]'>{t('Prompt prefix')}</TableHead>
           <TableHead className='h-7 text-right'>{t('Actual')}</TableHead>
           <TableHead className='h-7 text-right'>{t('Expected')}</TableHead>
+          {props.lane.provider === 'claude' && (
+            <>
+              <TableHead className='h-7 text-right'>
+                {t('After breakpoint advancement (simulated)')}
+              </TableHead>
+              <TableHead className='h-7 text-right'>
+                {t('Advancement + 1h TTL (simulated)')}
+              </TableHead>
+            </>
+          )}
           <TableHead className='h-7'>{t('Channel / key')}</TableHead>
           <TableHead className='h-7'>{t('Reason')}</TableHead>
           <TableHead className='h-7' />
@@ -151,7 +173,15 @@ function LaneTurns(props: {
               </TableCell>
               <TableCell className='py-1 text-right'>
                 {skeletonRate(turn.expected_current, turn.total_tokens)}
-                {turn.expected_adjusted > turn.expected_current &&
+                {props.lane.provider === 'claude' &&
+                  turn.expected_adjusted > turn.expected_current && (
+                    <div className='text-muted-foreground'>
+                      {t(skeletonTierLabels(props.lane.provider).adjusted)}{' '}
+                      {skeletonRate(turn.expected_adjusted, turn.total_tokens)}
+                    </div>
+                  )}
+                {props.lane.provider !== 'claude' &&
+                  turn.expected_adjusted > turn.expected_current &&
                   ` → ${skeletonRate(turn.expected_adjusted, turn.total_tokens)}`}
                 {turn.coverage_available &&
                   (turn.coverage_total_bytes ?? 0) > 0 && (
@@ -163,6 +193,16 @@ function LaneTurns(props: {
                     </div>
                   )}
               </TableCell>
+              {props.lane.provider === 'claude' && (
+                <>
+                  <TableCell className='py-1 text-right'>
+                    {skeletonRate(turn.expected_advanced, turn.total_tokens)}
+                  </TableCell>
+                  <TableCell className='py-1 text-right'>
+                    {skeletonRate(turn.expected_advanced_1h, turn.total_tokens)}
+                  </TableCell>
+                </>
+              )}
               <TableCell className='text-muted-foreground py-1'>
                 {turn.channel_id} / {turn.key_idx}
               </TableCell>
@@ -213,7 +253,7 @@ function LaneTurns(props: {
 
 // SessionCacheDiagnosis replays the session's request skeletons through the
 // prompt-cache simulation: actual hit rate against the ceilings with the
-// client's breakpoints, with the gateway adjustment and with a 1h TTL.
+// client's breakpoints, tail correction, advancement and longer retention.
 export function SessionCacheDiagnosis(props: { sessionId: string }) {
   const { t } = useTranslation()
   const [showTurns, setShowTurns] = useState(false)
@@ -251,6 +291,13 @@ export function SessionCacheDiagnosis(props: { sessionId: string }) {
           {showTurns ? t('Hide turns') : t('Show turns')}
         </Button>
       </div>
+      {lanes.some((lane) => lane.provider === 'claude') && (
+        <p className='text-muted-foreground'>
+          {t(
+            'Tail correction only moves a volatile system tail breakpoint. Advancement simulates covering growing stable history; simulated rates are estimates, not guaranteed gains.'
+          )}
+        </p>
+      )}
       {data.truncated && (
         <div className='text-warning'>
           {t('Only the first 2000 attempts of this session are analyzed')}

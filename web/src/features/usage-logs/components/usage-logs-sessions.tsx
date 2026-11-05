@@ -272,6 +272,28 @@ export function UsageLogsSessions(props: UsageLogsSessionsProps) {
                         )}
                       </b>
                     </span>
+                    {cacheSummary.provider === 'claude' && (
+                      <>
+                        <span>
+                          {t('After breakpoint advancement (simulated)')}{' '}
+                          <b>
+                            {skeletonRate(
+                              cacheSummaryRates.advanced,
+                              cacheSummaryRates.total
+                            )}
+                          </b>
+                        </span>
+                        <span>
+                          {t('Advancement + 1h TTL (simulated)')}{' '}
+                          <b>
+                            {skeletonRate(
+                              cacheSummaryRates.advanced_1h,
+                              cacheSummaryRates.total
+                            )}
+                          </b>
+                        </span>
+                      </>
+                    )}
                     {cacheSummaryQuery.data.truncated && (
                       <span className='text-warning'>
                         {t('partial sample (scan limit reached)')}

@@ -40,12 +40,17 @@ export function CacheLossBreakdown(props: { summary?: SkeletonLossSummary }) {
     concurrent: t('Possible concurrent overlap'),
     ttl_expired: t('TTL expired'),
     breakpoint_misplaced: t('Misplaced cache breakpoint'),
+    breakpoint_stalled: t('Breakpoint coverage insufficient / not advanced'),
+    stable_unexplained: t('Stable history unexplained'),
     lookback_exceeded: t('Cache lookback exceeded'),
     channel_switch: t('Channel switch correlation'),
     upstream_miss: t('Unexplained upstream gap'),
     new_content: t('New content / residual'),
   }
   const items = [...summary.items].sort((a, b) => b.tokens - a.tokens)
+  const stalled = summary.items.find(
+    (item) => item.reason === 'breakpoint_stalled'
+  )
 
   return (
     <section
@@ -72,6 +77,17 @@ export function CacheLossBreakdown(props: { summary?: SkeletonLossSummary }) {
           {skeletonRate(summary.uncached_tokens, summary.total_tokens)})
         </span>
       </div>
+      {stalled && stalled.tokens > 0 && (
+        <p className='text-warning'>
+          {t(
+            'Breakpoints did not cover growing stable history: {{tokens}} estimated tokens across {{turns}} attempts. Advance breakpoints as the conversation grows; tail system breakpoint correction alone does not address this.',
+            {
+              tokens: formatNumber(stalled.tokens, locale),
+              turns: formatNumber(stalled.turns, locale),
+            }
+          )}
+        </p>
+      )}
       {items.length > 0 && (
         <StaticDataTable
           tableProps={{ 'aria-label': t('Cache loss breakdown') }}
@@ -109,6 +125,11 @@ export function CacheLossBreakdown(props: { summary?: SkeletonLossSummary }) {
           ]}
         />
       )}
+      <p className='text-muted-foreground'>
+        {t(
+          'Breakpoint advancement and longer TTL rates are simulations, not guaranteed gains. Stable history unexplained means the remaining gap has no confirmed cause.'
+        )}
+      </p>
       <p className='text-muted-foreground'>
         {t(
           'Claude only, successful analyzable attempts. Byte-proportional estimates partition uncached input without overlap; attempts may appear in multiple reasons. First turns, changed input and new content are not necessarily recoverable.'

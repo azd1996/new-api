@@ -118,6 +118,8 @@ export const SKELETON_REASON_LABELS: Record<string, string> = {
   concurrent: 'Concurrent with previous turn',
   ttl_expired: 'TTL expired',
   breakpoint_misplaced: 'Breakpoint misplaced',
+  breakpoint_stalled: 'Breakpoint coverage insufficient / not advanced',
+  stable_unexplained: 'Stable history unexplained',
   lookback_exceeded: 'Cache lookback exceeded',
   channel_switch: 'Channel or key switched',
   upstream_miss: 'Upstream miss',
@@ -141,6 +143,8 @@ export const SKELETON_REASON_VARIANTS: Record<
   concurrent: 'info',
   ttl_expired: 'warning',
   breakpoint_misplaced: 'warning',
+  breakpoint_stalled: 'warning',
+  stable_unexplained: 'neutral',
   lookback_exceeded: 'warning',
   channel_switch: 'danger',
   upstream_miss: 'danger',
@@ -171,15 +175,15 @@ export function skeletonTierLabels(provider: string): SkeletonTierLabels {
   }
   return {
     current: 'Ceiling with client breakpoints',
-    adjusted: 'After breakpoint adjustment',
-    adjusted1h: 'Adjustment + 1h TTL',
+    adjusted: 'After tail breakpoint correction',
+    adjusted1h: 'Tail correction + 1h TTL',
     adjustedLoss: 'Breakpoint misplaced',
   }
 }
 
-// skeletonRate is part/total as a percentage, '—' without input tokens.
-export function skeletonRate(part: number, total: number): string {
-  if (total <= 0) return '—'
+// skeletonRate is part/total as a percentage, '—' for unknown values or no input.
+export function skeletonRate(part: number | undefined, total: number): string {
+  if (part === undefined || total <= 0) return '—'
   return `${((part / total) * 100).toFixed(1)}%`
 }
 

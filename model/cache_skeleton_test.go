@@ -240,7 +240,7 @@ func TestAnalyzeCacheSkeletons(t *testing.T) {
 		require.NotEmpty(t, turn.Losses)
 		assert.Equal(t, SkeletonLossAmount{SkeletonReasonMisplaced, 17647, 1}, turn.Losses[0])
 		assert.Equal(t, []SkeletonSegment{{State: "same", Bytes: 3000}, {State: "changed", Bytes: 1000}, {State: "new", Bytes: 1100}}, turn.Segments)
-		assert.Equal(t, SkeletonRates{Total: 60000, Actual: 0, Current: 0, Adjusted: 17647, Adjusted1h: 17647}, lane.Summary)
+		assert.Equal(t, SkeletonRates{Total: 60000, Actual: 0, Current: 0, Adjusted: 17647, Adjusted1h: 17647, Advanced: 17647, Advanced1h: 17647}, lane.Summary)
 	})
 
 	t.Run("gap beyond 5m is ttl_expired and recovered by 1h", func(t *testing.T) {
@@ -393,6 +393,15 @@ func TestClaudeCacheLossSummary(t *testing.T) {
 			},
 		},
 		{
+			name: "previous turn without a breakpoint is not a lookback loss",
+			change: func(first, _ *CacheSkeleton) {
+				first.BpIdx, first.BpTtl = nil, nil
+			},
+			want: []SkeletonLossAmount{
+				{SkeletonReasonNoBreakpoint, 18000, 1}, {SkeletonReasonNewContent, 12000, 1},
+			},
+		},
+		{
 			name: "expired prefix within 1h is separated from new input",
 			change: func(_, next *CacheSkeleton) {
 				next.Ts, next.EndTs = t0.Add(10*time.Minute), t0.Add(10*time.Minute+time.Second)
@@ -425,11 +434,8 @@ func TestClaudeCacheLossSummary(t *testing.T) {
 				next.BlkHash[1] = 99
 			},
 			want: []SkeletonLossAmount{
-				// Block 0 (1000/5000 bytes = 6000 tokens) is byte-identical to
-				// the previous turn and the channel/key did not change, so it
-				// is attributed to upstream_miss rather than folded into
-				// prefix_changed or new_content.
-				{SkeletonReasonUpstreamMiss, 6000, 1}, {SkeletonReasonPrefixChanged, 12000, 1}, {SkeletonReasonNewContent, 12000, 1},
+				// Block 0 is stable, but no breakpoint wrote its prefix.
+				{SkeletonReasonStableUnexplained, 6000, 1}, {SkeletonReasonPrefixChanged, 12000, 1}, {SkeletonReasonNewContent, 12000, 1},
 			},
 		},
 		{
@@ -463,6 +469,7 @@ func TestClaudeCacheLossSummary(t *testing.T) {
 			var sum int64
 			for _, item := range summary.Items {
 				assert.Positive(t, item.Tokens)
+				assert.LessOrEqual(t, item.Turns, summary.AnalyzedTurns)
 				sum += item.Tokens
 			}
 			assert.Equal(t, summary.TotalTokens-summary.ActualRead, sum)
@@ -470,6 +477,53 @@ func TestClaudeCacheLossSummary(t *testing.T) {
 			assert.Equal(t, summary, analysis.Lanes[0].LossSummary)
 		})
 	}
+}
+
+func TestClaudeCacheLossMergesRepeatedReasons(t *testing.T) {
+	t0 := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	var rows []*CacheSkeleton
+	for i, n := range []int{25, 3, 27} {
+		hashes, kinds := make([]uint64, n), make([]string, n)
+		for j := range hashes {
+			hashes[j], kinds[j] = uint64(j+1), "user.text"
+		}
+		row := skeletonFixture(t0.Add(time.Duration(i)*10*time.Minute), 1, hashes, kinds, []uint16{0}, 1, 0)
+		row.Input, row.BpTtl = uint32(n*1000), []string{"5m"}
+		rows = append(rows, row)
+	}
+	analysis := AnalyzeCacheSkeletons(rows)
+	require.Len(t, analysis.Lanes, 1)
+	lane := analysis.Lanes[0]
+	require.Len(t, lane.Turns, 3)
+	assert.Equal(t, []SkeletonLossAmount{
+		{SkeletonReasonTTLExpired, 24000, 1},
+		{SkeletonReasonStalled, 1000, 1},
+		{SkeletonReasonNewContent, 2000, 1},
+	}, lane.Turns[2].Losses, "merge TTL segments in first-appearance order")
+	for _, turn := range lane.Turns {
+		seen := map[string]bool{}
+		var sum int64
+		for _, item := range turn.Losses {
+			assert.False(t, seen[item.Reason], "duplicate reason %s", item.Reason)
+			seen[item.Reason] = true
+			assert.Equal(t, int64(1), item.Turns)
+			sum += item.Tokens
+		}
+		assert.Equal(t, turn.TotalTokens-turn.ActualRead, sum)
+	}
+	assert.Equal(t, []SkeletonLossAmount{
+		{SkeletonReasonFirstTurn, 25000, 1},
+		{SkeletonReasonTTLExpired, 26000, 2},
+		{SkeletonReasonStalled, 2000, 2},
+		{SkeletonReasonNewContent, 2000, 1},
+	}, analysis.LossSummary.Items)
+	assert.Equal(t, lane.LossSummary, analysis.LossSummary)
+	var sum int64
+	for _, item := range analysis.LossSummary.Items {
+		assert.LessOrEqual(t, item.Turns, analysis.LossSummary.AnalyzedTurns)
+		sum += item.Tokens
+	}
+	assert.Equal(t, analysis.LossSummary.UncachedTokens, sum)
 }
 
 func TestClaudeCacheLossLookbackBoundary(t *testing.T) {
@@ -503,12 +557,8 @@ func TestClaudeCacheLossLookbackBoundary(t *testing.T) {
 // turn where every simulated-hit ceiling (current/adjusted/adjusted1h/lookback)
 // is exhausted (the gap exceeds both the lookback window and the 1h TTL), yet
 // the hash comparison proves the old-history prefix is byte-identical to the
-// previous turn. None of the waterfall's simulated-cache candidates can
-// explain this turn's shortfall, so before the stableTokens clamp this would
-// have silently fallen into new_content even though the content never
-// changed. This is the shape of "the upstream account pool rotated under a
-// stable channel/key": the gateway cannot name the real cause, but it must
-// not misreport it as new input.
+// previous turn. Repeated bytes alone do not establish a live written cache
+// entry. Preserve the distinction from new input without blaming upstream.
 func TestClaudeCacheLossStablePrefixSurvivesExhaustedSimulatorCeilings(t *testing.T) {
 	t0 := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
 	first := skeletonFixture(t0, 1, []uint64{1, 2, 3}, []string{"tool", "system.text", "user.text"}, []uint16{2}, 2, 0)
@@ -521,10 +571,9 @@ func TestClaudeCacheLossStablePrefixSurvivesExhaustedSimulatorCeilings(t *testin
 	turn := turns[1]
 	assert.Zero(t, turn.ExpectedCurrent, "the 2h gap exceeds the 1h adjusted1h ceiling too")
 	assert.Equal(t, -1, turn.DivergeIdx, "the old-history prefix (blocks 0-2) is byte-identical")
-	// Same channel/key as the previous turn, so the unexplained shortfall is
-	// upstream_miss rather than channel_switch.
+	// All simulated entries expired: there is no evidence of an upstream miss.
 	assert.Equal(t, []SkeletonLossAmount{
-		{SkeletonReasonUpstreamMiss, 18000, 1}, {SkeletonReasonNewContent, 12000, 1},
+		{SkeletonReasonStableUnexplained, 18000, 1}, {SkeletonReasonNewContent, 12000, 1},
 	}, turn.Losses)
 }
 
@@ -557,4 +606,131 @@ func TestClaudeCacheLossAggregatesLanes(t *testing.T) {
 			{SkeletonReasonNewContent, 12000, 1},
 		},
 	}, analysis.LossSummary)
+}
+
+func TestClaudeRollingBreakpointRegression(t *testing.T) {
+	t0 := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name                 string
+		gap                  time.Duration
+		rolling              bool
+		read                 uint32
+		advanced, advanced1h int64
+	}{
+		{"fixed", time.Minute, false, 0, 25000, 25000},
+		{"fixed 5m expired", 10 * time.Minute, false, 0, 0, 25000},
+		{"fixed expired", 2 * time.Hour, false, 0, 0, 0},
+		{"observed read exceeds simulations", 2 * time.Hour, false, 20000, 0, 0},
+		{"rolling", time.Minute, true, 0, 25000, 25000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var rows []*CacheSkeleton
+			for i, n := range []int{3, 25, 47} {
+				hashes, kinds := make([]uint64, n), make([]string, n)
+				for j := range hashes {
+					hashes[j], kinds[j] = uint64(j+1), "user.text"
+				}
+				bp := uint16(1)
+				if tc.rolling {
+					bp = uint16(n - 1)
+				}
+				row := skeletonFixture(t0.Add(time.Duration(i)*tc.gap), 1, hashes, kinds, []uint16{0}, bp, 0)
+				// Constant token density makes every expected amount exact.
+				row.Input = uint32(n * 1000)
+				if i == 2 {
+					row.CacheRead, row.Input = tc.read, row.Input-tc.read
+				}
+				rows = append(rows, row)
+			}
+			analysis := AnalyzeCacheSkeletons(rows)
+			require.Len(t, analysis.Lanes, 1)
+			turn := analysis.Lanes[0].Turns[2]
+			assert.Equal(t, tc.advanced, turn.ExpectedAdvanced)
+			assert.Equal(t, tc.advanced1h, turn.ExpectedAdvanced1h)
+			assert.Equal(t, analysis.Lanes[0].Summary.Advanced, analysis.Summary.Advanced)
+			assert.Equal(t, analysis.Lanes[0].Summary.Advanced1h, analysis.Summary.Advanced1h)
+			assert.GreaterOrEqual(t, analysis.Summary.Advanced, analysis.Summary.Actual)
+			amounts := map[string]int64{}
+			var sum int64
+			for _, item := range turn.Losses {
+				amounts[item.Reason] += item.Tokens
+				sum += item.Tokens
+			}
+			assert.Equal(t, turn.TotalTokens-turn.ActualRead, sum)
+			if tc.rolling {
+				assert.Zero(t, amounts["breakpoint_stalled"], "a moved endpoint is a lookback issue, not stalled coverage")
+				assert.Zero(t, amounts[SkeletonReasonNoBreakpoint], "normal rolling gains must not fall through to missing breakpoints")
+			} else {
+				assert.Equal(t, int64(25000)-max(2000, int64(tc.read)), amounts["breakpoint_stalled"])
+				assert.Equal(t, max(0, turn.ExpectedCurrent-turn.ActualRead), amounts[SkeletonReasonUpstreamMiss])
+				assert.Equal(t, "breakpoint_stalled", turn.Reason)
+			}
+		})
+	}
+}
+
+func TestClaudeAdvancedPolicyConstraints(t *testing.T) {
+	t0 := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		change func(first, next *CacheSkeleton)
+		want   int64
+	}{
+		{"unchanged", func(_, _ *CacheSkeleton) {}, 20000},
+		{"parameters", func(_, next *CacheSkeleton) { next.ParamFp++ }, 0},
+		{"changed before endpoint", func(_, next *CacheSkeleton) { next.BlkHash[3] = 99 }, 5000},
+		{"pending write", func(first, _ *CacheSkeleton) { first.EndTs = t0.Add(2 * time.Minute) }, 0},
+		{"minimum write length", func(first, _ *CacheSkeleton) { first.Input = 500 }, 0},
+		{"original one hour ttl", func(first, next *CacheSkeleton) {
+			first.BpTtl, next.BpTtl = []string{"1h"}, []string{"1h"}
+			next.Ts, next.EndTs = t0.Add(10*time.Minute), t0.Add(10*time.Minute+time.Second)
+		}, 20000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := skeletonFixture(t0, 1, []uint64{1, 2, 3, 4}, []string{"tool", "system.text", "user.text", "assistant.text"}, []uint16{2, 3}, 0, 0)
+			next := skeletonFixture(t0.Add(time.Minute), 1, []uint64{1, 2, 3, 4, 5, 6}, []string{"tool", "system.text", "user.text", "assistant.text", "user.text", "assistant.text"}, []uint16{2, 3, 4, 5}, 0, 0)
+			tc.change(first, next)
+			// Future divergence must not change the preceding turn's writes.
+			before := AnalyzeCacheSkeletons([]*CacheSkeleton{first}).Lanes[0].Turns[0]
+			analysis := AnalyzeCacheSkeletons([]*CacheSkeleton{first, next})
+			assert.Equal(t, before, analysis.Lanes[0].Turns[0])
+			assert.Equal(t, tc.want, analysis.Lanes[0].Turns[1].ExpectedAdvanced)
+			assert.Equal(t, tc.want, analysis.Lanes[0].Turns[1].ExpectedAdvanced1h)
+		})
+	}
+
+	t.Run("four slots exclude thinking empty and volatile system blocks", func(t *testing.T) {
+		row := skeletonFixture(t0, 1, []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+			[]string{"tool", "system.text", "user.text", "assistant.text", "user.text", "assistant.thinking", "assistant.redacted_thinking", "assistant.text", "system.text"},
+			[]uint16{2, 3, 4, 5, 8}, 8, 0)
+		row.BlkLen[7] = 0
+		row.BpIdx = []uint16{0, 1, 2, 8}
+		row.BpTtl = []string{"1h", "1h", "5m", "5m"}
+		bps := rollingSkeletonBreakpoints(row, nil, nil)
+		require.Len(t, bps, 4)
+		assert.Equal(t, []skeletonBreakpoint{
+			{0, time.Hour}, {1, time.Hour}, {2, 5 * time.Minute}, {4, 5 * time.Minute},
+		}, bps)
+		next := *row
+		next.Ts, next.EndTs = t0.Add(time.Minute), t0.Add(time.Minute+time.Second)
+		next.BlkHash = append([]uint64{}, row.BlkHash...)
+		next.BlkHash[5], next.BlkHash[8] = 100, 101
+		turn := AnalyzeCacheSkeletons([]*CacheSkeleton{row, &next}).Lanes[0].Turns[1]
+		// Seven nonempty 1000-byte blocks plus the 100-byte tail.
+		assert.Equal(t, int64(21126), turn.ExpectedAdvanced)
+	})
+
+	t.Run("future completion cannot refresh an expired entry", func(t *testing.T) {
+		var rows []*CacheSkeleton
+		for _, gap := range []time.Duration{0, 4 * time.Minute, 10 * time.Minute, 21 * time.Minute} {
+			rows = append(rows, skeletonFixture(t0.Add(gap), 1, []uint64{1, 2, 3},
+				[]string{"tool", "system.text", "user.text"}, []uint16{2}, 0, 0))
+		}
+		rows[1].EndTs = t0.Add(20 * time.Minute)
+		turns := AnalyzeCacheSkeletons(rows).Lanes[0].Turns
+		assert.Equal(t, int64(30000), turns[1].ExpectedAdvanced)
+		assert.Zero(t, turns[2].ExpectedAdvanced, "the 4m read refreshed only until 9m")
+		assert.Equal(t, int64(30000), turns[2].ExpectedAdvanced1h)
+		assert.Equal(t, int64(30000), turns[3].ExpectedAdvanced, "the write completed at 20m")
+	})
 }

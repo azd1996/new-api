@@ -13,20 +13,22 @@ import (
 
 // Turn reasons, first match wins (see classifySkeletonTurn).
 const (
-	SkeletonReasonError         = "error"
-	SkeletonReasonFirstTurn     = "first_turn"
-	SkeletonReasonTooSmall      = "too_small"
-	SkeletonReasonNoBreakpoint  = "no_breakpoint"
-	SkeletonReasonParamChanged  = "param_changed"
-	SkeletonReasonPrefixChanged = "prefix_changed"
-	SkeletonReasonConcurrent    = "concurrent"
-	SkeletonReasonTTLExpired    = "ttl_expired"
-	SkeletonReasonMisplaced     = "breakpoint_misplaced"
-	SkeletonReasonChannelSwitch = "channel_switch"
-	SkeletonReasonUpstreamMiss  = "upstream_miss"
-	SkeletonReasonHit           = "hit"
-	SkeletonReasonLookback      = "lookback_exceeded"
-	SkeletonReasonNewContent    = "new_content"
+	SkeletonReasonError             = "error"
+	SkeletonReasonFirstTurn         = "first_turn"
+	SkeletonReasonTooSmall          = "too_small"
+	SkeletonReasonNoBreakpoint      = "no_breakpoint"
+	SkeletonReasonParamChanged      = "param_changed"
+	SkeletonReasonPrefixChanged     = "prefix_changed"
+	SkeletonReasonConcurrent        = "concurrent"
+	SkeletonReasonTTLExpired        = "ttl_expired"
+	SkeletonReasonMisplaced         = "breakpoint_misplaced"
+	SkeletonReasonStalled           = "breakpoint_stalled"
+	SkeletonReasonStableUnexplained = "stable_unexplained"
+	SkeletonReasonChannelSwitch     = "channel_switch"
+	SkeletonReasonUpstreamMiss      = "upstream_miss"
+	SkeletonReasonHit               = "hit"
+	SkeletonReasonLookback          = "lookback_exceeded"
+	SkeletonReasonNewContent        = "new_content"
 	// OpenAI only: a changed prompt_cache_key routes the turn away from the
 	// machine holding its prefix; previous_response_id hides the prefix.
 	SkeletonReasonCacheKeyChanged  = "cache_key_changed"
@@ -74,6 +76,8 @@ type SkeletonBreakpointMark struct {
 // gateway breakpoint adjustment and with the adjustment plus a 1h TTL; for
 // OpenAI lanes they are the prefix-match ceiling, the ceiling with one
 // prompt_cache_key for the whole lane and that plus 24h retention.
+// ExpectedAdvanced / ExpectedAdvanced1h are independent Claude rolling
+// breakpoint policies at the original TTLs and at 1h; OpenAI leaves them zero.
 type SkeletonTurn struct {
 	RequestId          string                   `json:"request_id"`
 	Ts                 time.Time                `json:"ts"`
@@ -87,6 +91,8 @@ type SkeletonTurn struct {
 	ExpectedCurrent    int64                    `json:"expected_current"`
 	ExpectedAdjusted   int64                    `json:"expected_adjusted"`
 	ExpectedAdjusted1h int64                    `json:"expected_adjusted_1h"`
+	ExpectedAdvanced   int64                    `json:"expected_advanced"`
+	ExpectedAdvanced1h int64                    `json:"expected_advanced_1h"`
 	Reason             string                   `json:"reason"`
 	DivergeIdx         int                      `json:"diverge_idx"`
 	TailVolatile       bool                     `json:"tail_volatile"`
@@ -104,14 +110,16 @@ type SkeletonTurn struct {
 }
 
 // SkeletonRates sums tokens of successful turns: Actual is what upstream
-// read from cache; Current/Adjusted/Adjusted1h are the three simulated
-// ceilings described on SkeletonTurn.
+// read from cache; the remaining fields aggregate the simulations described
+// on SkeletonTurn, floored by observed reads (Advanced* stay zero for OpenAI).
 type SkeletonRates struct {
 	Total      int64 `json:"total"`
 	Actual     int64 `json:"actual"`
 	Current    int64 `json:"current"`
 	Adjusted   int64 `json:"adjusted"`
 	Adjusted1h int64 `json:"adjusted_1h"`
+	Advanced   int64 `json:"advanced"`
+	Advanced1h int64 `json:"advanced_1h"`
 }
 
 type SkeletonCoverage struct {
@@ -136,6 +144,8 @@ func (r *SkeletonRates) add(o SkeletonRates) {
 	r.Current += o.Current
 	r.Adjusted += o.Adjusted
 	r.Adjusted1h += o.Adjusted1h
+	r.Advanced += o.Advanced
+	r.Advanced1h += o.Advanced1h
 }
 
 type SkeletonLane struct {
@@ -334,7 +344,7 @@ func GetSessionCacheRangeAnalysis(userId int, filter LogFilter) (*SessionCacheRa
 }
 
 // AnalyzeCacheSkeletons groups time-ordered skeletons by lane and replays
-// each lane through four cache simulations.
+// each lane through independent provider-specific cache simulations.
 func AnalyzeCacheSkeletons(rows []*CacheSkeleton) *SessionCacheAnalysis {
 	result := &SessionCacheAnalysis{Lanes: []SkeletonLane{}}
 	laneIndex := map[uint64]int{}
@@ -513,10 +523,110 @@ func withSkeletonTTL(bps []skeletonBreakpoint, ttl time.Duration) []skeletonBrea
 	return out
 }
 
-// skeletonExpectation is one turn's simulated hit tokens under the three
-// ceilings, plus the loss each step explains (largest one becomes the reason).
+// rollingSkeletonBreakpoints reserves slots for the current cacheable end and
+// the previous request's end (if its prefix still exists). The latter keeps a
+// real written anchor reachable even when a turn adds more than 20 blocks.
+// Selection uses only this request and the preceding request, never later rows.
+func rollingSkeletonBreakpoints(row, prev *CacheSkeleton, previous []skeletonBreakpoint) []skeletonBreakpoint {
+	limit := len(row.BlkHash)
+	if len(row.MsgStart) > 0 {
+		last := int(row.MsgStart[len(row.MsgStart)-1])
+		if last < len(row.BlkKind) && strings.HasPrefix(row.BlkKind[last], "system.") {
+			limit = last
+		}
+	}
+	original := skeletonBreakpoints(row)
+	ttl := 5 * time.Minute
+	if len(original) > 0 {
+		ttl = original[len(original)-1].ttl
+	}
+	candidates := make([]skeletonBreakpoint, 0, len(original)+2)
+	for i := limit - 1; i >= 0; i-- {
+		if skeletonCacheableBlock(row, i) {
+			candidates = append(candidates, skeletonBreakpoint{i, ttl})
+			break
+		}
+	}
+	if prev != nil && prev.ParamFp == row.ParamFp {
+		same := 0
+		for same < min(len(prev.BlkHash), len(row.BlkHash)) && prev.BlkHash[same] == row.BlkHash[same] {
+			same++
+		}
+		for i := len(previous) - 1; i >= 0; i-- {
+			if previous[i].idx < same && previous[i].idx < limit {
+				candidates = append(candidates, previous[i])
+				break
+			}
+		}
+	}
+	candidates = append(candidates, original...)
+	out := make([]skeletonBreakpoint, 0, skeletonMaxBreakpoints)
+	for _, bp := range candidates {
+		if bp.idx >= limit || !skeletonCacheableBlock(row, bp.idx) ||
+			slices.ContainsFunc(out, func(other skeletonBreakpoint) bool { return other.idx == bp.idx }) {
+			continue
+		}
+		out = append(out, bp)
+		if len(out) == skeletonMaxBreakpoints {
+			break
+		}
+	}
+	slices.SortFunc(out, func(a, b skeletonBreakpoint) int { return a.idx - b.idx })
+	// Anthropic requires 1h points before 5m points. Shorten a later TTL
+	// rather than silently upgrading an original 5m point to 1h.
+	for i := 1; i < len(out); i++ {
+		out[i].ttl = min(out[i].ttl, out[i-1].ttl)
+	}
+	return out
+}
+
+func skeletonCacheableBlock(row *CacheSkeleton, idx int) bool {
+	return idx >= 0 && idx < len(row.BlkLen) && idx < len(row.BlkKind) &&
+		row.BlkLen[idx] > 0 &&
+		!strings.HasSuffix(row.BlkKind[idx], ".thinking") &&
+		!strings.HasSuffix(row.BlkKind[idx], ".redacted_thinking")
+}
+
+type skeletonRollingWrite struct {
+	prefix []uint64
+	tokens []int64
+	bps    []skeletonBreakpoint
+	end    time.Time
+}
+
+// Unlike diagnostic probes, both rolling simulations have their own write
+// history. In-flight requests cannot create entries or extend expired entries.
+type skeletonRollingSim struct {
+	cache   *skeletonCacheSim
+	pending []skeletonRollingWrite
+}
+
+func (s *skeletonRollingSim) replay(prefix []uint64, tokens []int64, bps []skeletonBreakpoint, row *CacheSkeleton, minTokens int64) int64 {
+	slices.SortStableFunc(s.pending, func(a, b skeletonRollingWrite) int { return a.end.Compare(b.end) })
+	pending := s.pending[:0]
+	for _, write := range s.pending {
+		if write.end.After(row.Ts) {
+			pending = append(pending, write)
+			continue
+		}
+		for _, bp := range write.bps {
+			key := write.prefix[bp.idx]
+			if entry := s.cache.entries[key]; entry != nil && write.end.After(entry.expireAt) {
+				delete(s.cache.entries, key)
+			}
+		}
+		s.cache.write(write.prefix, write.tokens, write.bps, write.end, minTokens)
+	}
+	s.pending = pending
+	read := s.cache.lookup(prefix, tokens, bps, row.Ts)
+	s.pending = append(s.pending, skeletonRollingWrite{prefix, tokens, bps, row.EndTs})
+	return read
+}
+
+// skeletonExpectation holds simulated prefix ceilings and diagnostic probes.
 type skeletonExpectation struct {
 	current, adjusted, adjusted1h int64
+	advanced, advanced1h          int64
 	losses                        []skeletonLoss
 	lookback, pending, fallback   int64
 }
@@ -534,11 +644,15 @@ type skeletonLaneSim interface {
 
 // claudeLaneSim follows Anthropic's explicit breakpoints: client breakpoints
 // as-is, ignoring TTL (to size the TTL loss), with the gateway adjustment, and
-// with the adjustment at a 1h TTL.
+// with the adjustment at a 1h TTL. The rolling policies keep independent
+// histories and do not change the existing adjustment.
 type claudeLaneSim struct {
 	minTokens                            int64
 	current, noTTL, adjusted, adjusted1h *skeletonCacheSim
 	fallback                             *skeletonCacheSim
+	advanced, advanced1h                 skeletonRollingSim
+	previous                             *CacheSkeleton
+	previousBreakpoints                  []skeletonBreakpoint
 }
 
 func newClaudeLaneSim(modelName string) *claudeLaneSim {
@@ -549,6 +663,8 @@ func newClaudeLaneSim(modelName string) *claudeLaneSim {
 		adjusted:   newSkeletonCacheSim(false, skeletonLookback),
 		adjusted1h: newSkeletonCacheSim(false, skeletonLookback),
 		fallback:   newSkeletonCacheSim(false, skeletonLookback),
+		advanced:   skeletonRollingSim{cache: newSkeletonCacheSim(false, skeletonLookback)},
+		advanced1h: skeletonRollingSim{cache: newSkeletonCacheSim(false, skeletonLookback)},
 	}
 }
 
@@ -749,6 +865,10 @@ func (s *claudeLaneSim) replay(row *CacheSkeleton, cumTokens []int64) skeletonEx
 	noTTL := s.noTTL.lookup(prefix, cumTokens, bps, row.Ts)
 	e.adjusted = max(s.adjusted.lookup(prefix, cumTokens, adjusted, row.Ts), e.current)
 	e.adjusted1h = max(s.adjusted1h.lookup(prefix, cumTokens, adjusted1h, row.Ts), e.adjusted)
+	advanced := rollingSkeletonBreakpoints(row, s.previous, s.previousBreakpoints)
+	e.advanced = s.advanced.replay(prefix, cumTokens, advanced, row, s.minTokens)
+	e.advanced1h = s.advanced1h.replay(prefix, cumTokens, withSkeletonTTL(advanced, time.Hour), row, s.minTokens)
+	s.previous, s.previousBreakpoints = row, advanced
 	s.current.write(prefix, cumTokens, bps, row.EndTs, s.minTokens)
 	s.noTTL.write(prefix, cumTokens, bps, row.EndTs, s.minTokens)
 	s.adjusted.write(prefix, cumTokens, adjusted, row.EndTs, s.minTokens)
@@ -900,10 +1020,21 @@ func analyzeSkeletonLane(rows []*CacheSkeleton) SkeletonLane {
 		turn.ExpectedCurrent = expect.current
 		turn.ExpectedAdjusted = expect.adjusted
 		turn.ExpectedAdjusted1h = expect.adjusted1h
+		turn.ExpectedAdvanced = expect.advanced
+		turn.ExpectedAdvanced1h = expect.advanced1h
 
-		turn.Reason = classifySkeletonTurn(row, prev, &turn, openAI || len(bps) > 0, minTokens, expect.losses)
-		if !openAI {
+		if openAI {
+			turn.Reason = classifySkeletonTurn(row, prev, &turn, true, minTokens, expect.losses)
+		} else {
 			turn.Losses = skeletonTurnLosses(row, prev, &turn, minTokens, expect)
+			// Use the same mutually exclusive partition for the primary reason.
+			losses := make([]skeletonLoss, 0, len(turn.Losses))
+			for _, item := range turn.Losses {
+				if item.Reason != SkeletonReasonNewContent {
+					losses = append(losses, skeletonLoss{item.Reason, item.Tokens})
+				}
+			}
+			turn.Reason = classifySkeletonTurn(row, prev, &turn, len(bps) > 0, minTokens, losses)
 			lane.LossSummary.add(SkeletonLossSummary{
 				AnalyzedTurns: 1, TotalTokens: turn.TotalTokens, ActualRead: turn.ActualRead,
 				UncachedTokens: max(0, turn.TotalTokens-turn.ActualRead), Items: turn.Losses,
@@ -916,6 +1047,10 @@ func analyzeSkeletonLane(rows []*CacheSkeleton) SkeletonLane {
 			Adjusted:   max(turn.ExpectedAdjusted, turn.ActualRead),
 			Adjusted1h: max(turn.ExpectedAdjusted1h, turn.ActualRead),
 		})
+		if !openAI {
+			lane.Summary.Advanced += max(turn.ExpectedAdvanced, turn.ActualRead)
+			lane.Summary.Advanced1h += max(turn.ExpectedAdvanced1h, turn.ActualRead)
+		}
 		lane.Turns = append(lane.Turns, turn)
 		prev = row
 	}

@@ -766,7 +766,9 @@ export interface CacheSkeletonResponse {
 // Simulated prompt-cache outcome of one recorded attempt. expected_* are
 // token estimates (the turn's input split across blocks by byte share). For
 // Claude lanes: the ceiling with the client's breakpoints, with the gateway
-// adjustment, and with the adjustment plus a 1h TTL. For OpenAI lanes: the
+// volatile system tail correction, and that correction plus a 1h TTL.
+// expected_advanced* separately simulate advancing breakpoints over stable history.
+// For OpenAI lanes: the
 // prefix-match ceiling, with one prompt_cache_key, and that plus 24h
 // retention.
 export interface SkeletonTurn {
@@ -783,6 +785,9 @@ export interface SkeletonTurn {
   expected_current: number
   expected_adjusted: number
   expected_adjusted_1h: number
+  // Claude breakpoint advancement simulation; absent on older APIs / OpenAI.
+  expected_advanced?: number
+  expected_advanced_1h?: number
   reason: string
   // First block that differs from the previous turn; -1 when none.
   diverge_idx: number
@@ -806,6 +811,8 @@ export interface SkeletonRates {
   current: number
   adjusted: number
   adjusted_1h: number
+  advanced?: number
+  advanced_1h?: number
 }
 
 export interface SkeletonLane {

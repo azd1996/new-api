@@ -7,6 +7,10 @@
 
 ## [2026-11-05]
 
+### 修复 Fixed
+
+- **会话缓存诊断识别断点未推进，并纠正稳定历史损失归因**：对话历史持续增长、缓存断点却停在早期位置时，新增「断点覆盖不足 / 未推进」原因，展示影响尝试数与未覆盖稳定历史的估算 Token 量。原「断点调整后」明确为「尾部断点修正后」，另增独立的「推进后模拟命中率」和「推进 + 1 小时 TTL 模拟命中率」；滚动模拟遵守最多 4 个断点、20 块回看、缓存最小长度、TTL 与请求完成时间约束。修正本日此前「稳定历史兜底归上游差额」的过度归因：字节哈希相同不代表历史曾被断点覆盖或缓存仍可读，覆盖不足归 `breakpoint_stalled`，剩余原因未明的稳定历史归 `stable_unexplained`，不再直接归上游。同一尝试同一原因的多个损失片段合并，影响尝试数只计一次。已有骨架查询时重算，无需重新采集；不改变骨架表结构、在线请求或计费。模拟结果仍是按字节比例估算，不承诺实际收益；OpenAI 保持原有展示，旧接口缺少新增字段时显示「—」。实现见 `model/cache_skeleton_analysis.go`、`model/cache_skeleton_loss.go` 和使用日志会话诊断组件；详细口径见 `.comate/specs/cache-breakpoint-skeleton/doc.md` §7.6.4、§7.12、附录 D。
+
 ### 新增 Added
 - **会话列表新增「筛选时间范围内 Token 总量」排序维度**：此前会话列表的「Total Tokens」统计的是该会话的**生命周期总量**（不随筛选时间范围变化），无法单独按「这段时间内」的活跃程度排序。现 `GetLogSessions` 额外按当前筛选的起止时间聚合每个会话在该范围内的 `prompt_tokens + completion_tokens`（范围之外的 `logs` 行不计入），新增列 `range_total_tokens` 与可排序维度 `range_total_tokens`（`logSessionSortColumns`），与既有的生命周期 `total_tokens` 互不影响、各自独立展示与排序。前端会话列表新增对应列（显示 token 数及其占「筛选范围内总量」`range_total_tokens_sum` 的百分比）。实现见 `controller/log.go`（`respondLogSessions`/`GetLogSessions`/`GetUserLogSessions`）、`model/log_session.go`（`logSessionQuery`/`GetLogSessions`/`LogSessionSortOptions`）；前端 `web/src/features/usage-logs/components/usage-logs-sessions.tsx`、`columns/session-columns.tsx`、`types.ts`；回归用例见 `model/log_filter_test.go`。
 - **会话缓存汇总新增「Claude 内容兜底 vs 非内容兜底」来源对比表**：此前「会话 ID 来源」只能在通用日志按单一取值筛选（`metadata.user_id` / `content-fallback` / `prompt_cache_key` 等五种），无法直观对比「靠内容回退推断出会话 ID」（`content-fallback`，即客户端既没显式带 `metadata.user_id` 也没带可识别的会话标识，网关按内容相似度猜测会话边界）与其余四种「有明确标识来源」的会话在缓存命中率上的差异——内容回退推断的会话边界本身就不如显式标识可靠，命中率差异可以作为佐证。现会话缓存汇总新增一张小表，按 `session_id_source = content-fallback` 与否两组，分别统计会话数、请求数、token 总量与聚合缓存命中率（`cache_read / input_all`）。接口在 `GET /api/log/cache-skeleton/session` 响应新增 `source_stats` 字段。实现见 `model/cache_skeleton_analysis.go`（`getSessionSourceStats`/`SessionSourceStats`）、`controller/log.go`；前端 `web/src/features/usage-logs/components/usage-logs-sessions.tsx`、`types.ts`。

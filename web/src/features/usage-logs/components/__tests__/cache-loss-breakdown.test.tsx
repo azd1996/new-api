@@ -24,6 +24,35 @@ import { CacheLossBreakdown } from '../cache-loss-breakdown'
 
 afterEach(cleanup)
 
+it('explains stalled breakpoint totals and distinguishes unexplained stable history', () => {
+  render(
+    <CacheLossBreakdown
+      summary={{
+        analyzed_turns: 4,
+        total_tokens: 1000,
+        actual_read: 100,
+        uncached_tokens: 900,
+        items: [
+          { reason: 'breakpoint_stalled', tokens: 600, turns: 3 },
+          { reason: 'stable_unexplained', tokens: 300, turns: 1 },
+        ],
+      }}
+    />
+  )
+  expect(
+    screen.getByRole('cell', {
+      name: 'Breakpoint coverage insufficient / not advanced',
+    })
+  ).toBeVisible()
+  expect(
+    screen.getByRole('cell', { name: 'Stable history unexplained' })
+  ).toBeVisible()
+  expect(
+    screen.getByText(/600 estimated tokens across 3 attempts/)
+  ).toBeVisible()
+  expect(screen.getByText(/not guaranteed gains/)).toBeVisible()
+})
+
 it('keeps analyzed totals without an empty table when all input is cached', () => {
   render(
     <CacheLossBreakdown
@@ -42,6 +71,9 @@ it('keeps analyzed totals without an empty table when all input is cached', () =
   ).toBeVisible()
   expect(screen.getByText('Uncached tokens: 0 (0.0%)')).toBeVisible()
   expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  expect(
+    screen.queryByText(/Breakpoints did not cover growing stable history:/)
+  ).not.toBeInTheDocument()
 })
 
 it('renders an unknown future reason without dropping its tokens or dividing by zero', () => {
