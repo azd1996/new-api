@@ -46,10 +46,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 
 import { getProxyHealth } from '../api'
 import { SettingsForm } from '../components/settings-form-layout'
@@ -114,13 +111,14 @@ const proxyPoolSchema = z.object({
 type ProxyPoolFormValues = z.infer<typeof proxyPoolSchema>
 
 const ttftRoutingSchema = z.object({
-  threshold_ms: z.coerce.number().int().min(1),
-  consecutive_bad: z.coerce.number().int().min(1),
-  min_explore_ratio: z.coerce.number().gt(0).lt(1),
-  max_divert_ratio: z.coerce.number().gt(0).max(1),
-  sample_window: z.coerce.number().int().min(1),
+  threshold_ms: z.coerce.number<number | string>().int().min(1),
+  consecutive_bad: z.coerce.number<number | string>().int().min(1),
+  min_explore_ratio: z.coerce.number<number | string>().gt(0).lt(1),
+  max_divert_ratio: z.coerce.number<number | string>().gt(0).max(1),
+  sample_window: z.coerce.number<number | string>().int().min(1),
 })
 
+type TtftRoutingFormInput = z.input<typeof ttftRoutingSchema>
 type TtftRoutingFormValues = z.infer<typeof ttftRoutingSchema>
 
 const TTFT_ROUTING_DEFAULTS: TtftRoutingFormValues = {
@@ -256,7 +254,11 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
     baselineRef.current = normalized
   }
 
-  const ttftForm = useForm<TtftRoutingFormValues>({
+  const ttftForm = useForm<
+    TtftRoutingFormInput,
+    unknown,
+    TtftRoutingFormValues
+  >({
     resolver: zodResolver(ttftRoutingSchema),
     defaultValues: seedTtftRouting(props.defaultValues.ttftRouting),
   })
@@ -374,9 +376,7 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
                                 <span className='text-muted-foreground'>
                                   {t('Prompt tokens/s')}:{' '}
                                   {t('{{value}} tokens/s', {
-                                    value: Math.round(
-                                      health.token_speed_avg
-                                    ),
+                                    value: Math.round(health.token_speed_avg),
                                   })}{' '}
                                   ({health.token_speed_samples})
                                 </span>

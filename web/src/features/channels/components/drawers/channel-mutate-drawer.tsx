@@ -105,8 +105,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { SecureVerificationDialog } from '@/features/auth/secure-verification'
-import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 import { ResourceTypePicker } from '@/features/channels/components/resource-type-picker'
+import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
 import {
@@ -2764,6 +2764,11 @@ export function ChannelMutateDrawer({
                 <FormControl>
                   <Input placeholder={t(FIELD_PLACEHOLDERS.NAME)} {...field} />
                 </FormControl>
+                <FormDescription>
+                  {t(
+                    'Channel names ending exactly in -非标 identify non-standard channels for session routing. Renaming changes the routing category.'
+                  )}
+                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}

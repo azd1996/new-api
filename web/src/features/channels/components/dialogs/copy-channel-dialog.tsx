@@ -46,23 +46,36 @@ export function CopyChannelDialog({
   const { currentRow } = useChannels()
   const queryClient = useQueryClient()
   const [suffix, setSuffix] = useState('_copy')
-  const [channelName, setChannelName] = useState('')
+  const [channelName, setChannelName] = useState<string | null>(null)
   const [resetBalance, setResetBalance] = useState(true)
   const [isCopying, setIsCopying] = useState(false)
 
   if (!currentRow) return null
 
   const isBehindCdnAigw = currentRow.tag === BEHIND_CDNAIGW_TAG
-  const trimmedChannelName = channelName.trim()
-  const canSubmit = isBehindCdnAigw ? trimmedChannelName.length > 0 : true
+  const sourceName = currentRow.name.startsWith(BEHIND_CDNAIGW_PREFIX)
+    ? currentRow.name.slice(BEHIND_CDNAIGW_PREFIX.length)
+    : currentRow.name
+  const defaultName = currentRow.name.endsWith('-非标')
+    ? ''
+    : `${sourceName}-非标`
+  const trimmedChannelName = (channelName ?? defaultName).trim()
+  const fullName = `${BEHIND_CDNAIGW_PREFIX}${trimmedChannelName}`
+  const isChannelOnlyCopy = fullName === `${currentRow.name}-非标`
+  const exceedsProvisioningLimit =
+    !isChannelOnlyCopy && new TextEncoder().encode(fullName).length > 50
+  const canSubmit =
+    !isBehindCdnAigw ||
+    (trimmedChannelName.length > 0 && !exceedsProvisioningLimit)
 
   const resetState = () => {
     setSuffix('_copy')
-    setChannelName('')
+    setChannelName(null)
     setResetBalance(true)
   }
 
   const handleCopy = async () => {
+    if (!canSubmit || isCopying) return
     setIsCopying(true)
 
     if (isBehindCdnAigw) {
@@ -96,7 +109,11 @@ export function CopyChannelDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={(nextOpen) => {
+        if (isCopying) return
+        if (!nextOpen) resetState()
+        onOpenChange(nextOpen)
+      }}
       title={t('Copy Channel')}
       description={
         <>
@@ -110,7 +127,10 @@ export function CopyChannelDialog({
         <>
           <Button
             variant='outline'
-            onClick={() => onOpenChange(false)}
+            onClick={() => {
+              resetState()
+              onOpenChange(false)
+            }}
             disabled={isCopying}
           >
             {t('Cancel')}
@@ -134,7 +154,9 @@ export function CopyChannelDialog({
                 id='channel-name'
                 className='rounded-l-none'
                 placeholder={t('e.g. dept-claude-official')}
-                value={channelName}
+                value={channelName ?? defaultName}
+                aria-invalid={exceedsProvisioningLimit}
+                aria-describedby='copy-name-policy'
                 onChange={(e) => setChannelName(e.target.value)}
                 disabled={isCopying}
               />
@@ -142,6 +164,27 @@ export function CopyChannelDialog({
             <p className='text-muted-foreground text-xs'>
               {t('New name will be:')} {BEHIND_CDNAIGW_PREFIX}
               {trimmedChannelName}
+            </p>
+            <p id='copy-name-policy' className='text-muted-foreground text-xs'>
+              {isChannelOnlyCopy
+                ? t(
+                    'Only the channel is copied. The original groups and configuration are preserved; no group or API key is created or changed. This copy is not subject to the 50 UTF-8 byte limit (a 50-byte source plus the 7-byte suffix is 57 bytes).'
+                  )
+                : t(
+                    'Other names use the dedicated copy flow to provision a group and API key. The complete name, including the prefix, must not exceed 50 UTF-8 bytes.'
+                  )}
+            </p>
+            {exceedsProvisioningLimit && (
+              <p role='alert' className='text-destructive text-xs'>
+                {t(
+                  'The complete name must not exceed 50 UTF-8 bytes for dedicated copying.'
+                )}
+              </p>
+            )}
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Channel names ending exactly in -非标 identify non-standard channels for session routing. Renaming changes the routing category.'
+              )}
             </p>
           </div>
         ) : (

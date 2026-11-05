@@ -1613,11 +1613,16 @@ func CopyChannel(c *gin.Context) {
 		return
 	}
 
+	copyChannel(c, origin, origin.Name+suffix, resetBalance)
+}
+
+// copyChannel preserves the source configuration without provisioning groups or tokens.
+func copyChannel(c *gin.Context, origin *model.Channel, name string, resetBalance bool) {
 	// clone channel
 	clone := *origin // shallow copy is sufficient as we will overwrite primitives
 	clone.Id = 0     // let DB auto-generate
 	clone.CreatedTime = common.GetTimestamp()
-	clone.Name = origin.Name + suffix
+	clone.Name = name
 	clone.TestTime = 0
 	clone.ResponseTime = 0
 	if resetBalance {
@@ -1639,7 +1644,7 @@ func CopyChannel(c *gin.Context) {
 	}
 	model.InitChannelCache()
 	recordManageAudit(c, "channel.copy", map[string]any{
-		"sourceId": id,
+		"sourceId": origin.Id,
 		"id":       clone.Id,
 		"name":     clone.Name,
 	})
@@ -1662,7 +1667,8 @@ type copyBehindCdnAigwRequest struct {
 // one step, provisions the matching zero-ratio group (also registered as a
 // usable group so the key can relay) and an unlimited-quota API key under the
 // operating super-admin. Group/token creation is idempotent; name/group/key all
-// share the fixed prefix. The admin only types the distinguishing part.
+// share the fixed prefix. An exact source-name + "-非标" copy only clones the
+// channel, preserving its groups and leaving API keys untouched.
 func CopyBehindCdnAigwChannel(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -1680,10 +1686,9 @@ func CopyBehindCdnAigwChannel(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "渠道名不能为空"})
 		return
 	}
-	fullName := behindCdnAigwGroupPrefix + name
-	if len(fullName) > 50 {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "名称过长，去掉固定前缀后请控制在 35 个字符以内"})
-		return
+	fullName := name
+	if !strings.HasPrefix(fullName, behindCdnAigwGroupPrefix) {
+		fullName = behindCdnAigwGroupPrefix + name
 	}
 	resetBalance := true
 	if req.ResetBalance != nil {
@@ -1698,6 +1703,29 @@ func CopyBehindCdnAigwChannel(c *gin.Context) {
 	}
 	if origin.Tag == nil || *origin.Tag != behindCdnAigwTag {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "仅支持复制标签为 behind-cdnaigw 的渠道"})
+		return
+	}
+
+	// Check before the provisioning flow's length limit and all group/key writes.
+	if fullName == origin.Name+"-非标" {
+		if strings.HasSuffix(origin.Name, "-非标") {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Source channel is already nonstandard; cannot create another nonstandard copy"})
+			return
+		}
+		var count int64
+		if err := model.DB.Model(&model.Channel{}).Where("name = ?", fullName).Count(&count).Error; err != nil {
+			common.ApiErrorT(c, "Failed to fetch channel. Please try again later")
+			return
+		}
+		if count > 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Channel name already exists"})
+			return
+		}
+		copyChannel(c, origin, fullName, resetBalance)
+		return
+	}
+	if len(fullName) > 50 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "名称过长，去掉固定前缀后请控制在 35 个字符以内"})
 		return
 	}
 

@@ -221,6 +221,83 @@ func TestRestoreConnectionContextRejectsChangedAdvancedCustomRoute(t *testing.T)
 	assert.ErrorContains(t, apiErr, "upstream route changed")
 }
 
+func TestRestoreConnectionContextRejectsChangedSessionCategory(t *testing.T) {
+	database := setupRelayChannelDB(t)
+	require.NoError(t, database.AutoMigrate(&model.Ability{}))
+	const group = "behind-cdnaigw_ws"
+	const modelName = "ws-model"
+	affinity := operation_setting.GetChannelAffinitySetting()
+	savedAffinity := *affinity
+	routing := operation_setting.GetSessionRoutingSetting()
+	savedRouting := routing.GroupEnabled
+	t.Cleanup(func() {
+		*affinity = savedAffinity
+		routing.GroupEnabled = savedRouting
+	})
+	affinity.Rules = []operation_setting.ChannelAffinityRule{{
+		Name: "ws session", ModelRegex: []string{".*"},
+		KeySources: []operation_setting.ChannelAffinityKeySource{{Type: "gjson", Path: "prompt_cache_key"}},
+	}}
+	routing.GroupEnabled = map[string]bool{}
+	for _, nonstandard := range []bool{false, true} {
+		channel := &model.Channel{
+			Name: "ws", Key: "sk-test", Group: group, Models: modelName,
+			Status: common.ChannelStatusEnabled, Type: constant.ChannelTypeOpenAI,
+		}
+		if nonstandard {
+			channel.Name += "-非标"
+		}
+		channel.SetSetting(dto.ChannelSettings{ResponsesWebSocketEnabled: true})
+		require.NoError(t, database.Create(channel).Error)
+		require.NoError(t, database.Create(&model.Ability{
+			Group: group, Model: modelName, ChannelId: channel.Id, Enabled: true,
+		}).Error)
+	}
+	common.MemoryCacheEnabled = true
+	model.InitChannelCache()
+	t.Cleanup(func() {
+		require.NoError(t, database.Where("1 = 1").Delete(&model.Ability{}).Error)
+		require.NoError(t, database.Where("1 = 1").Delete(&model.Channel{}).Error)
+		model.InitChannelCache()
+	})
+	for _, nonstandard := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nonstandard=%t", nonstandard), func(t *testing.T) {
+			var channel model.Channel
+			name := "ws"
+			if nonstandard {
+				name += "-非标"
+			}
+			require.NoError(t, database.Where("name = ?", name).First(&channel).Error)
+			session := &responsesWSSession{
+				lockedChannelID: channel.Id, lockedGroup: group, lockedKey: channel.Key,
+				lockedContext: map[constant.ContextKey]any{
+					constant.ContextKeyChannelBaseUrl:        channel.GetBaseURL(),
+					constant.ContextKeyChannelHeaderOverride: channel.GetHeaderOverride(),
+				},
+			}
+			for turn := range 2 {
+				body := `{"model":"ws-model"}`
+				if nonstandard == (turn == 1) {
+					body = `{"model":"ws-model","prompt_cache_key":"client-session"}`
+				}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+				t.Cleanup(func() { common.CleanupBodyStorage(c) })
+				common.SetContextKey(c, constant.ContextKeyUsingGroup, group)
+				apiErr := session.restoreConnectionContext(c, modelName)
+				if turn == 0 {
+					require.Nil(t, apiErr)
+				} else {
+					require.NotNil(t, apiErr)
+					assert.Equal(t, types.ErrorCode(appdto.FilterSessionRouting), apiErr.GetErrorCode())
+					assert.ErrorContains(t, apiErr, "reconnect required")
+					assert.Zero(t, service.RequestPolicy(c).Attempts, "mismatched turn must not start an upstream attempt")
+				}
+			}
+		})
+	}
+}
+
 func TestResponsesWSChannelRoutingRequiresExplicitOptIn(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	database := setupRelayChannelDB(t)

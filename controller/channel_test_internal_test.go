@@ -6,21 +6,26 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	hostdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/clause"
 )
 
 func TestGetChannelDefaultBaseURLsUsesBuiltInDefaults(t *testing.T) {
@@ -189,6 +194,171 @@ func TestCopyChannelRejectsInvalidLegacyProxySettings(t *testing.T) {
 	var channelCount int64
 	require.NoError(t, db.Model(&model.Channel{}).Count(&channelCount).Error)
 	assert.Equal(t, int64(1), channelCount)
+}
+
+func TestCopyBehindCdnAigwChannel(t *testing.T) {
+	previousDB, previousLogDB := model.DB, model.LOG_DB
+	previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
+	previousRedis, previousMemory := common.RedisEnabled, common.MemoryCacheEnabled
+	previousOptions := common.OptionMap
+	previousRatios := ratio_setting.GroupRatio2JSONString()
+	previousGroups := setting.UserUsableGroups2JSONString()
+	db := setupModelListControllerTestDB(t)
+	common.RedisEnabled, common.MemoryCacheEnabled = false, false
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = previousDB, previousLogDB
+		common.SetDatabaseTypes(previousMain, previousLog)
+		common.RedisEnabled, common.MemoryCacheEnabled = previousRedis, previousMemory
+		common.OptionMap = previousOptions
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousRatios))
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousGroups))
+	})
+	connection, err := db.DB()
+	require.NoError(t, err)
+	connection.SetMaxOpenConns(1)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Token{}, &model.Option{}, &model.User{}, &model.AuditLog{}))
+
+	longName := behindCdnAigwGroupPrefix + strings.Repeat("a", 35)
+	require.Len(t, longName, 50)
+	for index, tc := range []struct {
+		name, source, input, message                              string
+		preserve, duplicate, dedicated, invalidSettings, wrongTag bool
+	}{
+		{name: "short name", source: "部门A", input: "部门A-非标"},
+		{name: "full name and whitespace", source: "部门B", input: "  behind-cdnaigw_部门B-非标  ", preserve: true},
+		{name: "50 plus 7 bytes", source: strings.TrimPrefix(longName, behindCdnAigwGroupPrefix), input: longName + "-非标"},
+		{name: "duplicate", source: "重名", input: "重名-非标", duplicate: true, message: "Channel name already exists"},
+		{name: "reject repeated nonstandard", source: strings.Repeat("b", 35) + "-非标", input: strings.Repeat("b", 35) + "-非标-非标", message: "Source channel is already nonstandard"},
+		{name: "invalid settings", source: "错误配置", input: "错误配置-非标", invalidSettings: true, message: "invalid channel settings"},
+		{name: "tag required", source: "错误标签", input: "错误标签-非标", wrongTag: true, message: "仅支持复制标签"},
+		{name: "dedicated short name", source: "标准源", input: "专用", dedicated: true},
+		{name: "dedicated full name", source: "标准源2", input: "behind-cdnaigw_专用2", dedicated: true},
+		{name: "unrelated nonstandard name still provisions", source: "标准源4", input: "其他-非标", dedicated: true},
+		{name: "dedicated length limit", source: "标准源3", input: strings.Repeat("c", 36), message: "名称过长"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1}`))
+			require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default"}`))
+			group := behindCdnAigwGroupPrefix + fmt.Sprint(index)
+			source := model.Channel{
+				Type: constant.ChannelTypeOpenAI, Name: behindCdnAigwGroupPrefix + tc.source,
+				Key: "test-upstream-key", Models: "gpt-test", Group: group + ",shared",
+				Tag: common.GetPointer(behindCdnAigwTag), Status: common.ChannelStatusEnabled,
+				Balance: 12.5, UsedQuota: 123, TestTime: 456, ResponseTime: 789,
+				BaseURL: common.GetPointer("https://upstream.example"), ParamOverride: common.GetPointer(`{"temperature":0}`),
+			}
+			if tc.invalidSettings {
+				source.Setting = common.GetPointer(`{"proxy":"socks5://proxy.example/invalid"}`)
+			}
+			if tc.wrongTag {
+				source.Tag = common.GetPointer("other")
+			}
+			require.NoError(t, source.Insert())
+			target := strings.TrimSpace(tc.input)
+			if !strings.HasPrefix(target, behindCdnAigwGroupPrefix) {
+				target = behindCdnAigwGroupPrefix + target
+			}
+			if tc.duplicate {
+				duplicate := source
+				duplicate.Id, duplicate.Name = 0, target
+				require.NoError(t, duplicate.Insert())
+			}
+			token := model.Token{UserId: 1, Name: "existing-" + tc.source, Key: "test-" + tc.source, Group: "default", RemainQuota: 321}
+			require.NoError(t, token.Insert())
+			var tokensBefore []model.Token
+			var optionsBefore []model.Option
+			require.NoError(t, db.Order("id").Find(&tokensBefore).Error)
+			require.NoError(t, db.Order(clause.OrderByColumn{Column: clause.Column{Name: "key"}}).Find(&optionsBefore).Error)
+			ratiosBefore, groupsBefore := ratio_setting.GetGroupRatioCopy(), setting.GetUserUsableGroupsCopy()
+			var countBefore int64
+			require.NoError(t, db.Model(&model.Channel{}).Count(&countBefore).Error)
+			body, err := common.Marshal(copyBehindCdnAigwRequest{Name: tc.input, ResetBalance: common.GetPointer(!tc.preserve)})
+			require.NoError(t, err)
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Set("id", 1)
+			ctx.Set("role", common.RoleRootUser)
+			ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprint(source.Id)}}
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/copy_behind_cdnaigw", bytes.NewReader(body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			CopyBehindCdnAigwChannel(ctx)
+			var response struct {
+				Success bool   `json:"success"`
+				Message string `json:"message"`
+				Data    struct {
+					ID int `json:"id"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, tc.message == "", response.Success, response.Message)
+			var countAfter int64
+			require.NoError(t, db.Model(&model.Channel{}).Count(&countAfter).Error)
+			if tc.message != "" {
+				assert.Contains(t, response.Message, tc.message)
+				assert.Equal(t, countBefore, countAfter)
+			} else {
+				assert.Equal(t, countBefore+1, countAfter)
+				clone, err := model.GetChannelById(response.Data.ID, true)
+				require.NoError(t, err)
+				expected := source
+				expected.Id, expected.Name, expected.CreatedTime = clone.Id, target, clone.CreatedTime
+				expected.TestTime, expected.ResponseTime = 0, 0
+				if !tc.preserve {
+					expected.Balance, expected.UsedQuota = 0, 0
+				}
+				if tc.dedicated {
+					expected.Group = target
+				}
+				assert.Equal(t, expected, *clone)
+				if !tc.dedicated {
+					probe, err := model.HasEnabledNonstandardChannel(group, source.Models)
+					require.NoError(t, err)
+					assert.True(t, probe)
+					probe, err = model.HasEnabledNonstandardChannel(group, "unserved-model")
+					require.NoError(t, err)
+					assert.False(t, probe)
+					for _, nonstandard := range []bool{false, true} {
+						selected, err := model.GetRandomSatisfiedChannel(group, source.Models, 0, []hostdto.ChannelFilter{{
+							Kind: hostdto.FilterSessionRouting, NonstandardSession: nonstandard,
+						}})
+						require.NoError(t, err)
+						require.NotNil(t, selected)
+						expectedID := source.Id
+						if nonstandard {
+							expectedID = clone.Id
+						}
+						assert.Equal(t, expectedID, selected.Id)
+					}
+					require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", clone.Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
+					probe, err = model.HasEnabledNonstandardChannel(group, source.Models)
+					require.NoError(t, err)
+					assert.False(t, probe, "disabled channel must not activate session routing even with stale abilities")
+				}
+			}
+			unchanged, err := model.GetChannelById(source.Id, true)
+			require.NoError(t, err)
+			assert.Equal(t, source, *unchanged)
+			if tc.dedicated {
+				assert.Equal(t, float64(0), ratio_setting.GetGroupRatioCopy()[target])
+				assert.Equal(t, target, setting.GetUserUsableGroupsCopy()[target])
+				createdToken, err := model.GetUserTokenByName(1, target)
+				require.NoError(t, err)
+				require.NotNil(t, createdToken)
+				assert.Equal(t, target, createdToken.Group)
+				assert.True(t, createdToken.UnlimitedQuota)
+				return
+			}
+			var tokensAfter []model.Token
+			var optionsAfter []model.Option
+			require.NoError(t, db.Order("id").Find(&tokensAfter).Error)
+			require.NoError(t, db.Order(clause.OrderByColumn{Column: clause.Column{Name: "key"}}).Find(&optionsAfter).Error)
+			assert.Equal(t, tokensBefore, tokensAfter)
+			assert.Equal(t, optionsBefore, optionsAfter)
+			assert.Equal(t, ratiosBefore, ratio_setting.GetGroupRatioCopy())
+			assert.Equal(t, groupsBefore, setting.GetUserUsableGroupsCopy())
+		})
+	}
 }
 
 func TestDeleteChannelResetsProxyCacheWhenPreReadFails(t *testing.T) {

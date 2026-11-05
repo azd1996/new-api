@@ -43,6 +43,7 @@ import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { positiveIntegerSchema } from '../utils/numeric-field'
 import { GroupRatioForm } from './group-ratio-form'
+import { GroupSessionRoutingSettings } from './group-session-routing-settings'
 import { ModelRatioForm } from './model-ratio-form'
 import { ToolPriceSettings } from './tool-price-settings'
 import { UpstreamRatioSync } from './upstream-ratio-sync'
@@ -330,7 +331,18 @@ export function RatioSettingsCard({
     })
   }, [modelDefaults, modelForm])
 
+  const previousGroupDefaults = useRef(groupDefaults)
   useEffect(() => {
+    // An unrelated option save must not discard unfinished group edits.
+    if (
+      Object.entries(groupDefaults).every(
+        ([key, value]) =>
+          previousGroupDefaults.current[key as keyof GroupFormValues] === value
+      )
+    ) {
+      return
+    }
+    previousGroupDefaults.current = groupDefaults
     groupNormalizedDefaults.current = {
       GroupRatio: normalizeJsonString(groupDefaults.GroupRatio),
       TopupGroupRatio: normalizeJsonString(groupDefaults.TopupGroupRatio),
@@ -510,11 +522,14 @@ export function RatioSettingsCard({
     }
     if (tab === 'groups') {
       return (
-        <GroupRatioForm
-          form={groupForm}
-          onSave={saveGroupRatios}
-          isSaving={updateOption.isPending}
-        />
+        <>
+          <GroupRatioForm
+            form={groupForm}
+            onSave={saveGroupRatios}
+            isSaving={updateOption.isPending}
+          />
+          <GroupSessionRoutingSettings />
+        </>
       )
     }
     if (tab === 'tool-prices') {

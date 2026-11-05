@@ -2,10 +2,44 @@ package model
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
+
+// HasEnabledNonstandardChannel uses the same exact/normalized model lookup as
+// channel selection. The category probe is independent of request path filters:
+// an unsupported endpoint must not silently bypass a configured routing split.
+func HasEnabledNonstandardChannel(group, modelName string) (bool, error) {
+	filters := []dto.ChannelFilter{{Kind: dto.FilterSessionRouting, NonstandardSession: true}}
+	if !common.MemoryCacheEnabled {
+		abilities := DB.Model(&Ability{}).Select("channel_id").
+			Where(commonGroupCol+" = ? AND model IN ? AND enabled = ?", group,
+				[]string{modelName, ratio_setting.RoutingMatchModelName(modelName)}, true)
+		var names []string
+		err := DB.Model(&Channel{}).Where("id IN (?) AND status = ?", abilities, common.ChannelStatusEnabled).
+			Pluck("name", &names).Error
+		if err != nil {
+			return false, err
+		}
+		return slices.ContainsFunc(names, func(name string) bool { return strings.HasSuffix(name, "-非标") }), nil
+	}
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	for _, name := range []string{modelName, ratio_setting.RoutingMatchModelName(modelName)} {
+		for _, id := range group2model2channels[group][name] {
+			ch := channelsIDM[id]
+			if ch != nil && ch.Status == common.ChannelStatusEnabled {
+				if ok, _ := ChannelSatisfiesFilters(ch, modelName, filters); ok {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
+}
 
 func IsChannelEnabledForGroupModel(group string, modelName string, channelID int) bool {
 	if group == "" || modelName == "" || channelID <= 0 {

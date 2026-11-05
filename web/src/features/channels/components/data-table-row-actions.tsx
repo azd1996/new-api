@@ -284,6 +284,28 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </TooltipContent>
       </Tooltip>
 
+      {channel.tag === 'behind-cdnaigw' && !channel.name.endsWith('-非标') && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                disabled={!canEditSensitive}
+                aria-label={t('Copy Channel')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleCopy()
+                }}
+              />
+            }
+          >
+            <Copy className='size-4' />
+          </TooltipTrigger>
+          <TooltipContent>{t('Copy Channel')}</TooltipContent>
+        </Tooltip>
+      )}
+
       <DropdownMenu>
         <DropdownMenuTrigger
           render={

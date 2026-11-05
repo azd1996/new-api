@@ -83,10 +83,13 @@ export function ChannelsDialogs() {
       />
 
       {/* Copy Channel Dialog */}
-      <CopyChannelDialog
-        open={open === 'copy-channel'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
+      {open === 'copy-channel' && (
+        <CopyChannelDialog
+          key={currentRow?.id}
+          open={open === 'copy-channel'}
+          onOpenChange={(v) => !v && setOpen(null)}
+        />
+      )}
 
       {/* Multi-Key Management Dialog */}
       <MultiKeyManageDialog

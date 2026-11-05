@@ -48,6 +48,7 @@ function channel(name: string): Channel {
   return {
     id: 3,
     type: 1,
+    resource_type_name: '',
     key: '',
     status: 1,
     name,

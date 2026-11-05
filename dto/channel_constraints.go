@@ -40,10 +40,12 @@ const (
 	FilterTaskPluginEndpoint ChannelFilterKind = "task_plugin_endpoint"
 	FilterTaskPluginIdentity ChannelFilterKind = "task_plugin_identity"
 	FilterResponsesWebSocket ChannelFilterKind = "responses_websocket"
+	FilterSessionRouting     ChannelFilterKind = "session_routing"
 )
 
 type ChannelFilter struct {
 	Kind                   ChannelFilterKind
+	NonstandardSession     bool
 	RequestPath            string
 	TaskPluginKey          string
 	TaskPluginKeys         []string

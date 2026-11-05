@@ -2,6 +2,7 @@ package model
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
@@ -12,6 +13,7 @@ var filterEvalOrder = []dto.ChannelFilterKind{
 	dto.FilterTaskPluginEndpoint,
 	dto.FilterTaskPluginIdentity,
 	dto.FilterResponsesWebSocket,
+	dto.FilterSessionRouting,
 }
 
 // ChannelSatisfiesFilters reports whether ch passes every filter.
@@ -90,6 +92,8 @@ func candidatePassesKindFilters(ch *Channel, exists bool, modelName string, kind
 
 func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilter) bool {
 	switch filter.Kind {
+	case dto.FilterSessionRouting:
+		return strings.HasSuffix(ch.Name, "-非标") == filter.NonstandardSession
 	case dto.FilterRequestPath:
 		if filter.RequestPath == "" {
 			return true

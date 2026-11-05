@@ -121,7 +121,6 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	var err error
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
-	filters := GetChannelConstraints(param.Ctx).Filters
 
 	if param.TokenGroup == "auto" {
 		autoGroups := GetRequestAutoGroups(param.Ctx, userGroup)
@@ -152,12 +151,10 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(
-				autoGroup,
-				param.ModelName,
-				priorityRetry,
-				filters,
-			)
+			channel, err = getSessionRoutedChannel(param, autoGroup, priorityRetry)
+			if err != nil {
+				return nil, autoGroup, err
+			}
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -195,12 +192,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(
-			param.TokenGroup,
-			param.ModelName,
-			param.GetRetry(),
-			filters,
-		)
+		channel, err = getSessionRoutedChannel(param, param.TokenGroup, param.GetRetry())
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
@@ -301,7 +293,21 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		if channel.Status != common.ChannelStatusEnabled {
 			return nil, "", pinnedChannelUnavailable(pin, http.StatusForbidden, i18n.MsgDistributorChannelDisabled)
 		}
-		if ok, kind := model.ChannelSatisfiesFilters(channel, modelName, constraints.Filters); !ok {
+		filters := constraints.Filters
+		for _, group := range sessionRoutingGroups(c, retry.TokenGroup) {
+			if retry.TokenGroup == "auto" && !model.IsChannelEnabledForGroupModel(group, modelName, channel.Id) {
+				continue
+			}
+			var routeErr error
+			filters, routeErr = sessionRoutingFilters(c, modelName, group, false)
+			if routeErr != nil {
+				return nil, "", &ChannelSelectError{StatusCode: http.StatusBadRequest, Message: "session_routing_classification_failed"}
+			}
+			if ok, _ := model.ChannelSatisfiesFilters(channel, modelName, filters); ok {
+				break
+			}
+		}
+		if ok, kind := model.ChannelSatisfiesFilters(channel, modelName, filters); !ok {
 			return nil, "", &ChannelSelectError{
 				StatusCode: http.StatusBadRequest, Code: types.ErrorCode(kind), MessageID: i18n.MsgDistributorNoAvailableChannel,
 				Params:     map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelName},
@@ -318,6 +324,16 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		if preferredChannelID, found := GetPreferredChannelByAffinity(c, modelName, usingGroup); found {
 			affinityUsable := false
 			preferred, err := model.CacheGetChannel(preferredChannelID)
+			routingChanged := false
+			if err == nil && preferred != nil {
+				for _, group := range sessionRoutingGroups(c, usingGroup) {
+					changed, routeErr := sessionRoutingBindingChanged(c, group, modelName, preferred)
+					if routeErr != nil {
+						return nil, "", &ChannelSelectError{StatusCode: http.StatusBadRequest, Message: "session_routing_classification_failed"}
+					}
+					routingChanged = routingChanged || changed
+				}
+			}
 			affinitySatisfied := false
 			if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled {
 				affinitySatisfied, _ = model.ChannelSatisfiesFilters(preferred, modelName, constraints.Filters)
@@ -327,6 +343,14 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 					userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 					for _, g := range GetRequestAutoGroups(c, userGroup) {
 						if model.IsChannelEnabledForGroupModel(g, modelName, preferred.Id) {
+							filters, routeErr := sessionRoutingFilters(c, modelName, g, false)
+							if routeErr != nil {
+								return nil, "", &ChannelSelectError{StatusCode: http.StatusBadRequest, Message: "session_routing_classification_failed"}
+							}
+							if ok, kind := model.ChannelSatisfiesFilters(preferred, modelName, filters); !ok {
+								routingChanged = routingChanged || kind == dto.FilterSessionRouting
+								continue
+							}
 							selectGroup = g
 							common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 							channel = preferred
@@ -336,16 +360,30 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 						}
 					}
 				} else if model.IsChannelEnabledForGroupModel(usingGroup, modelName, preferred.Id) {
-					channel = preferred
-					selectGroup = usingGroup
-					affinityUsable = true
-					MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+					filters, routeErr := sessionRoutingFilters(c, modelName, usingGroup, false)
+					if routeErr != nil {
+						return nil, "", &ChannelSelectError{StatusCode: http.StatusBadRequest, Message: "session_routing_classification_failed"}
+					}
+					if ok, kind := model.ChannelSatisfiesFilters(preferred, modelName, filters); ok {
+						channel = preferred
+						selectGroup = usingGroup
+						affinityUsable = true
+						MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+					} else {
+						routingChanged = kind == dto.FilterSessionRouting
+					}
 				}
 			}
-			if !affinityUsable && !ShouldKeepChannelAffinityOnChannelDisabled() {
+			if !affinityUsable && (routingChanged || !ShouldKeepChannelAffinityOnChannelDisabled()) {
 				ClearCurrentChannelAffinityCache(c)
+				if routingChanged {
+					// Only the obsolete binding is invalidated. The matched
+					// rule's retry restrictions still apply to the new binding.
+					c.Set(ginKeyChannelAffinitySkipRetry, RequestPolicy(c).SessionMode == "strict")
+					RequestPolicy(c).AddEvent(PolicyEvent{Decision: PolicyDecision{Action: "rebind", Reason: "session_routing_binding_changed", Source: "session_routing"}})
+				}
 			}
-			if !affinityUsable && RequestPolicy(c).SessionMode == "strict" {
+			if !affinityUsable && !routingChanged && RequestPolicy(c).SessionMode == "strict" {
 				return nil, "", &ChannelSelectError{StatusCode: http.StatusServiceUnavailable, Message: "strict_session_binding_unavailable"}
 			}
 		}

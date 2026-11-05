@@ -3,6 +3,7 @@ package service
 import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-gonic/gin"
@@ -75,7 +76,26 @@ func resolvePinnedChannel(param *RetryParam) (*model.Channel, string, bool) {
 	if err != nil || channel == nil || channel.Status != common.ChannelStatusEnabled {
 		return nil, "", false
 	}
-	return channel, pinnedSelectGroup(param), true
+	group := pinnedSelectGroup(param)
+	filters, routeErr := sessionRoutingFilters(param.Ctx, param.ModelName, group, false)
+	if routeErr != nil {
+		return nil, "", false
+	}
+	if passed, kind := model.ChannelSatisfiesFilters(channel, param.ModelName, filters); !passed {
+		// A same-channel retry may retain a standard channel previously
+		// reached by a permitted nonstandard fallback.
+		if kind != dto.FilterSessionRouting {
+			return nil, "", false
+		}
+		retryFilters, err := sessionRoutingFilters(param.Ctx, param.ModelName, group, true)
+		if err != nil {
+			return nil, "", false
+		}
+		if ok, _ := model.ChannelSatisfiesFilters(channel, param.ModelName, retryFilters); !ok {
+			return nil, "", false
+		}
+	}
+	return channel, group, true
 }
 
 // pinnedSelectGroup resolves the group to report for a pinned selection: the

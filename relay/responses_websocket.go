@@ -599,6 +599,13 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 			return types.NewErrorWithStatusCode(errors.New("the connection channel is no longer allowed for this group and model"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 	}
+	allowed, routeErr := service.SessionRoutingAllowsChannel(c, model, s.lockedGroup, channel)
+	if routeErr != nil {
+		return types.NewError(routeErr, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+	}
+	if !allowed {
+		return types.NewErrorWithStatusCode(errors.New("session routing changed; reconnect required"), types.ErrorCode(appdto.FilterSessionRouting), http.StatusForbidden, types.ErrOptionWithSkipRetry())
+	}
 	for key, value := range s.lockedContext {
 		c.Set(string(key), value)
 	}

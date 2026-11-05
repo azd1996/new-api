@@ -28,7 +28,7 @@ import type { SystemOption } from '../types'
 import { SettingsPageProvider } from './settings-page-context'
 
 type SettingsPageProps<
-  TSettings extends Record<string, string | number | boolean | unknown[]>,
+  TSettings extends Record<string, unknown>,
   TSectionId extends string,
   TExtraArgs extends unknown[] = [],
 > = {
@@ -98,7 +98,7 @@ function SettingsPageFrame(props: SettingsPageFrameProps) {
  * Handles loading state, data fetching, and section rendering
  */
 export function SettingsPage<
-  TSettings extends Record<string, string | number | boolean | unknown[]>,
+  TSettings extends Record<string, unknown>,
   TSectionId extends string,
   TExtraArgs extends unknown[] = [],
 >({
