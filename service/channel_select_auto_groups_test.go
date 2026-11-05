@@ -267,6 +267,33 @@ func TestSessionRoutingInactiveSplitPreservesRetryPriority(t *testing.T) {
 	}
 }
 
+func TestSessionRoutingCustomerSwitchForcesStandardPool(t *testing.T) {
+	t.Setenv(common.TraceTagKeyEnv, "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+	db := setupChannelSelectAutoGroupsTest(t)
+	require.NoError(t, db.AutoMigrate(&model.Customer{}))
+	customer := &model.Customer{CustomerId: "api-key-004", Name: "Routing customer"}
+	require.NoError(t, customer.Insert())
+	t.Cleanup(func() {
+		require.NoError(t, model.DeleteCustomerById(customer.Id))
+	})
+	const group = "behind-cdnaigw_customer"
+	createSessionRoutingTestChannel(t, db, 2441, group, "routing-model", false, common.ChannelStatusEnabled)
+	createSessionRoutingTestChannel(t, db, 2442, group, "routing-model", true, common.ChannelStatusEnabled)
+	model.InitChannelCache()
+
+	const traceTag = "C7J42H35CV56G2VKWLMPH72GEKF24S72RCDZOG6KAXXIJ5Q5D2K7LNKIH3R7D5KGLDOMTOX3XGH7HBRLCWQMCZKGHY7EXQBCLVWUATI"
+	ctx, param := sessionRoutingTestRequest(t, group, "", `{}`)
+	ctx.Request.Header.Set(common.TraceTagHeader, traceTag)
+	routingDisabled := false
+	customer.SessionRoutingEnabled = &routingDisabled
+	require.NoError(t, customer.Update())
+
+	channel, _, selectErr := SelectChannelForRequest(ctx, param.ModelName, param)
+	require.Nil(t, selectErr)
+	require.NotNil(t, channel)
+	assert.Equal(t, 2441, channel.Id)
+}
+
 func TestSessionRoutingAutoUsesActualGroupSwitch(t *testing.T) {
 	db := setupChannelSelectAutoGroupsTest(t)
 	const offGroup, onGroup = "behind-cdnaigw_off", "behind-cdnaigw_on"

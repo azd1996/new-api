@@ -158,6 +158,7 @@ func TestCustomerClaudeCacheOptimizationPersistence(t *testing.T) {
 	assert.Nil(t, GetCustomerClaudeCacheOptimization(customer.CustomerId))
 	assert.Nil(t, GetCustomerClaudeCacheOptimization("missing-claude-cache-customer"))
 	assert.Nil(t, GetCustomerClaudeCacheOptimization(""))
+	assert.True(t, CustomerSessionRoutingEnabled(customer.CustomerId))
 	data, err := common.Marshal(customer)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"claude_cache_optimization":null`)
@@ -206,9 +207,15 @@ func TestCustomerClaudeCacheOptimizationPersistence(t *testing.T) {
 	config.ForceExtendedTTL.Enabled = false
 	assert.Equal(t, stored.ClaudeCacheOptimization, GetCustomerClaudeCacheOptimization(customer.CustomerId))
 
+	routingDisabled := false
+	update.SessionRoutingEnabled = &routingDisabled
+	require.NoError(t, update.Update())
+	assert.False(t, CustomerSessionRoutingEnabled(customer.CustomerId))
+
 	// An old API payload omits the new field but still updates ordinary fields.
 	legacy := &Customer{Id: customer.Id, CustomerId: customer.CustomerId, Name: "legacy update"}
 	require.NoError(t, legacy.Update())
+	assert.False(t, CustomerSessionRoutingEnabled(customer.CustomerId), "omitted legacy field must preserve the explicit customer setting")
 	preserved, err := GetCustomerById(customer.Id)
 	require.NoError(t, err)
 	assert.Equal(t, "legacy update", preserved.Name)
@@ -217,10 +224,10 @@ func TestCustomerClaudeCacheOptimizationPersistence(t *testing.T) {
 
 	legacy.ClaudeCacheOptimization = &CustomerClaudeCacheOptimization{}
 	require.NoError(t, legacy.Update())
-	disabled, err := GetCustomerById(customer.Id)
+	disabledCustomer, err := GetCustomerById(customer.Id)
 	require.NoError(t, err)
-	require.NotNil(t, disabled.ClaudeCacheOptimization)
-	assert.Equal(t, legacy.ClaudeCacheOptimization, disabled.ClaudeCacheOptimization)
+	require.NotNil(t, disabledCustomer.ClaudeCacheOptimization)
+	assert.Equal(t, legacy.ClaudeCacheOptimization, disabledCustomer.ClaudeCacheOptimization)
 	assert.False(t, GetCustomerClaudeCacheOptimization(customer.CustomerId).ForceExtendedTTL.Matches("claude-sonnet"))
 	assert.False(t, GetCustomerClaudeCacheOptimization(customer.CustomerId).FallbackCacheBreakpoint.Matches("claude-opus"))
 

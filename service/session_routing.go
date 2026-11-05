@@ -78,6 +78,18 @@ func sessionRoutingFilters(c *gin.Context, modelName, group string, retry bool) 
 		enabled = maps.Clone(operation_setting.GetSessionRoutingSetting().GroupEnabled)
 		c.Set(settingsKey, enabled)
 	}
+	_, _, customerID, decoded := common.TraceTagFromContext(c)
+	if decoded && !model.CustomerSessionRoutingEnabled(customerID) {
+		RequestPolicy(c).AddEvent(PolicyEvent{
+			Group: group,
+			Decision: PolicyDecision{
+				Action: "standard", Reason: "customer_session_routing_disabled", Source: "session_routing",
+			},
+		})
+		result := make([]dto.ChannelFilter, len(filters), len(filters)+1)
+		copy(result, filters)
+		return append(result, dto.ChannelFilter{Kind: dto.FilterSessionRouting}), nil
+	}
 	match := matchRequestChannelAffinity(c, modelName)
 	if match.Err != nil {
 		return nil, match.Err

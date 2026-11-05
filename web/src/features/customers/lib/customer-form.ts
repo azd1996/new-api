@@ -70,6 +70,7 @@ export function getCustomerFormSchema(t: TFunction) {
         fallback_cache_breakpoint: rule,
       })
       .nullable(),
+    session_routing_enabled: z.boolean(),
   })
 }
 
@@ -87,6 +88,7 @@ export const CUSTOMER_FORM_DEFAULT_VALUES: CustomerFormValues = {
   prefix_discounts: [],
   remark: '',
   claude_cache_optimization: null,
+  session_routing_enabled: true,
 }
 
 // ============================================================================
@@ -116,6 +118,7 @@ export function transformFormDataToPayload(
     ...(data.claude_cache_optimization
       ? { claude_cache_optimization: data.claude_cache_optimization }
       : {}),
+    session_routing_enabled: data.session_routing_enabled,
   }
 }
 
@@ -138,5 +141,6 @@ export function transformCustomerToFormDefaults(
     claude_cache_optimization: customer.claude_cache_optimization
       ? claudeCacheOptimizationSchema.parse(customer.claude_cache_optimization)
       : null,
+    session_routing_enabled: customer.session_routing_enabled ?? true,
   }
 }

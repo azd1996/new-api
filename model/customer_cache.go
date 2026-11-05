@@ -94,6 +94,13 @@ func CustomerConfigured(customerID string) bool {
 	return ok
 }
 
+// CustomerSessionRoutingEnabled defaults to enabled for customers created before
+// the customer-level override was introduced.
+func CustomerSessionRoutingEnabled(customerID string) bool {
+	c, ok := getCachedCustomer(customerID)
+	return !ok || c.SessionRoutingEnabled == nil || *c.SessionRoutingEnabled
+}
+
 // CustomerModelDiscount returns the reporting-only stat discount multiplier for
 // (customerID, modelName): the longest matching model-name prefix ("series")
 // wins. When no series matches, it returns 1; the legacy customer default

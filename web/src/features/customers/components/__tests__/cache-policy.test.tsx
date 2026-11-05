@@ -155,6 +155,20 @@ it('hydrates an old four-rule policy with fallback disabled and normalizes null 
   })
 })
 
+it('defaults legacy customers to enabled session routing and preserves an explicit disable', () => {
+  const legacy = transformCustomerToFormDefaults(customer)
+  expect(legacy.session_routing_enabled).toBe(true)
+
+  const disabled = transformCustomerToFormDefaults({
+    ...customer,
+    session_routing_enabled: false,
+  })
+  expect(disabled.session_routing_enabled).toBe(false)
+  expect(transformFormDataToPayload(disabled)).toMatchObject({
+    session_routing_enabled: false,
+  })
+})
+
 it('keeps fallback prefixes through toggling, saving and reopening without changing other rules', async () => {
   const user = userEvent.setup()
   const onSave = vi.fn()

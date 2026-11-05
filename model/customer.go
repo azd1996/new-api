@@ -29,6 +29,7 @@ type Customer struct {
 	UpdatedTime                 int64                            `json:"updated_time" gorm:"bigint"`
 	ClaudeCacheOptimizationJSON string                           `json:"-" gorm:"column:claude_cache_optimization_json;type:text"`
 	ClaudeCacheOptimization     *CustomerClaudeCacheOptimization `json:"claude_cache_optimization" gorm:"-"`
+	SessionRoutingEnabled       *bool                            `json:"session_routing_enabled" gorm:"column:session_routing_enabled"`
 }
 
 // CustomerClaudeCacheOptimization overrides all five global rules when non-nil.
@@ -240,6 +241,9 @@ func (c *Customer) Update() error {
 	// persisted override; an empty object explicitly disables every rule.
 	if c.ClaudeCacheOptimization != nil {
 		columns = append(columns, "claude_cache_optimization_json")
+	}
+	if c.SessionRoutingEnabled != nil {
+		columns = append(columns, "session_routing_enabled")
 	}
 	err := DB.Model(c).Where("id = ?", c.Id).
 		Select(columns).
