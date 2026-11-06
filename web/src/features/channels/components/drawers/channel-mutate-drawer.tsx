@@ -1873,26 +1873,42 @@ export function ChannelMutateDrawer({
     />
   )
 
-  const proxyTtftRoutingFields = (
+  const proxyRoutingModeField = (
     <FormField
       control={form.control}
-      name='proxy_ttft_routing_enabled'
+      name='proxy_routing_mode'
       render={({ field }) => (
-        <FormItem className='flex items-center justify-between px-4 py-3'>
-          <div className='space-y-0.5'>
-            <FormLabel>{t('TTFT-aware proxy routing')}</FormLabel>
-            <FormDescription>
-              {t(
-                'When a proxy alias is consistently slow to first token, probabilistically shift traffic to other aliases and tune the split by observed TTFT. Thresholds are set in the proxy pool (System Settings - Models).'
-              )}
-            </FormDescription>
-          </div>
+        <FormItem>
+          <FormLabel>{t('Proxy routing mode')}</FormLabel>
           <FormControl>
-            <Switch
-              checked={field.value ?? false}
-              onCheckedChange={field.onChange}
-            />
+            <Select
+              value={field.value ?? 'priority'}
+              onValueChange={field.onChange}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value='priority'>
+                    {t('Priority failover')}
+                  </SelectItem>
+                  <SelectItem value='ttft'>
+                    {t('TTFT and connection latency')}
+                  </SelectItem>
+                  <SelectItem value='equal'>
+                    {t('Equal distribution')}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </FormControl>
+          <FormDescription>
+            {t(
+              'Equal distribution sends requests evenly to all available proxies and only switches when a proxy is unavailable.'
+            )}
+          </FormDescription>
+          <FormMessage />
         </FormItem>
       )}
     />
@@ -5184,7 +5200,7 @@ export function ChannelMutateDrawer({
               >
                 {taskPollingFields}
                 {proxyAliasesFields}
-                {proxyTtftRoutingFields}
+                {proxyRoutingModeField}
                 {proxyFields}
                 {httpProtocolFields}
                 {httpShardsFields}

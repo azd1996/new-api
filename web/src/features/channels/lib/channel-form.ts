@@ -305,6 +305,7 @@ export const channelFormSchema = z
     proxy_aliases: z.array(z.string()).optional(),
     // Opt-in TTFT-aware weighted proxy selection among proxy_aliases.
     proxy_ttft_routing_enabled: z.boolean().optional(),
+    proxy_routing_mode: z.enum(['priority', 'ttft', 'equal']).optional(),
     // Retry override (stored in setting JSON as an array of four-phase rules).
     // Kept as a pretty-printed JSON string in the form, edited as multiline text.
     retry_override: z.string().optional(),
@@ -524,6 +525,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   system_prompt: '',
   system_prompt_override: false,
   proxy_aliases: [],
+  proxy_routing_mode: 'priority',
   proxy_ttft_routing_enabled: false,
   retry_override: '',
   upstream_request_id_header: '',
@@ -582,6 +584,7 @@ export function transformChannelToFormDefaults(
     system_prompt: '',
     system_prompt_override: false,
     proxy_aliases: [] as string[],
+    proxy_routing_mode: 'priority' as const,
     proxy_ttft_routing_enabled: false,
     retry_override: '',
     upstream_request_id_header: '',
@@ -601,6 +604,14 @@ export function transformChannelToFormDefaults(
       const shards = normalizeHttp2ConnectionShards(
         parsed.http2_connection_shards
       )
+      const parsedRoutingMode =
+        parsed.proxy_routing_mode === 'equal' ||
+        parsed.proxy_routing_mode === 'ttft' ||
+        parsed.proxy_routing_mode === 'priority'
+          ? parsed.proxy_routing_mode
+          : undefined
+      const proxyRoutingMode =
+        parsedRoutingMode ?? (parsed.proxy_ttft_routing_enabled === true ? 'ttft' : 'priority')
       extraSettings = {
         task_plugin_key: parsed.task_plugin_key || '',
         task_extend_plugin_keys: readTaskExtendPluginKeys(channel.type, parsed),
@@ -620,6 +631,7 @@ export function transformChannelToFormDefaults(
               (alias: unknown): alias is string => typeof alias === 'string'
             )
           : [],
+        proxy_routing_mode: proxyRoutingMode,
         proxy_ttft_routing_enabled: parsed.proxy_ttft_routing_enabled === true,
         retry_override: Array.isArray(parsed.retry_override)
           ? JSON.stringify(parsed.retry_override, null, 2)
@@ -808,6 +820,9 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   }
   if (formData.proxy_ttft_routing_enabled) {
     settingObj.proxy_ttft_routing_enabled = true
+  }
+  if (formData.proxy_routing_mode && formData.proxy_routing_mode !== 'priority') {
+    settingObj.proxy_routing_mode = formData.proxy_routing_mode
   }
 
   if (formData.retry_override && formData.retry_override.trim() !== '') {

@@ -491,7 +491,7 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
-	proxyURL, proxyAlias := service.ResolveChannelProxyWeighted(info.ChannelId, info.ChannelSetting.ProxyAliases, info.ChannelSetting.Proxy, info.UpstreamModelName, info.ChannelSetting.ProxyTtftRoutingEnabled)
+	proxyURL, proxyAlias := service.ResolveChannelProxyMode(info.ChannelId, info.ChannelSetting.ProxyAliases, info.ChannelSetting.Proxy, info.UpstreamModelName, info.ChannelSetting.ProxyRoutingMode, info.ChannelSetting.ProxyTtftRoutingEnabled)
 	// Feed the proxy-pool-resolved URL into the upstream transport-policy-aware
 	// client builder so HTTP/2 shards, protocol and TLS settings still apply to
 	// proxied requests. proxyURL == "" means direct / no proxy.

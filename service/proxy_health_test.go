@@ -388,3 +388,22 @@ func TestProxyTtftDisabledAndSingleEligibleStayStrict(t *testing.T) {
 	_, alias = ResolveChannelProxyWeighted(ch, []string{"A"}, "", model, true)
 	require.Equal(t, "A", alias, "single eligible alias stays strict")
 }
+
+func TestProxyEqualRoutingSkipsCoolingProxy(t *testing.T) {
+	resetProxyHealthStateForTest(t, []system_setting.ProxyEntry{
+		{Alias: "A", URL: "http://a:1"},
+		{Alias: "B", URL: "http://b:1"},
+		{Alias: "C", URL: "http://c:1"},
+	})
+	const ch = 50
+	proxyTtftRandFloat = func() float64 { return 0.99 }
+
+	_, alias := ResolveChannelProxyMode(ch, []string{"A", "B", "C"}, "", "", ProxyRoutingModeEqual, false)
+	require.Equal(t, "C", alias)
+
+	for i := 0; i < proxyFailureThreshold; i++ {
+		RecordProxyConnectResult(ch, "C", 0, true)
+	}
+	_, alias = ResolveChannelProxyMode(ch, []string{"A", "B", "C"}, "", "", ProxyRoutingModeEqual, false)
+	require.Equal(t, "B", alias, "equal routing must exclude a proxy in connection-failure cooldown")
+}

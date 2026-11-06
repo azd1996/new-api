@@ -532,6 +532,16 @@ type ProxyModelRoutingStat struct {
 // off, fewer than two eligible aliases, or the gate is closed; otherwise the
 // inverse-TTFT weighted split. Models with no observed traffic are omitted.
 func ProxyTtftChannelStats(channelID int, configuredAliases []string, ttftEnabled bool) []ProxyModelRoutingStat {
+	mode := ProxyRoutingModePriority
+	if ttftEnabled {
+		mode = ProxyRoutingModeTtft
+	}
+	return ProxyChannelRoutingStats(channelID, configuredAliases, mode, ttftEnabled)
+}
+
+// ProxyChannelRoutingStats returns routing statistics for the requested channel
+// routing mode. Equal mode reports an even probability across eligible aliases.
+func ProxyChannelRoutingStats(channelID int, configuredAliases []string, mode string, ttftEnabled bool) []ProxyModelRoutingStat {
 	cfg := system_setting.GetProxyTtftRoutingConfig()
 	cleaned := normalizeProxyAliases(configuredAliases)
 	order := channelProxyAliasOrder(channelID, cleaned)
@@ -566,7 +576,9 @@ func ProxyTtftChannelStats(channelID int, configuredAliases []string, ttftEnable
 		if key.channelID != channelID {
 			continue
 		}
-		useWeighted := ttftEnabled && len(eligible) >= 2 && entry.gateActive
+		routingMode := resolveProxyRoutingMode(mode, ttftEnabled)
+		useEqual := routingMode == ProxyRoutingModeEqual && len(eligible) >= 1
+		useWeighted := routingMode == ProxyRoutingModeTtft && len(eligible) >= 2 && entry.gateActive
 		var weights map[string]float64
 		if useWeighted {
 			weights = computeProxyTtftWeightsLocked(entry, eligible, cfg, conn.weightVal)
@@ -578,6 +590,8 @@ func ProxyTtftChannelStats(channelID int, configuredAliases []string, ttftEnable
 			switch {
 			case useWeighted:
 				prob = weights[alias]
+			case useEqual && isEligible:
+				prob = 1 / float64(len(eligible))
 			case isEligible && alias == eligible[0]:
 				prob = 1 // strict head
 			}
@@ -601,7 +615,8 @@ func ProxyTtftChannelStats(channelID int, configuredAliases []string, ttftEnable
 			}
 			rows = append(rows, row)
 		}
-		out = append(out, ProxyModelRoutingStat{Model: key.model, GateActive: entry.gateActive, Aliases: rows})
+		gateActive := routingMode == ProxyRoutingModeTtft && entry.gateActive
+		out = append(out, ProxyModelRoutingStat{Model: key.model, GateActive: gateActive, Aliases: rows})
 	}
 	slices.SortFunc(out, func(a, b ProxyModelRoutingStat) int { return strings.Compare(a.Model, b.Model) })
 	return out

@@ -98,6 +98,8 @@ export interface ChannelSettings {
   retry_override?: Array<Record<string, unknown>>
   // Named proxy-pool aliases consulted in order before the proxy address.
   proxy_aliases?: string[]
+  // Proxy alias routing mode. Empty/priority keeps strict priority failover.
+  proxy_routing_mode?: ProxyRoutingMode
   // Opt-in TTFT-aware weighted selection among proxy_aliases.
   proxy_ttft_routing_enabled?: boolean
   upstream_request_id_header?: string
@@ -115,6 +117,8 @@ export interface ChannelSettings {
   http2_connection_shards?: number
   tls_insecure_skip_verify?: boolean
 }
+
+export type ProxyRoutingMode = 'priority' | 'ttft' | 'equal'
 
 export interface ChannelOtherSettings {
   azure_responses_version?: string
@@ -279,6 +283,7 @@ export type ProxyModelRoutingStat = {
 
 export type ChannelStats = {
   proxy_ttft_routing_enabled: boolean
+  proxy_routing_mode?: ProxyRoutingMode | string
   proxy_routing: ProxyModelRoutingStat[]
 }
 

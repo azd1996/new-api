@@ -942,7 +942,8 @@ func GetChannelStats(c *gin.Context) {
 		"message": "",
 		"data": gin.H{
 			"proxy_ttft_routing_enabled": settings.ProxyTtftRoutingEnabled,
-			"proxy_routing":              service.ProxyTtftChannelStats(id, settings.ProxyAliases, settings.ProxyTtftRoutingEnabled),
+			"proxy_routing_mode":         settings.ProxyRoutingMode,
+			"proxy_routing":              service.ProxyChannelRoutingStats(id, settings.ProxyAliases, settings.ProxyRoutingMode, settings.ProxyTtftRoutingEnabled),
 		},
 	})
 }

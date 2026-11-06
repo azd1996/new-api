@@ -89,7 +89,7 @@ func init() {
 // listed proxies is currently eligible. The returned alias is "" when the
 // direct fallback was used (so the caller skips health recording).
 func ResolveChannelProxy(channelID int, aliases []string, fallback string) (string, string) {
-	return resolveChannelProxy(channelID, aliases, fallback, "", false)
+	return resolveChannelProxy(channelID, aliases, fallback, "", false, "")
 }
 
 // ResolveChannelProxyWeighted resolves the channel proxy with optional
@@ -99,10 +99,16 @@ func ResolveChannelProxy(channelID int, aliases []string, fallback string) (stri
 // given model (see proxy_ttft.go). Connection-failure cooldown always applies
 // first, so an unhealthy proxy is never picked regardless of TTFT.
 func ResolveChannelProxyWeighted(channelID int, aliases []string, fallback, model string, ttftEnabled bool) (string, string) {
-	return resolveChannelProxy(channelID, aliases, fallback, model, ttftEnabled)
+	return resolveChannelProxy(channelID, aliases, fallback, model, ttftEnabled, "")
 }
 
-func resolveChannelProxy(channelID int, aliases []string, fallback, model string, ttftEnabled bool) (string, string) {
+// ResolveChannelProxyMode resolves a channel proxy using the requested routing
+// mode. Unknown or empty modes preserve the legacy TTFT switch behavior.
+func ResolveChannelProxyMode(channelID int, aliases []string, fallback, model, mode string, ttftEnabled bool) (string, string) {
+	return resolveChannelProxy(channelID, aliases, fallback, model, ttftEnabled, mode)
+}
+
+func resolveChannelProxy(channelID int, aliases []string, fallback, model string, ttftEnabled bool, mode string) (string, string) {
 	cleaned := normalizeProxyAliases(aliases)
 	if len(cleaned) == 0 {
 		return fallback, ""
@@ -131,7 +137,18 @@ func resolveChannelProxy(channelID int, aliases []string, fallback, model string
 	if len(eligible) == 0 {
 		return fallback, ""
 	}
-	if ttftEnabled && len(eligible) > 1 {
+	switch resolveProxyRoutingMode(mode, ttftEnabled) {
+	case ProxyRoutingModeEqual:
+		selected := int(proxyTtftRandFloat() * float64(len(eligible)))
+		if selected >= len(eligible) {
+			selected = len(eligible) - 1
+		}
+		recordProxyPick(channelID, model, eligible[selected].alias)
+		return eligible[selected].url, eligible[selected].alias
+	case ProxyRoutingModeTtft:
+		if len(eligible) <= 1 {
+			break
+		}
 		order := make([]string, len(eligible))
 		for i, e := range eligible {
 			order[i] = e.alias
@@ -147,6 +164,28 @@ func resolveChannelProxy(channelID int, aliases []string, fallback, model string
 	}
 	recordProxyPick(channelID, model, eligible[0].alias)
 	return eligible[0].url, eligible[0].alias
+}
+
+const (
+	ProxyRoutingModePriority = "priority"
+	ProxyRoutingModeTtft     = "ttft"
+	ProxyRoutingModeEqual    = "equal"
+)
+
+func resolveProxyRoutingMode(mode string, ttftEnabled bool) string {
+	switch strings.TrimSpace(mode) {
+	case ProxyRoutingModeEqual:
+		return ProxyRoutingModeEqual
+	case ProxyRoutingModeTtft:
+		return ProxyRoutingModeTtft
+	case ProxyRoutingModePriority:
+		return ProxyRoutingModePriority
+	default:
+		if ttftEnabled {
+			return ProxyRoutingModeTtft
+		}
+		return ProxyRoutingModePriority
+	}
 }
 
 // RecordProxyConnectResult feeds one real request's connection-level outcome

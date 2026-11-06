@@ -23,6 +23,11 @@ type ChannelSettings struct {
 	// list is empty or none is eligible, it falls back to Proxy. See
 	// service.ResolveChannelProxy.
 	ProxyAliases []string `json:"proxy_aliases,omitempty"`
+	// ProxyRoutingMode selects proxy alias routing: "priority" keeps strict
+	// priority failover, "ttft" enables TTFT/connect-latency routing, and
+	// "equal" distributes requests evenly across currently eligible aliases.
+	// Empty preserves the legacy behavior controlled by ProxyTtftRoutingEnabled.
+	ProxyRoutingMode string `json:"proxy_routing_mode,omitempty"`
 	// ProxyTtftRoutingEnabled turns on TTFT-aware weighted selection among this
 	// channel's ProxyAliases. When off (default) the first eligible alias is used
 	// in strict priority order (legacy failover). When on, once the head proxy's
