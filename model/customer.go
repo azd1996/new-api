@@ -22,14 +22,15 @@ type Customer struct {
 	// gpt / gemini / grok) to its discount; a model takes the longest matching
 	// prefix. PrefixDiscounts is the serialized JSON persisted to the DB and
 	// PrefixDiscountMap its decoded form used by the API and cache.
-	DefaultDiscount             float64                          `json:"default_discount"`
-	PrefixDiscounts             string                           `json:"-" gorm:"type:text"`
-	PrefixDiscountMap           map[string]float64               `json:"prefix_discounts" gorm:"-"`
-	CreatedTime                 int64                            `json:"created_time" gorm:"bigint"`
-	UpdatedTime                 int64                            `json:"updated_time" gorm:"bigint"`
-	ClaudeCacheOptimizationJSON string                           `json:"-" gorm:"column:claude_cache_optimization_json;type:text"`
-	ClaudeCacheOptimization     *CustomerClaudeCacheOptimization `json:"claude_cache_optimization" gorm:"-"`
-	SessionRoutingEnabled       *bool                            `json:"session_routing_enabled" gorm:"column:session_routing_enabled"`
+	DefaultDiscount                 float64                          `json:"default_discount"`
+	PrefixDiscounts                 string                           `json:"-" gorm:"type:text"`
+	PrefixDiscountMap               map[string]float64               `json:"prefix_discounts" gorm:"-"`
+	CreatedTime                     int64                            `json:"created_time" gorm:"bigint"`
+	UpdatedTime                     int64                            `json:"updated_time" gorm:"bigint"`
+	ClaudeCacheOptimizationJSON     string                           `json:"-" gorm:"column:claude_cache_optimization_json;type:text"`
+	ClaudeCacheOptimization         *CustomerClaudeCacheOptimization `json:"claude_cache_optimization" gorm:"-"`
+	SessionRoutingModelPrefixesJSON string                           `json:"-" gorm:"column:session_routing_model_prefixes_json;type:text"`
+	SessionRoutingModelPrefixes     map[string]bool                  `json:"session_routing_model_prefixes" gorm:"-"`
 }
 
 // CustomerClaudeCacheOptimization overrides all five global rules when non-nil.
@@ -113,6 +114,20 @@ func (c *Customer) hydrate() {
 		}
 		c.ClaudeCacheOptimization = config.clone()
 	}
+	c.SessionRoutingModelPrefixes = map[string]bool{}
+	if strings.TrimSpace(c.SessionRoutingModelPrefixesJSON) != "" {
+		var raw map[string]bool
+		if err := common.UnmarshalJsonStr(c.SessionRoutingModelPrefixesJSON, &raw); err != nil {
+			common.SysError("failed to parse customer session routing model prefixes: " + err.Error())
+		} else {
+			for prefix, enabled := range raw {
+				prefix = strings.TrimSpace(prefix)
+				if prefix != "" {
+					c.SessionRoutingModelPrefixes[prefix] = enabled
+				}
+			}
+		}
+	}
 	c.PrefixDiscountMap = map[string]float64{}
 	if strings.TrimSpace(c.PrefixDiscounts) == "" {
 		return
@@ -153,13 +168,32 @@ func (c *Customer) serialize() error {
 	c.PrefixDiscountMap = clean
 	if len(clean) == 0 {
 		c.PrefixDiscounts = ""
-		return nil
+	} else {
+		b, err := common.Marshal(clean)
+		if err != nil {
+			return err
+		}
+		c.PrefixDiscounts = string(b)
 	}
-	b, err := common.Marshal(clean)
-	if err != nil {
-		return err
+	if c.SessionRoutingModelPrefixes != nil {
+		sessionRoutingPrefixes := map[string]bool{}
+		for prefix, enabled := range c.SessionRoutingModelPrefixes {
+			prefix = strings.TrimSpace(prefix)
+			if prefix != "" {
+				sessionRoutingPrefixes[prefix] = enabled
+			}
+		}
+		c.SessionRoutingModelPrefixes = sessionRoutingPrefixes
+		if len(sessionRoutingPrefixes) == 0 {
+			c.SessionRoutingModelPrefixesJSON = ""
+		} else {
+			b, err := common.Marshal(sessionRoutingPrefixes)
+			if err != nil {
+				return err
+			}
+			c.SessionRoutingModelPrefixesJSON = string(b)
+		}
 	}
-	c.PrefixDiscounts = string(b)
 	return nil
 }
 
@@ -242,8 +276,8 @@ func (c *Customer) Update() error {
 	if c.ClaudeCacheOptimization != nil {
 		columns = append(columns, "claude_cache_optimization_json")
 	}
-	if c.SessionRoutingEnabled != nil {
-		columns = append(columns, "session_routing_enabled")
+	if c.SessionRoutingModelPrefixes != nil {
+		columns = append(columns, "session_routing_model_prefixes_json")
 	}
 	err := DB.Model(c).Where("id = ?", c.Id).
 		Select(columns).

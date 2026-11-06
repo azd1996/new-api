@@ -41,7 +41,6 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
 import {
   Sheet,
   SheetClose,
@@ -65,6 +64,7 @@ import {
 } from '../lib'
 import type { Customer } from '../types'
 import { CustomerCachePolicy } from './customer-cache-policy'
+import { CustomerSessionRoutingPolicy } from './customer-session-routing-policy'
 import { useCustomers } from './customers-provider'
 
 type CustomersMutateDrawerProps = {
@@ -186,32 +186,6 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
               className='contents'
             >
               <SideDrawerSection>
-                <FormField
-                  control={form.control}
-                  name='session_routing_enabled'
-                  render={({ field }) => (
-                    <FormItem>
-                      <div className='flex items-start justify-between gap-3'>
-                        <div className='space-y-1'>
-                          <FormLabel>{t('Session routing')}</FormLabel>
-                          <FormDescription>
-                            {t(
-                              'Allow this customer to use behind-cdnaigw standard and non-standard channel routing.'
-                            )}
-                          </FormDescription>
-                        </div>
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                            aria-label={t('Session routing')}
-                          />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
                 <FormField
                   control={form.control}
                   name='customer_id'
@@ -336,6 +310,7 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
                 />
               </SideDrawerSection>
               <CustomerCachePolicy />
+              <CustomerSessionRoutingPolicy />
             </fieldset>
           </form>
         </Form>

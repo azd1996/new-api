@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 // Customer config is admin-managed and tiny, so it is kept fully in memory and
@@ -94,11 +95,34 @@ func CustomerConfigured(customerID string) bool {
 	return ok
 }
 
-// CustomerSessionRoutingEnabled defaults to enabled for customers created before
-// the customer-level override was introduced.
-func CustomerSessionRoutingEnabled(customerID string) bool {
+// CustomerSessionRoutingEnabledForModel resolves customer × model-prefix
+// routing. An unmatched model is disabled by default.
+func CustomerSessionRoutingEnabledForModel(customerID, modelName string) bool {
 	c, ok := getCachedCustomer(customerID)
-	return !ok || c.SessionRoutingEnabled == nil || *c.SessionRoutingEnabled
+	if !ok {
+		return false
+	}
+	modelNames := []string{modelName}
+	if normalized := ratio_setting.RoutingMatchModelName(modelName); normalized != "" &&
+		normalized != modelName {
+		modelNames = append(modelNames, normalized)
+	}
+	bestPrefix := ""
+	enabled := false
+	for prefix, value := range c.SessionRoutingModelPrefixes {
+		prefix = strings.TrimSpace(prefix)
+		if prefix == "" || len(prefix) <= len(bestPrefix) {
+			continue
+		}
+		for _, candidate := range modelNames {
+			if strings.HasPrefix(strings.ToLower(candidate), strings.ToLower(prefix)) {
+				bestPrefix = prefix
+				enabled = value
+				break
+			}
+		}
+	}
+	return enabled
 }
 
 // CustomerModelDiscount returns the reporting-only stat discount multiplier for

@@ -54,7 +54,7 @@ export const customerSchema = z.object({
   created_time: z.number(),
   updated_time: z.number(),
   claude_cache_optimization: claudeCacheOptimizationSchema.nullish(),
-  session_routing_enabled: z.boolean().nullish(),
+  session_routing_model_prefixes: z.record(z.string(), z.boolean()).nullish(),
 })
 
 export type Customer = z.infer<typeof customerSchema>
@@ -98,7 +98,7 @@ export interface CustomerFormData {
   remark: string
   prefix_discounts: Record<string, number>
   claude_cache_optimization?: ClaudeCacheOptimization
-  session_routing_enabled?: boolean
+  session_routing_model_prefixes?: Record<string, boolean>
 }
 
 // ============================================================================

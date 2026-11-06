@@ -158,7 +158,7 @@ func TestCustomerClaudeCacheOptimizationPersistence(t *testing.T) {
 	assert.Nil(t, GetCustomerClaudeCacheOptimization(customer.CustomerId))
 	assert.Nil(t, GetCustomerClaudeCacheOptimization("missing-claude-cache-customer"))
 	assert.Nil(t, GetCustomerClaudeCacheOptimization(""))
-	assert.True(t, CustomerSessionRoutingEnabled(customer.CustomerId))
+	assert.False(t, CustomerSessionRoutingEnabledForModel(customer.CustomerId, "routing-model"))
 	data, err := common.Marshal(customer)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"claude_cache_optimization":null`)
@@ -207,15 +207,14 @@ func TestCustomerClaudeCacheOptimizationPersistence(t *testing.T) {
 	config.ForceExtendedTTL.Enabled = false
 	assert.Equal(t, stored.ClaudeCacheOptimization, GetCustomerClaudeCacheOptimization(customer.CustomerId))
 
-	routingDisabled := false
-	update.SessionRoutingEnabled = &routingDisabled
+	update.SessionRoutingModelPrefixes = map[string]bool{"routing-": true}
 	require.NoError(t, update.Update())
-	assert.False(t, CustomerSessionRoutingEnabled(customer.CustomerId))
+	assert.True(t, CustomerSessionRoutingEnabledForModel(customer.CustomerId, "routing-model"))
 
 	// An old API payload omits the new field but still updates ordinary fields.
 	legacy := &Customer{Id: customer.Id, CustomerId: customer.CustomerId, Name: "legacy update"}
 	require.NoError(t, legacy.Update())
-	assert.False(t, CustomerSessionRoutingEnabled(customer.CustomerId), "omitted legacy field must preserve the explicit customer setting")
+	assert.True(t, CustomerSessionRoutingEnabledForModel(customer.CustomerId, "routing-model"), "omitted legacy field must preserve the explicit customer setting")
 	preserved, err := GetCustomerById(customer.Id)
 	require.NoError(t, err)
 	assert.Equal(t, "legacy update", preserved.Name)
@@ -350,4 +349,23 @@ func TestCustomerDiscountResolution(t *testing.T) {
 			assert.Equal(t, tc.want.Discount, CustomerModelDiscount(tc.customerID, tc.modelName))
 		})
 	}
+}
+
+func TestCustomerSessionRoutingModelPrefixResolution(t *testing.T) {
+	require.NoError(t, DB.AutoMigrate(&Customer{}))
+	customer := &Customer{
+		CustomerId: "session-routing-prefix-test",
+		SessionRoutingModelPrefixes: map[string]bool{
+			"claude-":        true,
+			"claude-sonnet-": false,
+			"gpt-":           false,
+		},
+	}
+	require.NoError(t, customer.Insert())
+	t.Cleanup(func() { require.NoError(t, DeleteCustomerById(customer.Id)) })
+
+	assert.True(t, CustomerSessionRoutingEnabledForModel(customer.CustomerId, "claude-opus-4"))
+	assert.False(t, CustomerSessionRoutingEnabledForModel(customer.CustomerId, "claude-sonnet-4"))
+	assert.False(t, CustomerSessionRoutingEnabledForModel(customer.CustomerId, "gpt-4o"))
+	assert.False(t, CustomerSessionRoutingEnabledForModel(customer.CustomerId, "gemini-2.5"))
 }

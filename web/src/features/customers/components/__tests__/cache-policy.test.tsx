@@ -155,17 +155,23 @@ it('hydrates an old four-rule policy with fallback disabled and normalizes null 
   })
 })
 
-it('defaults legacy customers to enabled session routing and preserves an explicit disable', () => {
+it('defaults legacy customers to disabled session routing and preserves model-prefix rules', () => {
   const legacy = transformCustomerToFormDefaults(customer)
-  expect(legacy.session_routing_enabled).toBe(true)
+  expect(legacy.session_routing_model_prefixes).toEqual({})
 
-  const disabled = transformCustomerToFormDefaults({
+  const configured = transformCustomerToFormDefaults({
     ...customer,
-    session_routing_enabled: false,
+    session_routing_model_prefixes: { 'claude-': true, 'gpt-': false },
   })
-  expect(disabled.session_routing_enabled).toBe(false)
-  expect(transformFormDataToPayload(disabled)).toMatchObject({
-    session_routing_enabled: false,
+  expect(configured.session_routing_model_prefixes).toEqual({
+    'claude-': true,
+    'gpt-': false,
+  })
+  expect(transformFormDataToPayload(configured)).toMatchObject({
+    session_routing_model_prefixes: {
+      'claude-': true,
+      'gpt-': false,
+    },
   })
 })
 
