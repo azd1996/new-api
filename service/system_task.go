@@ -46,6 +46,14 @@ type ScheduledSystemTaskHandler interface {
 	NewPayload() any
 }
 
+// SlotScheduledSystemTaskHandler schedules one task for a completed, naturally
+// aligned time slot. ScheduleKey must uniquely identify the slot for the task
+// type; the system task model enforces idempotency across runner instances.
+type SlotScheduledSystemTaskHandler interface {
+	ScheduledSystemTaskHandler
+	ScheduleSlot(now time.Time) (scheduleKey string, payload any, due bool)
+}
+
 var (
 	systemTaskHandlersMu sync.RWMutex
 	systemTaskHandlers   = map[string]SystemTaskHandler{}
@@ -279,6 +287,28 @@ func runSystemTaskScheduler() {
 		return
 	}
 	for _, scheduled := range scheduledHandlers {
+		if slotScheduled, ok := scheduled.(SlotScheduledSystemTaskHandler); ok {
+			scheduleKey, payload, due := slotScheduled.ScheduleSlot(time.Now())
+			if !due || scheduleKey == "" {
+				continue
+			}
+			existing, lookupErr := model.GetSystemTaskByScheduleKey(scheduleKey)
+			if lookupErr != nil {
+				logger.LogWarn(context.Background(), common.LogText("system task scheduler schedule lookup failed: type=%s key=%s err=%v", scheduled.Type(), scheduleKey, lookupErr))
+				continue
+			}
+			if existing != nil {
+				continue
+			}
+			if _, err := model.CreateScheduledSystemTask(scheduled.Type(), scheduleKey, payload, nil); err != nil {
+				existing, lookupErr = model.GetSystemTaskByScheduleKey(scheduleKey)
+				if lookupErr == nil && existing != nil {
+					continue
+				}
+				logger.LogWarn(context.Background(), common.LogText("system task scheduler slot create failed: type=%s key=%s err=%v", scheduled.Type(), scheduleKey, err))
+			}
+			continue
+		}
 		latest := latestTasks[scheduled.Type()]
 		if latest != nil {
 			if latest.Status == model.SystemTaskStatusPending || latest.Status == model.SystemTaskStatusRunning {

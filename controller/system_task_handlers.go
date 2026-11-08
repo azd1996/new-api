@@ -21,6 +21,42 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+	service.RegisterSystemTaskHandler(errorAlertHandler{})
+}
+
+type errorAlertHandler struct{}
+
+func (errorAlertHandler) Type() string { return model.SystemTaskTypeErrorAlert }
+
+func (errorAlertHandler) Enabled() bool {
+	return operation_setting.ErrorAlertEnabled()
+}
+
+func (errorAlertHandler) Interval() time.Duration { return 15 * time.Minute }
+
+func (errorAlertHandler) NewPayload() any { return nil }
+
+func (errorAlertHandler) ScheduleSlot(now time.Time) (string, any, bool) {
+	slotStart, slotEnd := service.NaturalQuarterHourSlot(now)
+	payload := service.ErrorAlertTaskPayload{
+		SlotStart: slotStart.Unix(),
+		SlotEnd:   slotEnd.Unix(),
+	}
+	return service.ErrorAlertScheduleKey(slotEnd), payload, true
+}
+
+func (errorAlertHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := service.ErrorAlertTaskPayload{}
+	if err := task.DecodePayload(&payload); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	result, err := service.RunErrorAlertTask(ctx, payload)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, result, nil)
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
