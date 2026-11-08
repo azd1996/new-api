@@ -58,7 +58,7 @@ export function CopyChannelDialog({
     : currentRow.name
   const defaultName = currentRow.name.endsWith('-非标')
     ? ''
-    : `${sourceName}-非标`
+    : `${sourceName}-copy`
   const trimmedChannelName = (channelName ?? defaultName).trim()
   const fullName = `${BEHIND_CDNAIGW_PREFIX}${trimmedChannelName}`
   const isChannelOnlyCopy = fullName === `${currentRow.name}-非标`

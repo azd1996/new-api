@@ -748,6 +748,50 @@ export async function getAllModels(): Promise<{
 }
 
 /**
+ * Get models configured in the model management page.
+ */
+export async function getConfiguredModels(): Promise<{
+  success: boolean
+  message?: string
+  data?: {
+    items: Array<{ model_name: string }>
+    total: number
+  }
+}> {
+  const pageSize = 100
+  const items: Array<{ model_name: string }> = []
+  let page = 1
+  let total = 0
+
+  while (true) {
+    const res = await api.get<{
+      success: boolean
+      message?: string
+      data?: {
+        items: Array<{ model_name: string }>
+        total: number
+      }
+    }>('/api/models/', {
+      params: { p: page, page_size: pageSize },
+    })
+    const response = res.data
+    if (!response.success || !response.data) {
+      return response
+    }
+
+    items.push(...response.data.items)
+    total = response.data.total
+    if (items.length >= total || response.data.items.length === 0) {
+      return {
+        ...response,
+        data: { items, total },
+      }
+    }
+    page += 1
+  }
+}
+
+/**
  * Get all enabled models
  */
 export async function getEnabledModels(): Promise<{

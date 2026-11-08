@@ -130,6 +130,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import {
   getAllModels,
+  getConfiguredModels,
   getChannel,
   getChannelDefaultBaseURLs,
   getGroups,
@@ -559,6 +560,11 @@ export function ChannelMutateDrawer({
   const { data: allModelsData } = useQuery({
     queryKey: ['channel_models'],
     queryFn: async () => requireServerSuccess(await getAllModels()),
+    enabled: open && !showProviderPicker,
+  })
+  const { data: configuredModelsData } = useQuery({
+    queryKey: ['configured_models'],
+    queryFn: async () => requireServerSuccess(await getConfiguredModels()),
     enabled: open && !showProviderPicker,
   })
 
@@ -1894,10 +1900,10 @@ export function ChannelMutateDrawer({
                     {t('Priority failover')}
                   </SelectItem>
                   <SelectItem value='ttft'>
-                    {t('TTFT and connection latency')}
+                    {t('Priority failover + TTFT and connection latency')}
                   </SelectItem>
                   <SelectItem value='equal'>
-                    {t('Equal distribution')}
+                    {t('Priority failover + equal distribution')}
                   </SelectItem>
                 </SelectGroup>
               </SelectContent>
@@ -1905,7 +1911,7 @@ export function ChannelMutateDrawer({
           </FormControl>
           <FormDescription>
             {t(
-              'Equal distribution sends requests evenly to all available proxies and only switches when a proxy is unavailable.'
+              'All proxy routing modes use priority failover. TTFT and equal distribution only control how requests are distributed among healthy proxies.'
             )}
           </FormDescription>
           <FormMessage />
@@ -3595,7 +3601,11 @@ export function ChannelMutateDrawer({
                   </div>
                   <FormControl>
                     <MultiSelect
-                      options={modelOptions}
+                      options={modelOptions.filter((option) =>
+                        configuredModelsData?.data?.items?.some(
+                          (model) => model.model_name === option.value
+                        )
+                      )}
                       selected={currentModelsArray}
                       onChange={handleModelsChange}
                       placeholder={t('Select models or add custom ones')}

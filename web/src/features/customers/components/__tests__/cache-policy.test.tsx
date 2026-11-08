@@ -14,6 +14,7 @@ import {
 } from '../../lib/customer-form'
 import { customerSchema, type Customer } from '../../types'
 import { CustomerCachePolicy } from '../customer-cache-policy'
+import { CustomerSessionRoutingPolicy } from '../customer-session-routing-policy'
 
 afterEach(cleanup)
 
@@ -46,6 +47,7 @@ function PolicyForm(props: {
       >
         <input aria-label='Customer Name' {...form.register('name')} />
         <CustomerCachePolicy />
+        <CustomerSessionRoutingPolicy />
         <Button type='submit'>Save</Button>
       </form>
     </Form>
@@ -173,6 +175,45 @@ it('defaults legacy customers to disabled session routing and preserves model-pr
       'gpt-': false,
     },
   })
+})
+
+it('removes a model prefix rule without changing the other rules', async () => {
+  const user = userEvent.setup()
+  const onSave = vi.fn()
+  render(
+    <PolicyForm
+      defaults={transformCustomerToFormDefaults({
+        ...customer,
+        session_routing_model_prefixes: {
+          'claude-': true,
+          'gpt-': false,
+        },
+      })}
+      onSave={onSave}
+    />
+  )
+
+  expect(screen.getByText('claude-')).toBeVisible()
+  expect(screen.getByText('gpt-')).toBeVisible()
+  await user.click(screen.getAllByRole('button', { name: 'Remove' })[0])
+
+  expect(screen.getByRole('alertdialog')).toBeVisible()
+  expect(screen.getByText('Are you sure?')).toBeVisible()
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(screen.getByText('claude-')).toBeVisible()
+
+  await user.click(screen.getAllByRole('button', { name: 'Remove' })[0])
+  await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+  expect(screen.queryByText('claude-')).not.toBeInTheDocument()
+  expect(screen.getByText('gpt-')).toBeVisible()
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_routing_model_prefixes: { 'gpt-': false },
+      })
+    )
+  )
 })
 
 it('keeps fallback prefixes through toggling, saving and reopening without changing other rules', async () => {

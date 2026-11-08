@@ -75,21 +75,21 @@ afterEach(() => {
   localStorage.clear()
 })
 
-it('opens the shared dialog by keyboard and submits the default non-standard name without its prefix', async () => {
+it('opens the shared dialog by keyboard and submits the default standard copy name', async () => {
   mount()
   const user = userEvent.setup()
   screen.getByRole('button', { name: 'Copy Channel' }).focus()
   await user.keyboard('{Enter}')
   const dialog = within(await screen.findByRole('dialog'))
   expect(dialog.getByRole('textbox', { name: 'Channel Name' })).toHaveValue(
-    'dept-非标'
+    'dept-copy'
   )
-  expect(dialog.getByText(/Only the channel is copied/)).toBeVisible()
+  expect(dialog.getByText(/Other names use the dedicated copy flow/)).toBeVisible()
   await user.click(dialog.getByRole('button', { name: 'Copy Channel' }))
   await waitFor(() =>
     expect(api.post).toHaveBeenCalledWith(
       '/api/channel/copy_behind_cdnaigw/7',
-      { name: 'dept-非标', reset_balance: true },
+      { name: 'dept-copy', reset_balance: true },
       expect.any(Object)
     )
   )
@@ -105,6 +105,7 @@ it('allows the 57-byte pure copy but validates other names by UTF-8 bytes and ke
   const dialog = within(await screen.findByRole('dialog'))
   const input = dialog.getByRole('textbox', { name: 'Channel Name' })
   const submit = dialog.getByRole('button', { name: 'Copy Channel' })
+  fireEvent.change(input, { target: { value: `${'a'.repeat(35)}-非标` } })
   expect(submit).toBeEnabled()
   await user.click(submit)
   await waitFor(() =>
@@ -120,6 +121,7 @@ it('allows the 57-byte pure copy but validates other names by UTF-8 bytes and ke
   await user.click(screen.getByRole('button', { name: 'Copy Channel' }))
   const reopened = within(await screen.findByRole('dialog'))
   const renamed = reopened.getByRole('textbox', { name: 'Channel Name' })
+  expect(renamed).toHaveValue(`${'a'.repeat(35)}-copy`)
   fireEvent.change(renamed, { target: { value: '中'.repeat(13) } })
   expect(reopened.getByRole('button', { name: 'Copy Channel' })).toBeDisabled()
   expect(renamed).toHaveAttribute('aria-invalid', 'true')
@@ -152,7 +154,7 @@ it('keeps failed copies open and allows retry without losing the target name', a
     expect(dialog.getByRole('button', { name: 'Copy Channel' })).toBeEnabled()
   )
   expect(dialog.getByRole('textbox', { name: 'Channel Name' })).toHaveValue(
-    'dept-非标'
+    'dept-copy'
   )
   await user.click(dialog.getByRole('button', { name: 'Copy Channel' }))
   await waitFor(() =>

@@ -592,5 +592,3 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
   )
 }
 
-
-

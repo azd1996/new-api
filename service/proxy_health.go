@@ -103,7 +103,11 @@ func ResolveChannelProxyWeighted(channelID int, aliases []string, fallback, mode
 }
 
 // ResolveChannelProxyMode resolves a channel proxy using the requested routing
-// mode. Unknown or empty modes preserve the legacy TTFT switch behavior.
+// mode. Every mode starts from the channel's runtime priority order and removes
+// aliases in connection-failure cooldown. The mode only controls how requests
+// are distributed among the remaining healthy aliases; it never bypasses
+// priority failover. Unknown or empty modes preserve the legacy TTFT switch
+// behavior.
 func ResolveChannelProxyMode(channelID int, aliases []string, fallback, model, mode string, ttftEnabled bool) (string, string) {
 	return resolveChannelProxy(channelID, aliases, fallback, model, ttftEnabled, mode)
 }
