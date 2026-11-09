@@ -335,6 +335,13 @@ export function ErrorStats() {
         type: ['5'],
         errorSignatureHash: item.signature_hash,
         errorSignature: item.signature,
+        // Carry the stats page's own filters so the logs match the row counts.
+        statusCode: search.statusCode || undefined,
+        model: search.model || undefined,
+        channel: search.channel || undefined,
+        group: search.group || undefined,
+        customerName: search.customerName || undefined,
+        customerId: search.customerId || undefined,
         startTime: startMs,
         endTime: endMs,
       },
