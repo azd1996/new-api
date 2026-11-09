@@ -368,6 +368,19 @@ export type ProxyHealthResponse = {
   data: ProxyHealthEntry[]
 }
 
+export type ProxyChannelRef = {
+  id: number
+  name: string
+  status: number
+}
+
+export type ProxyChannelsResponse = {
+  success: boolean
+  message: string
+  // alias -> channels whose proxy_aliases reference it
+  data: Record<string, ProxyChannelRef[]>
+}
+
 export type GroupModelRule = {
   group: string
   models: string[]
