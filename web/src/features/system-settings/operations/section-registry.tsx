@@ -20,6 +20,7 @@ import { SystemBehaviorSection } from '../general/system-behavior-section'
 import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
+import { ErrorAlertSettingsSection } from '../maintenance/error-alert-settings-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
 import { PerformanceSection } from '../maintenance/performance-section'
 import { UpdateCheckerSection } from '../maintenance/update-checker-section'
@@ -129,6 +130,20 @@ const OPERATIONS_SECTIONS = [
             settings['log_setting.user_export_enabled'] ?? true,
           'log_setting.max_range_days':
             settings['log_setting.max_range_days'] ?? 365,
+        }}
+      />
+    ),
+  },
+  {
+    id: 'error-alerts',
+    titleKey: 'Detailed error alerts',
+    build: (settings: OperationsSettings) => (
+      <ErrorAlertSettingsSection
+        defaultValues={{
+          'error_alert_setting.enabled':
+            settings['error_alert_setting.enabled'] ?? false,
+          'error_alert_setting.rules':
+            settings['error_alert_setting.rules'] ?? [],
         }}
       />
     ),
