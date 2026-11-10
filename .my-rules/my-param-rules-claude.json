@@ -577,6 +577,29 @@
             "logic": "AND"
         },
         {
+            "description": "Bedrock的InvokeModel不接受adaptive thinking中的block_binding(错误路径里的adaptive是判别联合标签，真实字段是thinking.block_binding)，仅在adaptive且字段存在时删除",
+            "mode": "delete",
+            "path": "thinking.block_binding",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "thinking.type",
+                    "mode": "full",
+                    "value": "adaptive"
+                },
+                {
+                    "path": "thinking.block_binding",
+                    "mode": "contains",
+                    "value": ""
+                }
+            ],
+            "logic": "AND"
+        },
+        {
             "description": "claude-: Bedrock不接受messages里的developer角色(400 Unexpected role \"developer\"，只允许user/assistant/system)，把role精确等于developer的逐条改写成user，保留该条内容；用^developer$锚定，不误伤其它角色。性能gate：第2个条件用gjson查询messages.#(role==\"developer\")探测请求里是否真有developer角色，没有则整条跳过(不展开messages.*.role通配、不逐条sjson重写)，developer角色极罕见故绝大多数请求零成本",
             "mode": "regex_replace",
             "path": "messages.*.role",
@@ -733,6 +756,25 @@
                     "path": "messages.-1.role",
                     "mode": "full",
                     "value": "assistant"
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-sonnet-4-6: max_tokens最大为64000，超过上限时压到64000，避免Bedrock报错",
+            "mode": "set",
+            "path": "max_tokens",
+            "value": 64000,
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-sonnet-4-6"
+                },
+                {
+                    "path": "max_tokens",
+                    "mode": "gt",
+                    "value": 64000
                 }
             ],
             "logic": "AND"

@@ -407,3 +407,37 @@ func TestProxyEqualRoutingSkipsCoolingProxy(t *testing.T) {
 	_, alias = ResolveChannelProxyMode(ch, []string{"A", "B", "C"}, "", "", ProxyRoutingModeEqual, false)
 	require.Equal(t, "B", alias, "equal routing must exclude a proxy in connection-failure cooldown")
 }
+
+func TestProxyRoutingModesSharePriorityFailover(t *testing.T) {
+	modes := []string{
+		ProxyRoutingModePriority,
+		ProxyRoutingModeTtft,
+		ProxyRoutingModeEqual,
+	}
+	for _, mode := range modes {
+		t.Run(mode, func(t *testing.T) {
+			resetProxyHealthStateForTest(t, []system_setting.ProxyEntry{
+				{Alias: "A", URL: "http://a:1"},
+				{Alias: "B", URL: "http://b:1"},
+				{Alias: "C", URL: "http://c:1"},
+			})
+			const ch = 51
+			proxyTtftRandFloat = func() float64 { return 0.99 }
+
+			for i := 0; i < proxyFailureThreshold; i++ {
+				RecordProxyConnectResult(ch, "A", 0, true)
+				RecordProxyConnectResult(ch, "B", 0, true)
+			}
+
+			_, alias := ResolveChannelProxyMode(
+				ch,
+				[]string{"A", "B", "C"},
+				"",
+				"model",
+				mode,
+				mode == ProxyRoutingModeTtft,
+			)
+			require.Equal(t, "C", alias, "all modes must fail over by priority after unhealthy aliases are removed")
+		})
+	}
+}

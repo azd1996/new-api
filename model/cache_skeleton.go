@@ -44,6 +44,7 @@ type CacheSkeleton struct {
 	// Array columns need an explicit type: without one GORM parses a slice
 	// field as an association and rejects the model.
 	BlkHash       []uint64 `json:"-" gorm:"column:blk_hash;type:Array(UInt64)"`
+	PrefixHash    []uint64 `json:"-" gorm:"column:prefix_hash;type:Array(UInt64)"`
 	BlkKind       []string `json:"blk_kind" gorm:"column:blk_kind;type:Array(LowCardinality(String))"`
 	BlkName       []string `json:"blk_name" gorm:"column:blk_name;type:Array(LowCardinality(String))"`
 	BlkLen        []uint32 `json:"blk_len" gorm:"column:blk_len;type:Array(UInt32)"`
@@ -120,7 +121,8 @@ func MigrateCacheSkeletons() error {
 		bp_idx Array(UInt16), bp_ttl Array(LowCardinality(String)),
 		fixed LowCardinality(String),
 		cache_read UInt32, cache_creation UInt32, input UInt32,
-		parent_request_id String, prefix_len UInt16
+		parent_request_id String, prefix_len UInt16,
+		prefix_hash Array(UInt64) CODEC(ZSTD(3))
 		,coverage_hash Array(UInt64) CODEC(ZSTD(3))
 		,coverage_len Array(UInt32) CODEC(ZSTD(3))
 		,coverage_bp_idx Array(UInt16), coverage_bp_ttl Array(LowCardinality(String))
@@ -151,6 +153,7 @@ func MigrateCacheSkeletons() error {
 		"baseline_bp_idx Array(UInt16) DEFAULT []",
 		"baseline_bp_ttl Array(LowCardinality(String)) DEFAULT []",
 		"baseline_param_fp UInt64 DEFAULT 0",
+		"prefix_hash Array(UInt64) DEFAULT []",
 	} {
 		if err := LOG_DB.Exec("ALTER TABLE cache_skeletons ADD COLUMN IF NOT EXISTS " + column).Error; err != nil {
 			return err

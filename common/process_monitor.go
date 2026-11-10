@@ -32,12 +32,26 @@ func StartProcessMonitor() {
 				return
 			}
 
+			// gopsutil's Process.CPUPercent averages over the whole process
+			// lifetime, so CPU usage is derived from the CPU time delta between
+			// two samples instead. The first sample after (re-)enabling only
+			// records the baseline and reports no value.
+			var lastCPUTime float64
+			var lastSampleAt time.Time
+
 			for {
 				config := GetPerformanceMonitorConfig()
 				if config.Enabled {
 					var status ProcessStatus
-					if value, err := processInfo.CPUPercent(); err == nil {
-						status.CPUUsagePercent = &value
+					if times, err := processInfo.Times(); err == nil {
+						now := time.Now()
+						totalCPUTime := times.Total()
+						elapsed := now.Sub(lastSampleAt).Seconds()
+						if !lastSampleAt.IsZero() && elapsed > 0 {
+							value := 100 * (totalCPUTime - lastCPUTime) / elapsed
+							status.CPUUsagePercent = &value
+						}
+						lastCPUTime, lastSampleAt = totalCPUTime, now
 					}
 					if value, err := processInfo.NumThreads(); err == nil {
 						status.Threads = &value
@@ -47,6 +61,7 @@ func StartProcessMonitor() {
 					}
 					latestProcessStatus.Store(status)
 				} else {
+					lastSampleAt = time.Time{}
 					latestProcessStatus.Store(ProcessStatus{})
 				}
 				time.Sleep(5 * time.Second)

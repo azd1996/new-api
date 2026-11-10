@@ -169,6 +169,15 @@ func scanErrorStatRows(f ErrorStatFilter) ([]errorStatScanRow, error) {
 	return rows, err
 }
 
+// CountErrorLogs returns the total number of error logs matching the filter.
+// It is intentionally separate from the top-N aggregation so callers can
+// calculate shares against the complete window.
+func CountErrorLogs(f ErrorStatFilter) (int64, error) {
+	var count int64
+	err := applyErrorStatFilter(LOG_DB.Model(&Log{}), f).Count(&count).Error
+	return count, err
+}
+
 // GetErrorSignatureStats scans error logs in the filter window (capped), reads
 // the signature + hash out of each row's Other JSON, and aggregates them by
 // hash into the top-N signatures by occurrence count. Rows without a signature

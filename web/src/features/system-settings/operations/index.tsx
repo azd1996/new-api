@@ -42,6 +42,8 @@ const defaultOperationsSettings: OperationsSettings = {
   'claude_volatile_tail_pattern_setting.patterns': [],
   'client_disconnect_setting.rules': [],
   'debug_scope_setting.rules': [],
+  'error_alert_setting.enabled': false,
+  'error_alert_setting.rules': [],
   QuotaRemindEnabled: true,
   QuotaRemindThreshold: '',
   EmailProvider: 'smtp',

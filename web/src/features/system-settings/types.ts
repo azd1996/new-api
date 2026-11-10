@@ -443,6 +443,17 @@ export type DebugScopeRule = {
   model: string
 }
 
+export type ErrorAlertRule = {
+  id: string
+  enabled: boolean
+  customer_id: string
+  top_n: number
+  alert_toid: number[]
+  alert_url: string
+  link?: string
+  at_user_ids?: string[]
+}
+
 export type OperationsSettings = {
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
@@ -459,6 +470,8 @@ export type OperationsSettings = {
   'claude_volatile_tail_pattern_setting.patterns': string[]
   'client_disconnect_setting.rules': ClientDisconnectRule[]
   'debug_scope_setting.rules': DebugScopeRule[]
+  'error_alert_setting.enabled': boolean
+  'error_alert_setting.rules': ErrorAlertRule[]
   QuotaRemindEnabled: boolean
   QuotaRemindThreshold: string
   EmailProvider: 'smtp' | 'resend'

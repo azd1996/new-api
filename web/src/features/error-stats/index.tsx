@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, useNavigate, useRouter } from '@tanstack/react-router'
-import { Lightbulb, SlidersHorizontal } from 'lucide-react'
+import { Download, Lightbulb, SlidersHorizontal } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -44,6 +44,7 @@ import {
   type AliasSaveInput,
   ErrorStatsTable,
 } from './components/error-stats-table'
+import { downloadErrorStatsCsv } from './lib/export'
 import type {
   ErrorStatItem,
   ErrorStatsGroupBy,
@@ -334,11 +335,23 @@ export function ErrorStats() {
         type: ['5'],
         errorSignatureHash: item.signature_hash,
         errorSignature: item.signature,
+        // Carry the stats page's own filters so the logs match the row counts.
+        statusCode: search.statusCode || undefined,
+        model: search.model || undefined,
+        channel: search.channel || undefined,
+        group: search.group || undefined,
+        customerName: search.customerName || undefined,
+        customerId: search.customerId || undefined,
         startTime: startMs,
         endTime: endMs,
       },
     })
     window.open(location.href, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleExport = () => {
+    const { startMs, endMs } = resolveRange(search)
+    downloadErrorStatsCsv(items, viewMode, startMs, endMs, t)
   }
 
   return (
@@ -385,6 +398,16 @@ export function ErrorStats() {
                     </TabsTrigger>
                   </TabsList>
                   <div className='flex items-center gap-3'>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      className='h-8'
+                      onClick={handleExport}
+                      disabled={statsQuery.isLoading || items.length === 0}
+                    >
+                      <Download className='size-4' aria-hidden='true' />
+                      {t('Export')}
+                    </Button>
                     <Button
                       type='button'
                       variant='outline'

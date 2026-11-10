@@ -48,7 +48,9 @@ func TestBuildClaudeCacheSkeletonStructure(t *testing.T) {
 	assert.Equal(t, []uint16{3, 8}, row.BpIdx)
 	assert.Equal(t, []string{"5m", "1h"}, row.BpTtl)
 	require.Len(t, row.BlkLen, len(row.BlkHash))
+	require.Len(t, row.PrefixHash, len(row.BlkHash))
 	assert.NotZero(t, row.BlkLen[0])
+	assert.NotZero(t, row.PrefixHash[0])
 }
 
 func TestBuildClaudeCacheSkeletonPrefixComparison(t *testing.T) {
@@ -58,8 +60,10 @@ func TestBuildClaudeCacheSkeletonPrefixComparison(t *testing.T) {
 	// Blocks #0-#7 are identical even though turn 2 added a breakpoint on the
 	// tool_result (#7): cache_control is excluded from the content hash.
 	assert.Equal(t, turn1.BlkHash[:8], turn2.BlkHash[:8])
+	assert.Equal(t, turn1.PrefixHash[:8], turn2.PrefixHash[:8])
 	// The first divergence is turn 1's tail breakpoint (#8, the reminder).
 	assert.NotEqual(t, turn1.BlkHash[8], turn2.BlkHash[8])
+	assert.NotEqual(t, turn1.PrefixHash[8], turn2.PrefixHash[8])
 	assert.Equal(t, uint16(8), turn1.BpIdx[len(turn1.BpIdx)-1])
 	assert.Equal(t, []uint16{3, 7, 10}, turn2.BpIdx)
 
@@ -79,6 +83,29 @@ func TestBuildClaudeCacheSkeletonParamFingerprint(t *testing.T) {
 	assert.Equal(t, base.BlkHash, effort.BlkHash)
 	assert.Equal(t, "xhigh", effort.Effort)
 	assert.Equal(t, "adaptive", thinking.Thinking)
+}
+
+func TestBuildCacheSkeletonPrefixHashIncludesMessageStructure(t *testing.T) {
+	sameContentDifferentRole := buildClaudeCacheSkeleton([]byte(`{
+		"model":"m",
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	assistantContent := buildClaudeCacheSkeleton([]byte(`{
+		"model":"m",
+		"messages":[{"role":"assistant","content":"hello"}]
+	}`))
+	splitMessages := buildClaudeCacheSkeleton([]byte(`{
+		"model":"m",
+		"messages":[{"role":"user","content":"hello"},{"role":"user","content":"world"}]
+	}`))
+	combinedMessage := buildClaudeCacheSkeleton([]byte(`{
+		"model":"m",
+		"messages":[{"role":"user","content":"helloworld"}]
+	}`))
+
+	require.Len(t, sameContentDifferentRole.PrefixHash, 1)
+	assert.NotEqual(t, sameContentDifferentRole.PrefixHash, assistantContent.PrefixHash)
+	assert.NotEqual(t, splitMessages.PrefixHash[1], combinedMessage.PrefixHash[0])
 }
 
 func TestBuildClaudeCacheSkeletonTopLevelAutomaticCaching(t *testing.T) {
@@ -136,6 +163,7 @@ func TestBuildOpenAIChatCacheSkeleton(t *testing.T) {
 
 	require.Len(t, turn2.BlkHash, 6)
 	assert.Equal(t, turn1.BlkHash, turn2.BlkHash[:5], "an appended message keeps the prefix")
+	assert.Equal(t, turn1.PrefixHash, turn2.PrefixHash[:5], "an appended message keeps the prefix hash")
 	assert.Equal(t, turn1.Lane, turn2.Lane)
 	assert.Equal(t, turn1.ParamFp, turn2.ParamFp)
 }
@@ -161,6 +189,7 @@ func TestBuildOpenAIResponsesCacheSkeleton(t *testing.T) {
 	assert.Equal(t, "24h", row.Retention)
 	assert.Equal(t, "resp_1", row.ParentRequestId)
 	assert.Zero(t, row.CacheKeyHash)
+	require.Len(t, row.PrefixHash, len(row.BlkHash))
 
 	plain := buildOpenAIResponsesCacheSkeleton([]byte(`{"model":"gpt-5.5","input":"hello"}`))
 	assert.Equal(t, []string{"user.text"}, plain.BlkKind)
