@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { Lock, Plus, Trash2 } from 'lucide-react'
+import { Lock, Network, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -38,6 +38,13 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Form,
   FormControl,
   FormField,
@@ -48,7 +55,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 
-import { getProxyHealth } from '../api'
+import { getProxyChannels, getProxyHealth } from '../api'
 import { SettingsForm } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
@@ -229,6 +236,17 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
 
   // lockIndex drives the irreversible-lock confirmation dialog (null = closed).
   const [lockIndex, setLockIndex] = useState<number | null>(null)
+  // channelsAlias drives the "channels using this proxy" dialog (null = closed).
+  const [channelsAlias, setChannelsAlias] = useState<string | null>(null)
+
+  const proxyChannelsQuery = useQuery({
+    queryKey: ['proxy-channels'],
+    queryFn: getProxyChannels,
+    enabled: channelsAlias !== null,
+  })
+  const aliasChannels = channelsAlias
+    ? (proxyChannelsQuery.data?.data?.[channelsAlias] ?? [])
+    : []
 
   const confirmLock = () => {
     if (lockIndex === null) return
@@ -385,6 +403,21 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
                           )
                         })()}
                       </div>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        aria-label={t('Channels using this proxy')}
+                        title={t('Channels using this proxy')}
+                        disabled={!proxiesWatch?.[index]?.alias?.trim()}
+                        onClick={() =>
+                          setChannelsAlias(
+                            proxiesWatch?.[index]?.alias?.trim() ?? null
+                          )
+                        }
+                      >
+                        <Network className='h-4 w-4' />
+                      </Button>
                       {locked ? (
                         <Badge variant='secondary' className='gap-1'>
                           <Lock className='h-3 w-3' aria-hidden='true' />
@@ -566,6 +599,50 @@ export function ProxyPoolSection(props: ProxyPoolSectionProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={channelsAlias !== null}
+        onOpenChange={(open) => {
+          if (!open) setChannelsAlias(null)
+        }}
+      >
+        <DialogContent className='sm:max-w-md'>
+          <DialogHeader>
+            <DialogTitle>{t('Channels using this proxy')}</DialogTitle>
+            <DialogDescription>{channelsAlias}</DialogDescription>
+          </DialogHeader>
+          {proxyChannelsQuery.isLoading && (
+            <p className='text-muted-foreground text-sm'>{t('Loading...')}</p>
+          )}
+          {!proxyChannelsQuery.isLoading && aliasChannels.length === 0 && (
+            <div className='text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm'>
+              {t('No channels reference this proxy.')}
+            </div>
+          )}
+          {aliasChannels.length > 0 && (
+            <div className='max-h-80 space-y-2 overflow-y-auto'>
+              {aliasChannels.map((channel) => (
+                <div
+                  key={channel.id}
+                  className='flex items-center justify-between gap-2 rounded-md border px-3 py-2'
+                >
+                  <span className='truncate'>
+                    <span className='text-muted-foreground mr-2'>
+                      #{channel.id}
+                    </span>
+                    {channel.name}
+                  </span>
+                  {channel.status === 1 ? (
+                    <Badge variant='secondary'>{t('Enabled')}</Badge>
+                  ) : (
+                    <Badge variant='outline'>{t('Disabled')}</Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </SettingsSection>
   )
 }
