@@ -23,6 +23,8 @@ export interface SkeletonBlockRow {
   type: string
   name: string
   hash: string
+  prefixHash: string
+  prefixHashInLookback: boolean
   bytes: number
   cumulativeBytes: number
   breakpointTtl?: string
@@ -46,6 +48,13 @@ export interface SkeletonGroup {
 export function buildSkeletonGroups(item: CacheSkeleton): SkeletonGroup[] {
   const ttlByIndex = new Map<number, string>()
   item.bp_idx.forEach((idx, i) => ttlByIndex.set(idx, item.bp_ttl[i] ?? ''))
+  const prefixHashLookback = new Set<number>()
+  item.bp_idx.forEach((breakpoint) => {
+    const first = Math.max(0, breakpoint - 19)
+    for (let index = first; index <= breakpoint; index++) {
+      prefixHashLookback.add(index)
+    }
+  })
   const lastMessageStart = item.msg_start.at(-1) ?? -1
   const lastMessageIsSystem =
     lastMessageStart >= 0 &&
@@ -88,6 +97,8 @@ export function buildSkeletonGroups(item: CacheSkeleton): SkeletonGroup[] {
       type: isMessage || prefix === 'system' ? rest.join('.') : prefix,
       name: item.blk_name[index] ?? '',
       hash: hash.slice(0, 8),
+      prefixHash: (item.prefix_hash[index] ?? '').slice(0, 8),
+      prefixHashInLookback: prefixHashLookback.has(index),
       bytes,
       cumulativeBytes: cumulative,
       breakpointTtl,

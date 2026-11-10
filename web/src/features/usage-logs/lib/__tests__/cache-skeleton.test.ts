@@ -47,6 +47,7 @@ function skeleton(overrides: Partial<CacheSkeleton>): CacheSkeleton {
     thinking: '',
     effort: '',
     blk_hash: [],
+    prefix_hash: [],
     blk_kind: [],
     blk_name: [],
     blk_len: [],
@@ -68,6 +69,9 @@ function skeleton(overrides: Partial<CacheSkeleton>): CacheSkeleton {
 // trailing mid-conversation system reminder carrying the breakpoint.
 const reminderTail = skeleton({
   blk_hash: ['a1', 'b2', 'c3', 'd4', 'e5', 'f6'].map((h) => h.padEnd(16, '0')),
+  prefix_hash: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((h) =>
+    h.padEnd(16, '0')
+  ),
   blk_kind: [
     'tool',
     'system.text',
@@ -118,6 +122,31 @@ describe('cache skeleton layout', () => {
     assert.equal(rows[1].tailSystemBreakpoint, false)
     assert.equal(rows[5].breakpointTtl, '5m')
     assert.equal(rows[5].tailSystemBreakpoint, true)
+  })
+
+  test('marks the breakpoint and previous 19 blocks as cumulative hash lookback', () => {
+    const item = skeleton({
+      blk_hash: Array.from({ length: 25 }, (_, index) =>
+        `${index}`.padStart(16, '0')
+      ),
+      prefix_hash: Array.from({ length: 25 }, (_, index) =>
+        `p${index}`.padEnd(16, '0')
+      ),
+      blk_kind: Array.from({ length: 25 }, () => 'user.text'),
+      blk_name: Array.from({ length: 25 }, () => ''),
+      blk_len: Array.from({ length: 25 }, () => 1),
+      msg_start: [0],
+      bp_idx: [20],
+      bp_ttl: ['5m'],
+    })
+
+    const rows = buildSkeletonGroups(item).flatMap((group) => group.rows)
+
+    assert.equal(rows[0].prefixHashInLookback, false)
+    assert.equal(rows[1].prefixHashInLookback, true)
+    assert.equal(rows[20].prefixHashInLookback, true)
+    assert.equal(rows[21].prefixHashInLookback, false)
+    assert.equal(rows[20].prefixHash, 'p2000000')
   })
 
   test('does not flag a breakpoint on a trailing tool_result', () => {

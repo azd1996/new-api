@@ -111,6 +111,7 @@ function SkeletonAttempt(props: { item: CacheSkeleton; showAttempt: boolean }) {
             <TableHead className='h-7'>{t('Block type')}</TableHead>
             <TableHead className='h-7'>{t('Name')}</TableHead>
             <TableHead className='h-7'>{t('Hash')}</TableHead>
+            <TableHead className='h-7'>{t('Cumulative hash')}</TableHead>
             <TableHead className='h-7 text-right'>{t('Size')}</TableHead>
             <TableHead className='h-7 text-right'>{t('Cumulative')}</TableHead>
             <TableHead className='h-7'>{t('Breakpoint')}</TableHead>
@@ -118,8 +119,8 @@ function SkeletonAttempt(props: { item: CacheSkeleton; showAttempt: boolean }) {
         </TableHeader>
         {groups.map((group) => (
           <TableBody key={group.key} className='[&>tr]:h-auto'>
-            <TableRow className='hover:bg-transparent'>
-              <TableCell colSpan={7} className='pt-2 pb-1 font-semibold'>
+              <TableRow className='hover:bg-transparent'>
+                <TableCell colSpan={8} className='pt-2 pb-1 font-semibold'>
                 {group.messageIndex === undefined
                   ? `${group.label} (${group.rows.length})`
                   : `m${group.messageIndex} ${group.label}`}
@@ -138,6 +139,21 @@ function SkeletonAttempt(props: { item: CacheSkeleton; showAttempt: boolean }) {
                 <TableCell className='py-0.5'>{row.name}</TableCell>
                 <TableCell className='text-muted-foreground py-0.5'>
                   {row.hash}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    'py-0.5',
+                    row.prefixHashInLookback
+                      ? 'font-semibold text-violet-600 dark:text-violet-400'
+                      : 'text-muted-foreground'
+                  )}
+                  title={
+                    row.prefixHashInLookback
+                      ? t('Within breakpoint lookback window')
+                      : undefined
+                  }
+                >
+                  {row.prefixHash || '-'}
                 </TableCell>
                 <TableCell className='py-0.5 text-right'>
                   {formatBytes(row.bytes)}

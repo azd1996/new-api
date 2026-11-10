@@ -737,6 +737,7 @@ export interface CacheSkeleton {
   thinking: string
   effort: string
   blk_hash: string[]
+  prefix_hash: string[]
   blk_kind: string[]
   blk_name: string[]
   blk_len: number[]

@@ -433,6 +433,7 @@ func GetLogsSelfStat(c *gin.Context) {
 type cacheSkeletonView struct {
 	*model.CacheSkeleton
 	BlkHash      []string `json:"blk_hash"`
+	PrefixHash   []string `json:"prefix_hash"`
 	CacheKeyHash string   `json:"cache_key_hash"`
 }
 
@@ -459,7 +460,15 @@ func GetCacheSkeleton(c *gin.Context) {
 		for i, h := range row.BlkHash {
 			hashes[i] = fmt.Sprintf("%016x", h)
 		}
-		view := cacheSkeletonView{CacheSkeleton: row, BlkHash: hashes}
+		prefixHashes := make([]string, len(row.PrefixHash))
+		for i, h := range row.PrefixHash {
+			prefixHashes[i] = fmt.Sprintf("%016x", h)
+		}
+		view := cacheSkeletonView{
+			CacheSkeleton: row,
+			BlkHash:       hashes,
+			PrefixHash:    prefixHashes,
+		}
 		if row.CacheKeyHash != 0 {
 			view.CacheKeyHash = fmt.Sprintf("%016x", row.CacheKeyHash)
 		}
