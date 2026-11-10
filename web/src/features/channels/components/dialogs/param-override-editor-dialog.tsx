@@ -117,6 +117,7 @@ const OPERATION_MODE_OPTIONS = [
   { label: 'To Uppercase', value: 'to_upper' },
   { label: 'Return Custom Error', value: 'return_error' },
   { label: 'Prune Object Items', value: 'prune_objects' },
+  { label: 'Scramble Item IDs', value: 'scramble_ids' },
   { label: 'Pass Through Headers', value: 'pass_headers' },
   { label: 'Sync Fields', value: 'sync_fields' },
   { label: 'Set Request Header', value: 'set_header' },
@@ -181,6 +182,7 @@ const MODE_META: Record<
   to_upper: { path: true },
   return_error: { value: true },
   prune_objects: { pathOptional: true, value: true },
+  scramble_ids: { path: true, value: true },
   pass_headers: { value: true, keepOrigin: true },
   sync_fields: { from: true, to: true },
   set_header: { path: true, value: true, keepOrigin: true },
@@ -236,6 +238,8 @@ const MODE_DESCRIPTIONS: Record<string, string> = {
   to_upper: 'Convert string to uppercase',
   return_error: 'Return a custom error immediately',
   prune_objects: 'Prune object items by conditions',
+  scramble_ids:
+    'Replace the id of each array item with a random one, keeping its type prefix',
   pass_headers: 'Pass specified request headers to upstream',
   sync_fields: 'Auto-fill when one field exists and another is missing',
   set_header:
@@ -621,6 +625,7 @@ const getModePathPlaceholder = (mode: string): string => {
   if (mode === 'set_header') return 'Authorization'
   if (mode === 'delete_header') return 'X-Debug-Mode'
   if (mode === 'prune_objects') return 'messages'
+  if (mode === 'scramble_ids') return 'input'
   return 'temperature'
 }
 
@@ -682,6 +687,7 @@ const getModeValuePlaceholder = (mode: string): string => {
     return 'openai/'
   }
   if (mode === 'prune_objects') return '{"type":"redacted_thinking"}'
+  if (mode === 'scramble_ids') return '{"skip_types":["item_reference"]}'
   return '0.7'
 }
 

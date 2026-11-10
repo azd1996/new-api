@@ -14,6 +14,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestApplyParamOverrideTrimPrefix(t *testing.T) {
@@ -2666,4 +2667,87 @@ func TestReasoningEffortOverrideIsAuditedWithoutDebugMode(t *testing.T) {
 	_, err := ApplyParamOverrideWithRelayInfo([]byte(`{"reasoning":{"effort":"high"}}`), info)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"set reasoning.effort = max"}, info.ParamOverrideAudit)
+}
+
+func TestApplyParamOverrideScrambleIDsAfterPruningReasoning(t *testing.T) {
+	input := []byte(`{"input":[
+		{"role":"developer","content":"sys"},
+		{"role":"user","content":[{"type":"input_text","text":"hi"}]},
+		{"type":"reasoning","id":"rs_03cc0a90aa182532006af1c2141b488190b309a7a91291a421","encrypted_content":"x"},
+		{"type":"function_call","id":"fc_03cc0a90aa182532006af1c2156e1a08193bdf53f5843d506","call_id":"call_1","name":"search","arguments":"{}"},
+		{"type":"function_call_output","call_id":"call_1","output":"ok"},
+		{"type":"message","id":"msg_03cc0a90aa182532006af1c216cc548190bab75aa07f2654c6","role":"assistant","content":[{"type":"output_text","text":"done"}]},
+		{"type":"item_reference","id":"msg_keepme"}
+	]}`)
+	override := map[string]any{
+		"operations": []any{
+			map[string]any{"mode": "prune_objects", "path": "input", "value": map[string]any{"where": map[string]any{"type": "reasoning"}}},
+			map[string]any{"mode": "scramble_ids", "path": "input"},
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, nil)
+	require.NoError(t, err)
+
+	items := gjson.GetBytes(out, "input").Array()
+	require.Len(t, items, 6)
+	assert.False(t, items[0].Get("id").Exists(), "items without id stay without id")
+	assert.False(t, items[1].Get("id").Exists())
+
+	fcID := items[2].Get("id").String()
+	assert.Regexp(t, `^fc_[0-9a-f]{49}$`, fcID)
+	assert.NotContains(t, fcID, "03cc0a90aa182532006af1c2")
+	assert.Equal(t, "call_1", items[2].Get("call_id").String())
+	assert.Equal(t, "call_1", items[3].Get("call_id").String())
+
+	msgID := items[4].Get("id").String()
+	assert.Regexp(t, `^msg_[0-9a-f]{50}$`, msgID)
+	assert.NotContains(t, msgID, "03cc0a90aa182532006af1c2")
+	assert.NotEqual(t, fcID[3:], msgID[4:])
+
+	assert.Equal(t, "msg_keepme", items[5].Get("id").String(), "item_reference is skipped by default")
+}
+
+func TestApplyParamOverrideScrambleIDsOptions(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		value  any
+		assert func(t *testing.T, out []byte)
+	}{
+		{
+			name:  "explicit empty skip_types also rewrites item_reference",
+			input: `{"input":[{"type":"item_reference","id":"msg_abc"}]}`,
+			value: map[string]any{"skip_types": []any{}},
+			assert: func(t *testing.T, out []byte) {
+				assert.Regexp(t, `^msg_[0-9a-f]{24}$`, gjson.GetBytes(out, "input.0.id").String())
+			},
+		},
+		{
+			name:  "non-array path is a no-op",
+			input: `{"input":"plain text"}`,
+			assert: func(t *testing.T, out []byte) {
+				assert.JSONEq(t, `{"input":"plain text"}`, string(out))
+			},
+		},
+		{
+			name:  "invalid skip_types skips the operation",
+			input: `{"input":[{"type":"message","id":"msg_abc"}]}`,
+			value: map[string]any{"skip_types": "message"},
+			assert: func(t *testing.T, out []byte) {
+				assert.Equal(t, "msg_abc", gjson.GetBytes(out, "input.0.id").String())
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			op := map[string]any{"mode": "scramble_ids", "path": "input"}
+			if tt.value != nil {
+				op["value"] = tt.value
+			}
+			out, err := ApplyParamOverride([]byte(tt.input), map[string]any{"operations": []any{op}}, nil)
+			require.NoError(t, err)
+			tt.assert(t, out)
+		})
+	}
 }

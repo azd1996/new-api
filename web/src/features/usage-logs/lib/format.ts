@@ -49,6 +49,7 @@ const PARAM_OVERRIDE_ACTION_MAP: Record<string, string> = {
   to_upper: 'To Upper',
   replace: 'Replace',
   regex_replace: 'Regex Replace',
+  scramble_ids: 'Scramble Item IDs',
   set_header: 'Set Header',
   delete_header: 'Delete Header',
   copy_header: 'Copy Header',
