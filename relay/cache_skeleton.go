@@ -27,18 +27,54 @@ const claudeDefaultCacheTTL = "5m"
 // is hashed over hashRaw (its JSON with cache markers removed) and sized by
 // its original bytes.
 type skeletonBuilder struct {
-	row *model.CacheSkeleton
+	row         *model.CacheSkeleton
+	prefixHash  *xxhash.Digest
+	messageSeen uint64
+}
+
+const (
+	skeletonPrefixHashVersion uint64 = 1
+	skeletonPrefixMessageMark uint64 = 0
+	skeletonPrefixBlockMark   uint64 = 1
+)
+
+func newSkeletonBuilder(row *model.CacheSkeleton) skeletonBuilder {
+	prefixHash := xxhash.New()
+	builder := skeletonBuilder{row: row, prefixHash: prefixHash}
+	builder.writePrefixUint64(skeletonPrefixHashVersion)
+	builder.writePrefixUint64(row.ParamFp)
+	return builder
+}
+
+func (b skeletonBuilder) writePrefixUint64(value uint64) {
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], value)
+	_, _ = b.prefixHash.Write(buf[:])
+}
+
+func (b skeletonBuilder) writePrefixString(value string) {
+	b.writePrefixUint64(uint64(len(value)))
+	_, _ = b.prefixHash.WriteString(value)
 }
 
 func (b skeletonBuilder) add(kind, name, hashRaw string, size int) {
-	b.row.BlkHash = append(b.row.BlkHash, xxhash.Sum64String(hashRaw))
+	blockHash := xxhash.Sum64String(hashRaw)
+	b.row.BlkHash = append(b.row.BlkHash, blockHash)
 	b.row.BlkKind = append(b.row.BlkKind, kind)
 	b.row.BlkName = append(b.row.BlkName, name)
 	b.row.BlkLen = append(b.row.BlkLen, uint32(size))
+	b.writePrefixUint64(skeletonPrefixBlockMark)
+	b.writePrefixString(kind)
+	b.writePrefixString(name)
+	b.writePrefixUint64(blockHash)
+	b.row.PrefixHash = append(b.row.PrefixHash, b.prefixHash.Sum64())
 }
 
-func (b skeletonBuilder) startMessage() {
+func (b *skeletonBuilder) startMessage() {
 	b.row.MsgStart = append(b.row.MsgStart, uint16(len(b.row.BlkHash)))
+	b.writePrefixUint64(skeletonPrefixMessageMark)
+	b.writePrefixUint64(b.messageSeen)
+	b.messageSeen++
 }
 
 // setLane separates conversations that share one session id (a client's main
@@ -73,7 +109,7 @@ func buildClaudeCacheSkeleton(body []byte) *model.CacheSkeleton {
 	// invalidates the cached message prefix; max_tokens/temperature are not.
 	row.ParamFp = xxhash.Sum64String(row.Model + "\x00" + root.Get("tool_choice").Raw + "\x00" +
 		root.Get("thinking").Raw + "\x00" + row.Effort)
-	b := skeletonBuilder{row: row}
+	b := newSkeletonBuilder(row)
 
 	addBlock := func(kind, name string, block gjson.Result) {
 		raw := block.Raw
@@ -234,7 +270,7 @@ func newOpenAICacheSkeleton(root gjson.Result, effort string) (*model.CacheSkele
 		row.CacheKeyHash = xxhash.Sum64String(key)
 	}
 	row.ParamFp = xxhash.Sum64String(row.Model + "\x00" + root.Get("tool_choice").Raw + "\x00" + effort)
-	return row, skeletonBuilder{row: row}
+	return row, newSkeletonBuilder(row)
 }
 
 // addOpenAITools records the tool definitions, which lead the cached prefix.
