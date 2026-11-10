@@ -1087,13 +1087,13 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 					break
 				}
 			}
-		case "scramble_ids":
+		case "generate_random_id":
 			for _, path := range opPaths {
-				result, err = scrambleIDs(result, path, op.Value)
+				result, err = generateRandomIDs(result, path, op.Value)
 				if err != nil {
 					break
 				}
-				auditRecorder.recordOperation("scramble_ids", path, "", "", nil)
+				auditRecorder.recordOperation("generate_random_id", path, "", "", nil)
 			}
 		case "set_header":
 			err = setHeaderOverrideInContext(context, op.Path, op.Value, op.KeepOrigin)
@@ -1805,7 +1805,7 @@ func copyValue(data []byte, fromPath, toPath string) ([]byte, error) {
 
 func isPathBasedOperation(mode string) bool {
 	switch mode {
-	case "delete", "set", "prepend", "append", "trim_prefix", "trim_suffix", "ensure_prefix", "ensure_suffix", "trim_space", "to_lower", "to_upper", "replace", "regex_replace", "prune_objects", "scramble_ids":
+	case "delete", "set", "prepend", "append", "trim_prefix", "trim_suffix", "ensure_prefix", "ensure_suffix", "trim_space", "to_lower", "to_upper", "replace", "regex_replace", "prune_objects", "generate_random_id":
 		return true
 	default:
 		return false
@@ -2024,36 +2024,36 @@ func regexReplaceStringValue(data []byte, path, pattern, replacement string) ([]
 	return sjson.SetBytes(data, path, re.ReplaceAllString(current.String(), replacement))
 }
 
-// defaultScrambleIDsSkipTypes lists item types whose id must stay intact:
+// defaultGenerateRandomIDSkipTypes lists item types whose id must stay intact:
 // an item_reference only exists to point at a server-stored item by id.
-var defaultScrambleIDsSkipTypes = []string{"item_reference"}
+var defaultGenerateRandomIDSkipTypes = []string{"item_reference"}
 
-// scrambleIDs replaces the `id` of every object in the array at path with a
+// generateRandomIDs replaces the `id` of every object in the array at path with a
 // random value that keeps the type prefix (text before the first "_") and the
 // original length (at least 24 random hex chars). OpenAI/Azure Responses ids of one turn share a prefix with
 // that turn's rs_ reasoning item, so once reasoning items are pruned, a
 // surviving msg_/fc_ id makes the upstream look up a reasoning item that is no
 // longer in the request. Objects without a string id are left untouched.
 //
-// value may be {"skip_types": [...]} to override defaultScrambleIDsSkipTypes.
-func scrambleIDs(data []byte, path string, value any) ([]byte, error) {
+// value may be {"skip_types": [...]} to override defaultGenerateRandomIDSkipTypes.
+func generateRandomIDs(data []byte, path string, value any) ([]byte, error) {
 	target := gjson.GetBytes(data, path)
 	if !target.IsArray() {
 		return data, nil
 	}
 
-	skipTypes := defaultScrambleIDsSkipTypes
+	skipTypes := defaultGenerateRandomIDSkipTypes
 	if options, ok := value.(map[string]any); ok {
 		if rawSkip, exists := options["skip_types"]; exists {
 			rawList, ok := rawSkip.([]any)
 			if !ok {
-				return nil, fmt.Errorf("scramble_ids skip_types must be an array of strings")
+				return nil, fmt.Errorf("generate_random_id skip_types must be an array of strings")
 			}
 			skipTypes = make([]string, 0, len(rawList))
 			for _, item := range rawList {
 				itemType, ok := item.(string)
 				if !ok {
-					return nil, fmt.Errorf("scramble_ids skip_types must be an array of strings")
+					return nil, fmt.Errorf("generate_random_id skip_types must be an array of strings")
 				}
 				skipTypes = append(skipTypes, itemType)
 			}

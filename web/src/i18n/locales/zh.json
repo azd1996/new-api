@@ -7965,7 +7965,7 @@
     "Zhipu GLM": "智谱GLM",
     "Zhipu V4": "智谱 V4",
     "Zoom": "缩放",
-    "Scramble Item IDs": "随机化条目 ID",
+    "Generate Random ID": "生成随机 ID",
     "Replace the id of each array item with a random one, keeping its type prefix": "将数组中每一项的 id 替换为随机值，保留类型前缀"
   }
 }

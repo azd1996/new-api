@@ -2669,7 +2669,7 @@ func TestReasoningEffortOverrideIsAuditedWithoutDebugMode(t *testing.T) {
 	assert.Equal(t, []string{"set reasoning.effort = max"}, info.ParamOverrideAudit)
 }
 
-func TestApplyParamOverrideScrambleIDsAfterPruningReasoning(t *testing.T) {
+func TestApplyParamOverrideGenerateRandomIDAfterPruningReasoning(t *testing.T) {
 	input := []byte(`{"input":[
 		{"role":"developer","content":"sys"},
 		{"role":"user","content":[{"type":"input_text","text":"hi"}]},
@@ -2682,7 +2682,7 @@ func TestApplyParamOverrideScrambleIDsAfterPruningReasoning(t *testing.T) {
 	override := map[string]any{
 		"operations": []any{
 			map[string]any{"mode": "prune_objects", "path": "input", "value": map[string]any{"where": map[string]any{"type": "reasoning"}}},
-			map[string]any{"mode": "scramble_ids", "path": "input"},
+			map[string]any{"mode": "generate_random_id", "path": "input"},
 		},
 	}
 
@@ -2708,7 +2708,7 @@ func TestApplyParamOverrideScrambleIDsAfterPruningReasoning(t *testing.T) {
 	assert.Equal(t, "msg_keepme", items[5].Get("id").String(), "item_reference is skipped by default")
 }
 
-func TestApplyParamOverrideScrambleIDsOptions(t *testing.T) {
+func TestApplyParamOverrideGenerateRandomIDOptions(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  string
@@ -2741,7 +2741,7 @@ func TestApplyParamOverrideScrambleIDsOptions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			op := map[string]any{"mode": "scramble_ids", "path": "input"}
+			op := map[string]any{"mode": "generate_random_id", "path": "input"}
 			if tt.value != nil {
 				op["value"] = tt.value
 			}
