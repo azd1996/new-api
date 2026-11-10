@@ -562,37 +562,55 @@ type channelAffinityMatch struct {
 	Err       error
 }
 
+const ginKeyOriginalChannelAffinity = "channel_affinity_original_request"
+
+type channelAffinitySourceValue struct {
+	Value string
+	Err   error
+}
+
+type originalChannelAffinity struct {
+	Rules     []operation_setting.ChannelAffinityRule
+	Path      string
+	UserAgent string
+	Values    map[operation_setting.ChannelAffinityKeySource]channelAffinitySourceValue
+	ModelName string
+	Match     *channelAffinityMatch
+}
+
+// PrepareOriginalRequestChannelAffinity freezes configured key sources before
+// metadata synthesis or channel/retry rewrites. The model is fixed by the
+// initial routing decision and the resulting match is reused for the request.
+func PrepareOriginalRequestChannelAffinity(c *gin.Context, modelName string) error {
+	return matchRequestChannelAffinity(c, modelName).Err
+}
+
 // matchRequestChannelAffinity only matches the original request. It deliberately
 // ignores the binding switch and never reads the affinity cache or applies a
-// rule's retry policy/template. Both session classification and binding reuse it.
+// rule's retry policy/template. Both session classification and binding reuse
+// the one result captured for the request.
 func matchRequestChannelAffinity(c *gin.Context, modelName string) *channelAffinityMatch {
-	const matchKey = "channel_affinity_request_match"
-	if c != nil {
-		if value, ok := c.Get(matchKey); ok {
-			if match := value.(*channelAffinityMatch); match.ModelName == modelName {
-				return match
-			}
-		}
+	original := prepareOriginalChannelAffinityInputs(c, modelName)
+	if original.Match != nil {
+		return original.Match
 	}
-	result := &channelAffinityMatch{ModelName: modelName}
-	if c != nil {
-		c.Set(matchKey, result)
+	match := matchOriginalChannelAffinity(original)
+	original.Match = match
+	return match
+}
+
+func matchOriginalChannelAffinity(original *originalChannelAffinity) *channelAffinityMatch {
+	if original == nil {
+		return &channelAffinityMatch{}
 	}
+	result := &channelAffinityMatch{ModelName: original.ModelName}
 	setting := operation_setting.GetChannelAffinitySetting()
 	if setting == nil {
 		return result
 	}
-	path := ""
-	if c != nil && c.Request != nil && c.Request.URL != nil {
-		path = c.Request.URL.Path
-	}
-	userAgent := ""
-	if c != nil && c.Request != nil {
-		userAgent = c.Request.UserAgent()
-	}
-
-	for _, rule := range setting.Rules {
-		if !matchAnyRegexCached(rule.ModelRegex, modelName) {
+	path, userAgent := original.Path, original.UserAgent
+	for _, rule := range original.Rules {
+		if !matchAnyRegexCached(rule.ModelRegex, original.ModelName) {
 			continue
 		}
 		if len(rule.PathRegex) > 0 && !matchAnyRegexCached(rule.PathRegex, path) {
@@ -604,8 +622,9 @@ func matchRequestChannelAffinity(c *gin.Context, modelName string) *channelAffin
 		var affinityValue string
 		var usedSource operation_setting.ChannelAffinityKeySource
 		for _, src := range rule.KeySources {
+			value := original.Values[src]
 			var err error
-			affinityValue, err = extractChannelAffinityValueWithError(c, src)
+			affinityValue, err = value.Value, value.Err
 			if err != nil {
 				result.Err = err
 				return result
@@ -627,6 +646,46 @@ func matchRequestChannelAffinity(c *gin.Context, modelName string) *channelAffin
 	return result
 }
 
+func prepareOriginalChannelAffinityInputs(c *gin.Context, modelName string) *originalChannelAffinity {
+	if c != nil {
+		if value, ok := c.Get(ginKeyOriginalChannelAffinity); ok {
+			return value.(*originalChannelAffinity)
+		}
+	}
+	original := &originalChannelAffinity{
+		ModelName: modelName,
+		Values:    make(map[operation_setting.ChannelAffinityKeySource]channelAffinitySourceValue),
+	}
+	if c != nil && c.Request != nil {
+		original.UserAgent = c.Request.UserAgent()
+		if c.Request.URL != nil {
+			original.Path = c.Request.URL.Path
+		}
+	}
+	if setting := operation_setting.GetChannelAffinitySetting(); setting != nil {
+		original.Rules = append([]operation_setting.ChannelAffinityRule(nil), setting.Rules...)
+	}
+	for _, rule := range original.Rules {
+		if len(rule.PathRegex) > 0 && !matchAnyRegexCached(rule.PathRegex, original.Path) {
+			continue
+		}
+		if len(rule.UserAgentInclude) > 0 && !matchAnyIncludeFold(rule.UserAgentInclude, original.UserAgent) {
+			continue
+		}
+		for _, src := range rule.KeySources {
+			if _, exists := original.Values[src]; exists {
+				continue
+			}
+			value, err := extractChannelAffinityValueWithError(c, src)
+			original.Values[src] = channelAffinitySourceValue{Value: value, Err: err}
+		}
+	}
+	if c != nil {
+		c.Set(ginKeyOriginalChannelAffinity, original)
+	}
+	return original
+}
+
 func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup string) (int, bool) {
 	setting := operation_setting.GetChannelAffinitySetting()
 	state := RequestPolicy(c)
@@ -638,6 +697,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		return 0, false
 	}
 	rule, usedSource, affinityValue := match.Rule, match.Source, match.Value
+	routingModel := match.ModelName
 	path := ""
 	if c != nil && c.Request != nil && c.Request.URL != nil {
 		path = c.Request.URL.Path
@@ -646,7 +706,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 	if ttlSeconds <= 0 {
 		ttlSeconds = setting.DefaultTTLSeconds
 	}
-	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
+	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, routingModel, usingGroup, affinityValue)
 	cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
 	state.SessionMode, state.SessionModeSource = EffectiveSessionMode(setting, rule)
 	state.RuleName = rule.Name
@@ -662,7 +722,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		KeyHint:        buildChannelAffinityKeyHint(affinityValue),
 		KeyFingerprint: affinityFingerprint(affinityValue),
 		UsingGroup:     usingGroup,
-		ModelName:      modelName,
+		ModelName:      routingModel,
 		RequestPath:    path,
 	})
 

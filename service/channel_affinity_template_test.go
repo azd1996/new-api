@@ -196,6 +196,87 @@ func TestExtractChannelAffinityValue_RequestHeader(t *testing.T) {
 	require.Equal(t, "tenant-123", value)
 }
 
+func TestOriginalChannelAffinitySurvivesSynthesisAndRepeatedLookups(t *testing.T) {
+	setting := operation_setting.GetChannelAffinitySetting()
+	previous := *setting
+	t.Cleanup(func() { *setting = previous })
+	for _, tc := range []struct {
+		name, body, value, valueRegex, userAgent string
+		source                                   operation_setting.ChannelAffinityKeySource
+	}{
+		{name: "default missing metadata", source: operation_setting.ChannelAffinityKeySource{Type: "gjson", Path: "metadata.user_id"}},
+		{name: "default client metadata", body: `,"metadata":{"user_id":"client"}`, value: "client", source: operation_setting.ChannelAffinityKeySource{Type: "gjson", Path: "metadata.user_id"}},
+		{name: "custom header", value: "original", source: operation_setting.ChannelAffinityKeySource{Type: "request_header", Key: "X-Custom-Session"}},
+		{name: "custom gjson", body: `,"session":"original"`, value: "original", source: operation_setting.ChannelAffinityKeySource{Type: "gjson", Path: "session"}},
+		{name: "custom context string", value: "original", source: operation_setting.ChannelAffinityKeySource{Type: "context_string", Key: "custom-session"}},
+		{name: "custom context int", value: "42", source: operation_setting.ChannelAffinityKeySource{Type: "context_int", Key: "custom-session"}},
+		{name: "value regex rejects", valueRegex: "^accepted$", source: operation_setting.ChannelAffinityKeySource{Type: "request_header", Key: "X-Custom-Session"}},
+		{name: "user agent rejects", userAgent: "other-client", source: operation_setting.ChannelAffinityKeySource{Type: "gjson", Path: "metadata.user_id"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Classification must still use rules when affinity binding is off.
+			*setting = operation_setting.ChannelAffinitySetting{Enabled: false, Rules: []operation_setting.ChannelAffinityRule{{
+				Name: "original", ModelRegex: []string{"^claude-"}, PathRegex: []string{"^/v1/messages$"},
+				KeySources: []operation_setting.ChannelAffinityKeySource{tc.source}, ValueRegex: tc.valueRegex,
+			}}}
+			if tc.userAgent != "" {
+				setting.Rules[0].UserAgentInclude = []string{tc.userAgent}
+			}
+			body := []byte(`{"model":"claude-a","messages":[{"role":"user","content":"hi"}]` + tc.body + `}`)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
+			ctx.Request.Header.Set("User-Agent", "original-client")
+			ctx.Request.Header.Set("X-Custom-Session", "original")
+			ctx.Set("custom-session", "original")
+			if tc.source.Type == "context_int" {
+				ctx.Set("custom-session", 42)
+			}
+			storage, err := common.GetBodyStorage(ctx)
+			require.NoError(t, err)
+			t.Cleanup(func() { assert.NoError(t, storage.Close()) })
+			require.NoError(t, PrepareOriginalRequestChannelAffinity(ctx, "claude-a"))
+			originalMatch := matchRequestChannelAffinity(ctx, "claude-a")
+			require.NoError(t, originalMatch.Err)
+			require.Equal(t, tc.value, originalMatch.Value)
+
+			synthesized, _, err := common.PrepareClaudeMetadataUserID(body, "test-key-123456", "", "", "")
+			require.NoError(t, err)
+			replacement, err := common.CreateBodyStorage(synthesized)
+			require.NoError(t, err)
+			t.Cleanup(func() { assert.NoError(t, replacement.Close()) })
+			ctx.Set(common.KeyBodyStorage, replacement)
+			ctx.Request.Header.Set("X-Custom-Session", "rewritten")
+			ctx.Request.Header.Set("User-Agent", "other-client")
+			ctx.Set("custom-session", "rewritten")
+			if tc.source.Type == "context_int" {
+				ctx.Set("custom-session", 99)
+			}
+			for range 2 {
+				match := matchRequestChannelAffinity(ctx, "claude-a")
+				require.NoError(t, match.Err)
+				assert.Equal(t, tc.value, match.Value)
+			}
+			assert.Empty(t, RequestPolicy(ctx).Events(), "preparation has no binding side effects")
+		})
+	}
+}
+
+func TestPrepareOriginalChannelAffinityPropagatesBodyError(t *testing.T) {
+	setting := operation_setting.GetChannelAffinitySetting()
+	previous := *setting
+	t.Cleanup(func() { *setting = previous })
+	*setting = operation_setting.ChannelAffinitySetting{Rules: []operation_setting.ChannelAffinityRule{{
+		ModelRegex: []string{"^claude-"}, KeySources: []operation_setting.ChannelAffinityKeySource{{Type: "gjson", Path: "metadata.user_id"}},
+	}}}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
+	storage, err := common.GetBodyStorage(ctx)
+	require.NoError(t, err)
+	require.NoError(t, storage.Close())
+	require.ErrorIs(t, PrepareOriginalRequestChannelAffinity(ctx, "claude-a"), common.ErrStorageClosed)
+	assert.ErrorIs(t, PrepareOriginalRequestChannelAffinity(ctx, "claude-a"), common.ErrStorageClosed)
+}
+
 func TestGetPreferredChannelByAffinity_RequestHeaderKeySource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

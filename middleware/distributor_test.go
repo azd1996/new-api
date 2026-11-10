@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +20,38 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPrepareClaudeMetadataKeepsOriginalBody(t *testing.T) {
+	for _, metadata := range []string{"", `,"metadata":{"user_id":"client"}`} {
+		t.Run(metadata, func(t *testing.T) {
+			body := `{"model":"claude-a","messages":[{"role":"user","content":"hi"}]` + metadata + `}`
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			common.SetContextKey(ctx, constant.ContextKeyTokenKey, "test-key-123456")
+			_, err := getModelFromJSONBody(ctx)
+			require.NoError(t, err)
+			storage, err := common.GetBodyStorage(ctx)
+			require.NoError(t, err)
+			defer storage.Close()
+			require.NoError(t, prepareClaudeMetadataUserIDForRouting(ctx, "claude-a"))
+			prepared := common.GetContextKeyString(ctx, constant.ContextKeyClaudeMetadataUserID)
+			if metadata == "" {
+				assert.Contains(t, prepared, `"device_id":"123456"`)
+			} else {
+				assert.Empty(t, prepared, "client metadata is never synthesized")
+			}
+			data, err := storage.Bytes()
+			require.NoError(t, err)
+			assert.Equal(t, body, string(data))
+			data, err = io.ReadAll(ctx.Request.Body)
+			require.NoError(t, err)
+			assert.Equal(t, body, string(data), "the relay/pass-through reader keeps the original body")
+			require.NoError(t, prepareClaudeMetadataUserIDForRouting(ctx, "claude-b"))
+			assert.Equal(t, prepared, common.GetContextKeyString(ctx, constant.ContextKeyClaudeMetadataUserID))
+		})
+	}
+}
 
 func TestChannelMatchesExpectedTaskPluginUsesGenericChannelSetting(t *testing.T) {
 	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin}

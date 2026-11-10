@@ -168,13 +168,17 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		// session_id) when the client omitted user_id; clients that already set
 		// user_id (e.g. Claude Code) are left untouched.
 		if !operation_setting.MatchGroupModel(operation_setting.GetMetadataInjectionDisableSetting().Rules, claudeGroup, claudeModel) {
-			jsonData, err = fillClaudeMetadataUserID(
-				jsonData,
-				common.GetContextKeyString(c, constant.ContextKeyTokenKey),
-				c.GetHeader("x-claude-code-session-id"),
-				c.ClientIP(),
-				c.GetHeader("User-Agent"),
-			)
+			if prepared := common.GetContextKeyString(c, constant.ContextKeyClaudeMetadataUserID); !clientHadClaudeUserID && prepared != "" {
+				jsonData, err = sjson.SetBytes(jsonData, "metadata.user_id", prepared)
+			} else {
+				jsonData, err = fillClaudeMetadataUserID(
+					jsonData,
+					common.GetContextKeyString(c, constant.ContextKeyTokenKey),
+					c.GetHeader("x-claude-code-session-id"),
+					c.ClientIP(),
+					c.GetHeader("User-Agent"),
+				)
+			}
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}

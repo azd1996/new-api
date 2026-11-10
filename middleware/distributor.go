@@ -97,6 +97,12 @@ func Distribute() func(c *gin.Context) {
 				}
 			}
 		}
+		if shouldSelectChannel {
+			if err := prepareClaudeMetadataUserIDForRouting(c, modelRequest.Model); err != nil {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
+				return
+			}
+		}
 		if pinned || shouldSelectChannel {
 			usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 			var selectErr *service.ChannelSelectError
@@ -137,6 +143,44 @@ func Distribute() func(c *gin.Context) {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
+}
+
+func prepareClaudeMetadataUserIDForRouting(c *gin.Context, modelName string) error {
+	if c.Request.URL.Path != "/v1/messages" ||
+		!strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {
+		return nil
+	}
+	if err := service.PrepareOriginalRequestChannelAffinity(c, modelName); err != nil {
+		return err
+	}
+	if _, prepared := common.GetContextKey(c, constant.ContextKeyClaudeMetadataUserID); prepared {
+		return nil
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return err
+	}
+	raw, err := storage.Bytes()
+	if err != nil {
+		return err
+	}
+	out, synthesized, err := common.PrepareClaudeMetadataUserID(
+		raw,
+		common.GetContextKeyString(c, constant.ContextKeyTokenKey),
+		c.GetHeader("x-claude-code-session-id"),
+		c.ClientIP(),
+		c.GetHeader("User-Agent"),
+	)
+	if err != nil {
+		return err
+	}
+	if !synthesized {
+		return nil
+	}
+	// Preserve the original body for affinity, retries and pass-through. Relay
+	// applies this candidate only when the actual group/outbound model allows it.
+	common.SetContextKey(c, constant.ContextKeyClaudeMetadataUserID, gjson.GetBytes(out, "metadata.user_id").String())
+	return nil
 }
 
 // noAvailableChannelMessage explains a 503 for a task-plugin-claimed model.

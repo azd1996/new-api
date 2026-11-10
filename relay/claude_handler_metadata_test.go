@@ -12,6 +12,8 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,15 +28,30 @@ const (
 )
 
 func TestClaudeHelperRecordsFinalSession(t *testing.T) {
+	disableSetting := operation_setting.GetMetadataInjectionDisableSetting()
+	previousRules := disableSetting.Rules
+	previousPassThrough := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	t.Cleanup(func() {
+		disableSetting.Rules = previousRules
+		model_setting.GetGlobalSettings().PassThroughRequestEnabled = previousPassThrough
+	})
 	for _, tc := range []struct {
 		name, metadata, rewrite, wantSession, wantSource string
 		param                                            bool
+		prepared, disableModel                           string
+		channelPassThrough, globalPassThrough            bool
 	}{
 		{name: "client", metadata: `,"metadata":{"user_id":"{\"session_id\":\"client\"}"}`, wantSession: "client", wantSource: "metadata.user_id"},
 		{name: "injected", wantSource: "content-fallback"},
 		{name: "retry only", rewrite: `{"session_id":"retry"}`, wantSession: "retry", wantSource: "content-fallback"},
 		{name: "param overrides client", metadata: `,"metadata":{"user_id":"{\"session_id\":\"client\"}"}`, rewrite: `{"session_id":"param"}`, param: true, wantSession: "param", wantSource: "metadata.user_id"},
 		{name: "retry removes session", rewrite: `{}`, wantSession: sessionIDNotFound},
+		{name: "prepared reused after model mapping", prepared: `{"session_id":"prepared"}`, wantSession: "prepared", wantSource: "content-fallback"},
+		{name: "prepared does not replace client", metadata: `,"metadata":{"user_id":"{\"session_id\":\"client\"}"}`, prepared: `{"session_id":"prepared"}`, wantSession: "client", wantSource: "metadata.user_id"},
+		{name: "disabled for actual auto group and outbound model", prepared: `{"session_id":"prepared"}`, disableModel: "claude-outbound", wantSession: sessionIDNotFound},
+		{name: "origin model disable does not block outbound", prepared: `{"session_id":"prepared"}`, disableModel: "claude-sonnet-4", wantSession: "prepared", wantSource: "content-fallback"},
+		{name: "channel pass through", prepared: `{"session_id":"prepared"}`, channelPassThrough: true},
+		{name: "global pass through", prepared: `{"session_id":"prepared"}`, globalPassThrough: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var outbound []byte
@@ -53,8 +70,23 @@ func TestClaudeHelperRecordsFinalSession(t *testing.T) {
 			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
 			common.SetContextKey(c, constant.ContextKeyChannelKey, "upstream-test")
 			common.SetContextKey(c, constant.ContextKeyTokenKey, testAPIKey)
+			common.SetContextKey(c, constant.ContextKeyClaudeMetadataUserID, tc.prepared)
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, "auto")
+			common.SetContextKey(c, constant.ContextKeyAutoGroup, "actual-group")
+			common.SetContextKey(c, constant.ContextKeyChannelModelMapping, `{"claude-sonnet-4":"claude-outbound"}`)
+			common.SetContextKey(c, constant.ContextKeyChannelSetting, dto.ChannelSettings{PassThroughBodyEnabled: tc.channelPassThrough})
+			model_setting.GetGlobalSettings().PassThroughRequestEnabled = tc.globalPassThrough
+			disableSetting.Rules = nil
+			if tc.disableModel != "" {
+				disableSetting.Rules = []operation_setting.GroupModelRule{{Group: "actual-group", Models: []string{tc.disableModel}}}
+			}
 			var request dto.ClaudeRequest
-			require.NoError(t, common.UnmarshalJsonStr(`{"model":"claude-sonnet-4","max_tokens":16,"messages":[{"role":"user","content":"hi"}]`+tc.metadata+`}`, &request))
+			raw := `{"model":"claude-sonnet-4","max_tokens":16,"messages":[{"role":"user","content":"hi"}]` + tc.metadata + `}`
+			require.NoError(t, common.UnmarshalJsonStr(raw, &request))
+			storage, err := common.CreateBodyStorage([]byte(raw))
+			require.NoError(t, err)
+			defer storage.Close()
+			c.Set(common.KeyBodyStorage, storage)
 			info := &relaycommon.RelayInfo{Request: &request, RelayFormat: types.RelayFormatClaude, OriginModelName: request.Model, RequestURLPath: "/v1/messages"}
 			if tc.rewrite != "" {
 				if tc.param {
@@ -68,6 +100,10 @@ func TestClaudeHelperRecordsFinalSession(t *testing.T) {
 			apiErr := ClaudeHelper(c, info)
 			require.NotNil(t, apiErr)
 			require.NotEmpty(t, outbound, "request must reach the upstream fixture")
+			if tc.channelPassThrough || tc.globalPassThrough {
+				assert.Equal(t, raw, string(outbound), "pass-through must not inject the prepared value")
+				return
+			}
 			wantSession := tc.wantSession
 			if wantSession == "" {
 				wantSession = claudeSessionID(outbound)
