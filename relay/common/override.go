@@ -1,6 +1,8 @@
 package common
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -1085,6 +1087,14 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 					break
 				}
 			}
+		case "generate_random_id":
+			for _, path := range opPaths {
+				result, err = generateRandomIDs(result, path, op.Value)
+				if err != nil {
+					break
+				}
+				auditRecorder.recordOperation("generate_random_id", path, "", "", nil)
+			}
 		case "set_header":
 			err = setHeaderOverrideInContext(context, op.Path, op.Value, op.KeepOrigin)
 			if err == nil {
@@ -1795,7 +1805,7 @@ func copyValue(data []byte, fromPath, toPath string) ([]byte, error) {
 
 func isPathBasedOperation(mode string) bool {
 	switch mode {
-	case "delete", "set", "prepend", "append", "trim_prefix", "trim_suffix", "ensure_prefix", "ensure_suffix", "trim_space", "to_lower", "to_upper", "replace", "regex_replace", "prune_objects":
+	case "delete", "set", "prepend", "append", "trim_prefix", "trim_suffix", "ensure_prefix", "ensure_suffix", "trim_space", "to_lower", "to_upper", "replace", "regex_replace", "prune_objects", "generate_random_id":
 		return true
 	default:
 		return false
@@ -2012,6 +2022,75 @@ func regexReplaceStringValue(data []byte, path, pattern, replacement string) ([]
 		return data, err
 	}
 	return sjson.SetBytes(data, path, re.ReplaceAllString(current.String(), replacement))
+}
+
+// defaultGenerateRandomIDSkipTypes lists item types whose id must stay intact:
+// an item_reference only exists to point at a server-stored item by id.
+var defaultGenerateRandomIDSkipTypes = []string{"item_reference"}
+
+// generateRandomIDs replaces the `id` of every object in the array at path with a
+// random value that keeps the type prefix (text before the first "_") and the
+// original length (at least 24 random hex chars). OpenAI/Azure Responses ids of one turn share a prefix with
+// that turn's rs_ reasoning item, so once reasoning items are pruned, a
+// surviving msg_/fc_ id makes the upstream look up a reasoning item that is no
+// longer in the request. Objects without a string id are left untouched.
+//
+// value may be {"skip_types": [...]} to override defaultGenerateRandomIDSkipTypes.
+func generateRandomIDs(data []byte, path string, value any) ([]byte, error) {
+	target := gjson.GetBytes(data, path)
+	if !target.IsArray() {
+		return data, nil
+	}
+
+	skipTypes := defaultGenerateRandomIDSkipTypes
+	if options, ok := value.(map[string]any); ok {
+		if rawSkip, exists := options["skip_types"]; exists {
+			rawList, ok := rawSkip.([]any)
+			if !ok {
+				return nil, fmt.Errorf("generate_random_id skip_types must be an array of strings")
+			}
+			skipTypes = make([]string, 0, len(rawList))
+			for _, item := range rawList {
+				itemType, ok := item.(string)
+				if !ok {
+					return nil, fmt.Errorf("generate_random_id skip_types must be an array of strings")
+				}
+				skipTypes = append(skipTypes, itemType)
+			}
+		}
+	}
+
+	result := data
+	for index, item := range target.Array() {
+		id := item.Get("id")
+		if id.Type != gjson.String || id.String() == "" {
+			continue
+		}
+		if slices.Contains(skipTypes, item.Get("type").String()) {
+			continue
+		}
+		prefix, rest, hasPrefix := strings.Cut(id.String(), "_")
+		suffixLen := len(rest)
+		if !hasPrefix {
+			suffixLen = len(prefix)
+		}
+		suffixLen = max(suffixLen, 24)
+		randomBytes := make([]byte, (suffixLen+1)/2)
+		if _, err := rand.Read(randomBytes); err != nil {
+			return nil, err
+		}
+		suffix := hex.EncodeToString(randomBytes)[:suffixLen]
+		newID := suffix
+		if hasPrefix {
+			newID = prefix + "_" + suffix
+		}
+		var err error
+		result, err = sjson.SetBytes(result, fmt.Sprintf("%s.%d.id", path, index), newID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 type pruneObjectsOptions struct {
