@@ -249,7 +249,7 @@ export function ChannelsTable() {
         typeFilter.length > 0 && !typeFilter.includes('all')
           ? Number(typeFilter[0])
           : undefined,
-      tag_mode: enableTagMode,
+      tag_mode: enableTagMode && !shouldSearch,
       id_sort: idSort,
       ...sortParams,
       p: pagination.pageIndex + 1,
@@ -273,7 +273,7 @@ export function ChannelsTable() {
               typeFilter.length > 0 && !typeFilter.includes('all')
                 ? Number(typeFilter[0])
                 : undefined,
-            tag_mode: enableTagMode,
+            tag_mode: false,
             id_sort: idSort,
             ...sortParams,
             p: pagination.pageIndex + 1,

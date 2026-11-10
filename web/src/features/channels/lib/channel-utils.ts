@@ -640,6 +640,10 @@ export function aggregateChannelsByTag(
 
   for (const channel of channels) {
     const tag = channel.tag || ''
+    if (!tag) {
+      result.push(channel)
+      continue
+    }
 
     if (!tagMap.has(tag)) {
       // Create tag aggregate row

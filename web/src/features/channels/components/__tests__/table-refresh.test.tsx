@@ -24,12 +24,19 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createInstance } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
+import { SectionPageLayout } from '@/components/layout/components/section-page-layout'
 import { api } from '@/lib/api'
 
 import type { Channel } from '../../types'
@@ -86,14 +93,37 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function renderChannelsPage(searchGate: () => Promise<void>) {
+async function renderChannelsPage(
+  searchGate: () => Promise<void>,
+  options?: {
+    initialEntry: string
+    items: Channel[]
+    total: number
+  }
+) {
   const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/channel/search') {
       await searchGate()
       return {
         data: {
           success: true,
-          data: { items: [channel('prod')], total: 1, type_counts: {} },
+          data: {
+            items: options?.items ?? [channel('prod')],
+            total: options?.total ?? 1,
+            type_counts: {},
+          },
+        },
+      }
+    }
+    if (url === '/api/channel') {
+      return {
+        data: {
+          success: true,
+          data: {
+            items: [{ ...channel('staging'), id: 9, tag: 'shared' }],
+            total: 1,
+            type_counts: {},
+          },
         },
       }
     }
@@ -110,11 +140,16 @@ async function renderChannelsPage(searchGate: () => Promise<void>) {
     path: 'channels/',
     component: () => (
       <ChannelsProvider>
-        <ChannelsTable />
+        <SectionPageLayout>
+          <SectionPageLayout.Content>
+            <ChannelsTable />
+          </SectionPageLayout.Content>
+        </SectionPageLayout>
       </ChannelsProvider>
     ),
   })
   const initialEntry =
+    options?.initialEntry ??
     '/channels/?filter=prod&group=%5B%22vip%22%5D&status=%5B%22enabled%22%5D&model=gpt-4o'
   const router = createRouter({
     routeTree: root.addChildren([auth.addChildren([channelsRoute])]),
@@ -128,7 +163,12 @@ async function renderChannelsPage(searchGate: () => Promise<void>) {
       </QueryClientProvider>
     </I18nextProvider>
   )
-  expect((await screen.findAllByText('prod')).length).toBeGreaterThan(0)
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Refresh' })).toHaveAttribute(
+      'aria-busy',
+      'false'
+    )
+  )
   return get
 }
 
@@ -153,4 +193,60 @@ it('refetches the channel list with the current filters and marks Refresh busy w
   expect(refresh).toHaveAttribute('aria-busy', 'true')
   release()
   await waitFor(() => expect(refresh).toHaveAttribute('aria-busy', 'false'))
+})
+
+it('searches individual matches in tag mode and restores tag listing when the keyword is cleared', async () => {
+  localStorage.setItem('enable-tag-mode', 'true')
+  localStorage.setItem('channels:view-mode', 'table')
+  const get = await renderChannelsPage(() => Promise.resolve(), {
+    initialEntry: '/channels/?filter=prod&pageSize=10',
+    items: [
+      { ...channel('prod-east'), id: 1, tag: 'shared' },
+      { ...channel('prod-west'), id: 2, tag: 'shared' },
+      { ...channel('prod-untagged'), id: 3 },
+    ],
+    total: 11,
+  })
+  await waitFor(() =>
+    expect(get).toHaveBeenCalledWith('/api/channel/search', {
+      params: expect.objectContaining({
+        keyword: 'prod',
+        tag_mode: false,
+        p: 1,
+        page_size: 10,
+      }),
+    })
+  )
+  expect(await screen.findByText('prod-untagged')).toBeVisible()
+  const tagRow = screen.getByRole('row', { name: /Tag：shared/ })
+  expect(within(tagRow).getByText('2 channels')).toBeVisible()
+  await userEvent.setup().click(within(tagRow).getAllByRole('button')[0])
+  expect(await screen.findByText('prod-east')).toBeVisible()
+  expect(screen.getByText('prod-west')).toBeVisible()
+  expect(screen.queryByText('staging')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Go to next page' })).toBeEnabled()
+
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Go to next page' }))
+  await waitFor(() =>
+    expect(get).toHaveBeenCalledWith('/api/channel/search', {
+      params: expect.objectContaining({ tag_mode: false, p: 2, page_size: 10 }),
+    })
+  )
+  await userEvent
+    .setup()
+    .clear(screen.getByPlaceholderText('Filter by name, ID, or key...'))
+  await waitFor(() =>
+    expect(get).toHaveBeenCalledWith('/api/channel', {
+      params: expect.objectContaining({ tag_mode: true, p: 1 }),
+    })
+  )
+  await waitFor(() =>
+    expect(screen.queryByText('prod-untagged')).not.toBeInTheDocument()
+  )
+  expect(screen.getByRole('row', { name: /Tag：shared/ })).toHaveTextContent(
+    '1 channels'
+  )
+  expect(screen.getByRole('button', { name: 'Go to next page' })).toBeDisabled()
 })
