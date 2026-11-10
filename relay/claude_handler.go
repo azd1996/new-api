@@ -19,7 +19,6 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
-	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -401,10 +400,6 @@ func claudeCacheOptimizationConfigured(policy model.CustomerClaudeCacheOptimizat
 		policy.FallbackCacheBreakpoint.Enabled
 }
 
-// claudeDerivedDeviceIDLen is the number of trailing API-key characters used as
-// the device_id when synthesizing a metadata.user_id for clients that omit it.
-const claudeDerivedDeviceIDLen = 6
-
 // claudeMetadataUserID mirrors the JSON shape Claude Code packs into
 // metadata.user_id (a JSON string embedding device_id / account_uuid /
 // session_id). Synthesizing the same shape lets downstream gateways parse our
@@ -425,130 +420,14 @@ type claudeMetadataUserID struct {
 // is returned unchanged when a non-empty user_id is already present (e.g. real
 // Claude Code, which carries its own session) or when no key suffix is available.
 func fillClaudeMetadataUserID(jsonData []byte, apiKey, headerSessionID, clientIP, userAgent string) ([]byte, error) {
-	if existing := gjson.GetBytes(jsonData, "metadata.user_id"); existing.Exists() && strings.TrimSpace(existing.String()) != "" {
-		return jsonData, nil
-	}
-	if len(apiKey) < claudeDerivedDeviceIDLen {
-		return jsonData, nil
-	}
-	suffix := apiKey[len(apiKey)-claudeDerivedDeviceIDLen:]
-	sessionID := claudeSessionHash(deriveClaudeSessionSeed(jsonData, headerSessionID, clientIP, userAgent, apiKey))
-	encoded, err := common.Marshal(claudeMetadataUserID{
-		DeviceID:  suffix,
-		SessionID: sessionID,
-	})
-	if err != nil {
-		return jsonData, err
-	}
-	return sjson.SetBytes(jsonData, "metadata.user_id", string(encoded))
+	out, _, err := common.PrepareClaudeMetadataUserID(jsonData, apiKey, headerSessionID, clientIP, userAgent)
+	return out, err
 }
 
 // claudeSessionHash reduces a session seed to a 16-char xxhash64 hex string.
 // An empty (after trim) seed yields an empty hash so callers can skip writing.
 func claudeSessionHash(seed string) string {
-	normalized := strings.TrimSpace(seed)
-	if normalized == "" {
-		return ""
-	}
-	return fmt.Sprintf("%016x", xxhash.Sum64String(normalized))
-}
-
-// deriveClaudeSessionSeed builds the session seed as model + stable system
-// prefix + conversation identity, so the resulting session_id changes exactly
-// when the upstream prompt cache would be invalidated (model switch or a change
-// in the cached system prefix) and stays stable otherwise.
-func deriveClaudeSessionSeed(jsonData []byte, headerSessionID, clientIP, userAgent, apiKeyID string) string {
-	conversation := claudeConversationSeed(jsonData, headerSessionID, clientIP, userAgent, apiKeyID)
-	model := gjson.GetBytes(jsonData, "model").String()
-	systemPrefix := claudeStableSystemPrefix(jsonData)
-	if model == "" && systemPrefix == "" && conversation == "" {
-		return ""
-	}
-	// \x1f (unit separator) keeps the three factors unambiguously delimited.
-	return strings.Join([]string{model, systemPrefix, conversation}, "\x1f")
-}
-
-// claudeConversationSeed picks the conversation identity by priority: session
-// header, then the first message (scoped to the API key), then a request-wide
-// fallback. Message cache_control breakpoints are not used: clients move them
-// onto the newest message every turn, which would split one conversation into
-// single-request sessions.
-func claudeConversationSeed(jsonData []byte, headerSessionID, clientIP, userAgent, apiKeyID string) string {
-	if s := strings.TrimSpace(headerSessionID); s != "" {
-		return s
-	}
-	if s := claudeFirstMessageSeed(jsonData); strings.TrimSpace(s) != "" {
-		return apiKeyID + "\x1f" + s
-	}
-	return claudeFallbackSessionSeed(clientIP, userAgent, apiKeyID)
-}
-
-// claudeStableSystemPrefix returns the cached-stable portion of the system
-// prompt: the concatenation of system blocks up to and including the first one
-// carrying an ephemeral cache_control breakpoint. The dynamic tail after the
-// breakpoint is intentionally excluded so a changing tail does not flip the
-// session. When no breakpoint is present it falls back to the first system
-// block; a plain-string system is used verbatim.
-func claudeStableSystemPrefix(jsonData []byte) string {
-	sys := gjson.GetBytes(jsonData, "system")
-	if sys.Type == gjson.String {
-		return sys.String()
-	}
-	if !sys.IsArray() {
-		return ""
-	}
-	blocks := sys.Array()
-	var sb strings.Builder
-	for _, block := range blocks {
-		if t := block.Get("text"); t.Exists() {
-			sb.WriteString(t.String())
-		} else {
-			sb.WriteString(block.Raw)
-		}
-		if block.Get("cache_control.type").String() == "ephemeral" {
-			return sb.String()
-		}
-	}
-	if len(blocks) > 0 {
-		if t := blocks[0].Get("text"); t.Exists() {
-			return t.String()
-		}
-		return blocks[0].Raw
-	}
-	return ""
-}
-
-// claudeFirstMessageSeed returns the content of the first message, which stays
-// fixed for the whole conversation. cache_control is ignored so a breakpoint
-// moving on or off the first message does not change the seed.
-func claudeFirstMessageSeed(jsonData []byte) string {
-	content := gjson.GetBytes(jsonData, "messages.0.content")
-	if content.Type == gjson.String {
-		return content.String()
-	}
-	if !content.IsArray() {
-		return ""
-	}
-	var sb strings.Builder
-	for _, block := range content.Array() {
-		if t := block.Get("text"); t.Exists() {
-			sb.WriteString(t.String())
-			continue
-		}
-		raw, err := sjson.Delete(block.Raw, "cache_control")
-		if err != nil {
-			raw = block.Raw
-		}
-		sb.WriteString(raw)
-	}
-	return sb.String()
-}
-
-// claudeFallbackSessionSeed builds the last-resort seed from request identity
-// only (client IP + user agent + API key). Prompt text is intentionally
-// excluded so the seed stays stable across the turns of one conversation.
-func claudeFallbackSessionSeed(clientIP, userAgent, apiKeyID string) string {
-	return clientIP + userAgent + apiKeyID
+	return common.ClaudeSessionHash(seed)
 }
 
 const (
