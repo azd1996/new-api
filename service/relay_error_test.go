@@ -316,3 +316,26 @@ func TestRelayAttemptGeneratedInLogAdminJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestUpstreamLatencyStoredInLogAdminInfo(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	reported := model.NewLogOther()
+	AppendRelayLogAdminInfo(ctx, &relaycommon.RelayInfo{
+		UpstreamLatencySource:       "aws_bedrock",
+		UpstreamFirstByteLatencyMs:  7291,
+		UpstreamInvocationLatencyMs: 9014,
+	}, reported)
+	var stored struct {
+		AdminInfo struct {
+			UpstreamLatency map[string]any `json:"upstream_latency"`
+		} `json:"admin_info"`
+	}
+	require.NoError(t, common.UnmarshalJsonStr(reported.JSONString(), &stored))
+	assert.Equal(t, map[string]any{"source": "aws_bedrock", "frt_ms": float64(7291), "total_ms": float64(9014)},
+		stored.AdminInfo.UpstreamLatency, "upstream-reported timing is admin-only")
+
+	unreported := model.NewLogOther()
+	AppendRelayLogAdminInfo(ctx, &relaycommon.RelayInfo{}, unreported)
+	assert.NotContains(t, unreported.Snapshot()["admin_info"], "upstream_latency", "channels that report no timing carry no record")
+}

@@ -85,6 +85,10 @@ import {
   isViolationFeeLog,
   getFirstResponseTimeColor,
   getResponseTimeColor,
+  formatLatencyGapMs,
+  formatLatencyMs,
+  getUpstreamGapColor,
+  getUpstreamTimingComparison,
   getReasoningEffortVariant,
   logTokenName,
   renderAuditContent,
@@ -595,6 +599,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
+  const upstreamTiming = props.isAdmin
+    ? getUpstreamTimingComparison(other, props.log.use_time)
+    : null
   const processShutdown =
     props.isAdmin && (isConsume || props.log.type === 5)
       ? adminInfo?.process_shutdown
@@ -972,6 +979,48 @@ export function DetailsDialog(props: DetailsDialogProps) {
                         (FRT: {formatUseTime(other.frt / 1000)})
                       </span>
                     )}
+                </span>
+              }
+            />
+          )}
+
+          {showTiming && upstreamTiming && (
+            <DetailRow
+              label={t('Upstream reported')}
+              value={
+                <span className='flex flex-col gap-0.5 tabular-nums'>
+                  {[
+                    {
+                      label: t('First token'),
+                      ours: upstreamTiming.ourFirstTokenMs,
+                      upstream: upstreamTiming.upstreamFirstTokenMs,
+                      gap: upstreamTiming.firstTokenGapMs,
+                    },
+                    {
+                      label: t('Duration'),
+                      ours: upstreamTiming.ourTotalMs,
+                      upstream: upstreamTiming.upstreamTotalMs,
+                      gap: upstreamTiming.totalGapMs,
+                    },
+                  ]
+                    .filter((row) => row.upstream != null)
+                    .map((row) => (
+                      <span key={row.label}>
+                        {row.label}
+                        {row.ours != null &&
+                          ` · ${t('Gateway')} ${formatLatencyMs(row.ours)}`}
+                        {` · ${upstreamTiming.sourceLabel} ${formatLatencyMs(row.upstream ?? 0)}`}
+                        {row.gap != null && (
+                          <span
+                            className={timingTextColorClass(
+                              getUpstreamGapColor(row.gap)
+                            )}
+                          >
+                            {` · ${t('Gap (gateway − upstream)')} ${formatLatencyGapMs(row.gap)}`}
+                          </span>
+                        )}
+                      </span>
+                    ))}
                 </span>
               }
             />

@@ -7966,6 +7966,9 @@
     "Zhipu V4": "智谱 V4",
     "Zoom": "缩放",
     "Generate Random ID": "生成随机 ID",
-    "Replace the id of each array item with a random one, keeping its type prefix": "将数组中每一项的 id 替换为随机值，保留类型前缀"
+    "Replace the id of each array item with a random one, keeping its type prefix": "将数组中每一项的 id 替换为随机值，保留类型前缀",
+    "Upstream reported": "上游汇报",
+    "Gap (gateway − upstream)": "差值（网关 − 上游）",
+    "Gateway": "网关"
   }
 }

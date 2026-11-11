@@ -370,7 +370,7 @@ func TestAwsStreamHandlerUsesFinalUpstreamUsage(t *testing.T) {
 		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":423}}`,
-		`{"type":"message_stop"}`,
+		`{"type":"message_stop","amazon-bedrock-invocationMetrics":{"inputTokenCount":2,"outputTokenCount":259,"invocationLatency":9014,"firstByteLatency":7291}}`,
 	}
 	client := newAwsTestClient(awsHTTPClientFunc(func(request *http.Request) (*http.Response, error) {
 		var body bytes.Buffer
@@ -384,8 +384,9 @@ func TestAwsStreamHandlerUsesFinalUpstreamUsage(t *testing.T) {
 	adaptor := &Adaptor{AwsClient: client, AwsReq: newAwsStreamInput()}
 	recorder := httptest.NewRecorder()
 	c := newAwsTestContext(recorder, context.Background())
+	info := newAwsTestRelayInfo()
 
-	handlerErr, usage := awsStreamHandler(c, newAwsTestRelayInfo(), adaptor)
+	handlerErr, usage := awsStreamHandler(c, info, adaptor)
 
 	require.Nil(t, handlerErr)
 	require.NotNil(t, usage)
@@ -394,6 +395,10 @@ func TestAwsStreamHandlerUsesFinalUpstreamUsage(t *testing.T) {
 	assert.Equal(t, 100, usage.BillingUsage.ClaudeUsage.InputTokens)
 	assert.Equal(t, 423, usage.BillingUsage.ClaudeUsage.OutputTokens)
 	assert.Contains(t, recorder.Body.String(), "[DONE]")
+	// Bedrock's own timing from the final event is kept for the consume log.
+	assert.Equal(t, "aws_bedrock", info.UpstreamLatencySource)
+	assert.Equal(t, int64(7291), info.UpstreamFirstByteLatencyMs)
+	assert.Equal(t, int64(9014), info.UpstreamInvocationLatencyMs)
 }
 
 func TestAwsStreamHandlerStopsAtClientCancellation(t *testing.T) {
