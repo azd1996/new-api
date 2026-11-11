@@ -611,7 +611,8 @@ export function transformChannelToFormDefaults(
           ? parsed.proxy_routing_mode
           : undefined
       const proxyRoutingMode =
-        parsedRoutingMode ?? (parsed.proxy_ttft_routing_enabled === true ? 'ttft' : 'priority')
+        parsedRoutingMode ??
+        (parsed.proxy_ttft_routing_enabled === true ? 'ttft' : 'priority')
       extraSettings = {
         task_plugin_key: parsed.task_plugin_key || '',
         task_extend_plugin_keys: readTaskExtendPluginKeys(channel.type, parsed),
@@ -818,11 +819,12 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   if (proxyAliases.length > 0) {
     settingObj.proxy_aliases = proxyAliases
   }
-  if (formData.proxy_ttft_routing_enabled) {
+  const proxyRoutingMode = formData.proxy_routing_mode ?? 'priority'
+  if (proxyRoutingMode === 'ttft') {
+    settingObj.proxy_routing_mode = proxyRoutingMode
     settingObj.proxy_ttft_routing_enabled = true
-  }
-  if (formData.proxy_routing_mode && formData.proxy_routing_mode !== 'priority') {
-    settingObj.proxy_routing_mode = formData.proxy_routing_mode
+  } else if (proxyRoutingMode === 'equal') {
+    settingObj.proxy_routing_mode = proxyRoutingMode
   }
 
   if (formData.retry_override && formData.retry_override.trim() !== '') {

@@ -59,6 +59,48 @@ function buildChannel(setting: Record<string, unknown>) {
   })
 }
 
+test('the legacy TTFT switch round-trips as TTFT routing and clears when priority is selected', () => {
+  const legacyForm = transformChannelToFormDefaults(
+    buildChannel({ proxy_ttft_routing_enabled: true })
+  )
+  expect(legacyForm.proxy_routing_mode).toBe('ttft')
+
+  const prioritySetting = JSON.parse(
+    transformFormDataToUpdatePayload(
+      {
+        ...legacyForm,
+        proxy_routing_mode: 'priority',
+        proxy_ttft_routing_enabled: false,
+      },
+      7
+    ).setting ?? '{}'
+  )
+  expect(prioritySetting).not.toHaveProperty('proxy_routing_mode')
+  expect(prioritySetting).not.toHaveProperty('proxy_ttft_routing_enabled')
+  expect(
+    transformChannelToFormDefaults(buildChannel(prioritySetting))
+      .proxy_routing_mode
+  ).toBe('priority')
+})
+
+test('equal routing mode persists without retaining the legacy TTFT switch', () => {
+  const form = transformChannelToFormDefaults(
+    buildChannel({ proxy_ttft_routing_enabled: true })
+  )
+  const setting = JSON.parse(
+    transformFormDataToUpdatePayload(
+      { ...form, proxy_routing_mode: 'equal' },
+      7
+    ).setting ?? '{}'
+  )
+
+  expect(setting.proxy_routing_mode).toBe('equal')
+  expect(setting).not.toHaveProperty('proxy_ttft_routing_enabled')
+  expect(
+    transformChannelToFormDefaults(buildChannel(setting)).proxy_routing_mode
+  ).toBe('equal')
+})
+
 test('editing a channel keeps the custom setting fields it was loaded with', () => {
   const form = transformChannelToFormDefaults(buildChannel(storedSetting))
   const payload = transformFormDataToUpdatePayload(form, 7)

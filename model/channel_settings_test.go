@@ -50,6 +50,33 @@ func TestChannelValidateSettingsRejectsInvalidHTTPTransport(t *testing.T) {
 	}
 }
 
+func TestChannelValidateSettingsNormalizesProxyRoutingMode(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        string
+		ttftEnabled bool
+		wantTTFT    bool
+	}{
+		{name: "priority clears legacy TTFT switch", mode: "priority", ttftEnabled: true},
+		{name: "TTFT enables legacy switch", mode: "ttft", wantTTFT: true},
+		{name: "equal clears legacy TTFT switch", mode: "equal", ttftEnabled: true},
+		{name: "empty mode preserves legacy switch", ttftEnabled: true, wantTTFT: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			channel := &Channel{}
+			channel.SetSetting(dto.ChannelSettings{
+				ProxyRoutingMode:        tt.mode,
+				ProxyTtftRoutingEnabled: tt.ttftEnabled,
+			})
+
+			require.NoError(t, channel.ValidateSettings())
+			assert.Equal(t, tt.wantTTFT, channel.GetSetting().ProxyTtftRoutingEnabled)
+		})
+	}
+}
+
 func TestAdvancedCustomChannelRequiresModelListRouteOnlyWhenUpdateChecksEnabled(t *testing.T) {
 	inferenceRoute := dto.AdvancedCustomRoute{
 		IncomingPath: "/v1/chat/completions",
