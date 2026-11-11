@@ -95,7 +95,16 @@ type RelayInfo struct {
 	TokenUnlimited    bool
 	StartTime         time.Time
 	FirstResponseTime time.Time
-	isFirstResponse   bool
+	// UpstreamFirstByteLatencyMs / UpstreamInvocationLatencyMs are the timings
+	// the upstream itself reports for this call (AWS Bedrock sends them in the
+	// final stream event as amazon-bedrock-invocationMetrics). 0 = not reported.
+	// Comparing them with our own FRT/latency separates upstream slowness from
+	// time lost between the gateway and the upstream.
+	// UpstreamLatencySource names who reported them (e.g. "aws_bedrock").
+	UpstreamFirstByteLatencyMs  int64
+	UpstreamInvocationLatencyMs int64
+	UpstreamLatencySource       string
+	isFirstResponse             bool
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool

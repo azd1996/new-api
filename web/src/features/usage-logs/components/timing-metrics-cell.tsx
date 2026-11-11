@@ -33,7 +33,14 @@ import {
 import { formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { getFirstResponseTimeColor, getResponseTimeColor } from '../lib/format'
+import {
+  formatLatencyGapMs,
+  formatLatencyMs,
+  getFirstResponseTimeColor,
+  getResponseTimeColor,
+  getUpstreamGapColor,
+  type UpstreamTimingComparison,
+} from '../lib/format'
 import type { LogOtherData } from '../types'
 
 /**
@@ -64,6 +71,58 @@ interface TimingMetricsCellProps {
    */
   indicator?: 'bar' | 'dot'
   compact?: boolean
+  /**
+   * Upstream-reported timing (admin only). When present, each line also shows
+   * the upstream value and the gateway − upstream gap.
+   */
+  upstream?: UpstreamTimingComparison | null
+}
+
+interface UpstreamTimingSuffixProps {
+  sourceLabel: string
+  upstreamMs: number | null
+  gapMs: number | null
+}
+
+/** "AWS 7.3s +0.3s" after a gateway-observed value; gap colored by size. */
+function UpstreamTimingSuffix(props: UpstreamTimingSuffixProps) {
+  const { t } = useTranslation()
+  if (props.upstreamMs == null) return null
+  const gapVariant: StatusVariant =
+    props.gapMs == null ? 'neutral' : getUpstreamGapColor(props.gapMs)
+  const gapLabel = props.gapMs == null ? null : formatLatencyGapMs(props.gapMs)
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span className='text-muted-foreground/70 inline-flex cursor-help items-baseline gap-1 tabular-nums'>
+              <span>
+                {props.sourceLabel} {formatLatencyMs(props.upstreamMs)}
+              </span>
+              {gapLabel && (
+                <span className={textColorMap[gapVariant]}>{gapLabel}</span>
+              )}
+            </span>
+          }
+        />
+        <TooltipContent>
+          <div className='space-y-0.5 text-xs'>
+            <p>
+              {t('Upstream reported')} ({props.sourceLabel}):{' '}
+              {formatLatencyMs(props.upstreamMs)}
+            </p>
+            {gapLabel && (
+              <p>
+                {t('Gap (gateway − upstream)')}: {gapLabel}
+              </p>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
 }
 
 export function TimingMetricsCell(props: TimingMetricsCellProps) {
@@ -80,9 +139,17 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
     props.useTimeSec,
     props.completionTokens
   )
-  const firstTokenLabel =
+  let firstTokenLabel =
     firstTokenSeconds == null ? t('N/A') : formatUseTime(firstTokenSeconds)
-  const totalTimeLabel = formatUseTime(props.useTimeSec)
+  let totalTimeLabel = formatUseTime(props.useTimeSec)
+  // When comparing against upstream-reported timing, show our own values from
+  // the same precise source and precision as the upstream value and the gap.
+  if (props.upstream?.ourFirstTokenMs != null) {
+    firstTokenLabel = formatLatencyMs(props.upstream.ourFirstTokenMs)
+  }
+  if (props.upstream?.ourTotalMs != null) {
+    totalTimeLabel = formatLatencyMs(props.upstream.ourTotalMs)
+  }
 
   const labels = (
     <div
@@ -109,6 +176,13 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
           <span className={cn('tabular-nums', textColorMap[firstTokenVariant])}>
             {firstTokenLabel}
           </span>
+          {props.upstream && (
+            <UpstreamTimingSuffix
+              sourceLabel={props.upstream.sourceLabel}
+              upstreamMs={props.upstream.upstreamFirstTokenMs}
+              gapMs={props.upstream.firstTokenGapMs}
+            />
+          )}
         </div>
       )}
       <div className='flex items-baseline gap-1.5'>
@@ -125,6 +199,13 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
         <span className={cn('tabular-nums', textColorMap[totalTimeVariant])}>
           {totalTimeLabel}
         </span>
+        {props.upstream && (
+          <UpstreamTimingSuffix
+            sourceLabel={props.upstream.sourceLabel}
+            upstreamMs={props.upstream.upstreamTotalMs}
+            gapMs={props.upstream.totalGapMs}
+          />
+        )}
       </div>
     </div>
   )
