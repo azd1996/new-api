@@ -378,7 +378,7 @@
             "logic": "AND"
         },
         {
-            "description": "claude-opus-5: thinking.display仅非法值(非summarized/omitted)兜底改为summarized，合法值保留，避免Bedrock 400",
+            "description": "claude-: thinking.display仅非法值(非summarized/omitted/updates)兜底改为summarized，合法值保留，避免Bedrock 400；updates的按模型放行见下一条",
             "mode": "set",
             "path": "thinking.display",
             "value": "summarized",
@@ -398,6 +398,61 @@
                     "path": "thinking.display",
                     "mode": "full",
                     "value": "omitted",
+                    "invert": true
+                },
+                {
+                    "path": "thinking.display",
+                    "mode": "full",
+                    "value": "updates",
+                    "invert": true
+                }
+            ],
+            "logic": "AND"
+        },
+        {
+            "description": "claude-: thinking.display=updates仅对会产出工具间进度更新的模型放行(Fable 5/5.1/5.2、Mythos 5.1/5.2、Opus 5.5、Sonnet 5.5，依据Anthropic thinking文档进度更新模型清单)；其余模型(Haiku 5.5、Opus 5、Sonnet 5、Mythos 5、Opus 4.x等)发updates不会被产出，归一为summarized保留可见推理。prefix claude-fable-5覆盖fable-5/5-1/5-2；Mythos 5(无后缀)不在清单故用-5-1/-5-2精确匹配；须在display兜底规则之后、between_tools删display之前执行",
+            "mode": "set",
+            "path": "thinking.display",
+            "value": "summarized",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "thinking.display",
+                    "mode": "full",
+                    "value": "updates"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-fable-5",
+                    "invert": true
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-mythos-5-1",
+                    "invert": true
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-mythos-5-2",
+                    "invert": true
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5-5",
+                    "invert": true
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-sonnet-5-5",
                     "invert": true
                 }
             ],
@@ -438,14 +493,9 @@
                 "prompt-caching-scope-2026-01-05": null,
                 "mid-conversation-system-2026-04-07": null,
                 "per-turn-control-2026-07-01": null,
-                "mid-conversation-tool-changes-2026-07-01": null,
-                "inline-tools-2026-09-15": null,
                 "advisor-tool-2026-03-01": null,
                 "afk-mode-2026-01-31": null,
-                "fallback-credit-2026-06-01": null,
                 "thinking-binding-controls-2026-08-01": null,
-                "thinking-display-updates-2026-08-18": null,
-                "dangerous-tool-use-2026-09-03": null,
                 "advanced-tool-use-2025-11-20": null,
                 "structured-outputs-2025-12-15": null,
                 "structured-outputs-2025-11-13": null
@@ -656,9 +706,47 @@
             "logic": "AND"
         },
         {
-            "description": "删除messages里的system角色",
+            "description": "删除messages里的system角色；仅对不支持中段system的老模型(Opus 4.8之前)生效，避免其400；Opus 4.8与Claude 5系(prefix: opus-4-8/opus-5/sonnet-5/fable-5/mythos-5)放行，使per-turn effort与mid-conversation tool changes可用",
             "mode": "prune_objects",
             "path": "messages",
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-"
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-4-8",
+                    "invert": true
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-opus-5",
+                    "invert": true
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-sonnet-5",
+                    "invert": true
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-fable-5",
+                    "invert": true
+                },
+                {
+                    "path": "model",
+                    "mode": "prefix",
+                    "value": "claude-mythos-5",
+                    "invert": true
+                }
+            ],
+            "logic": "AND",
             "value": {
                 "where": {
                     "role": "system"
