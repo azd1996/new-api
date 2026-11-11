@@ -304,7 +304,8 @@ export function ChannelsTable() {
         )
       }
     },
-    placeholderData: (previousData) => previousData,
+    placeholderData: (previousData) =>
+      shouldSearch ? undefined : previousData,
   })
 
   // Apply tag aggregation if tag mode is enabled

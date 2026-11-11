@@ -319,6 +319,15 @@ func resolveBillingModelName(origin string) string {
 		candidates = append(candidates, deepSeekBase)
 	}
 	candidates = append(candidates, base)
+	// A path-prefixed model (e.g. "prefix/model-a") falls back to the bare model
+	// after the last '/'. This is the lowest-priority candidate so an explicit
+	// price on the full name always wins; it only lets an otherwise-unpriced
+	// prefixed model bill at the bare model's price.
+	if slash := strings.LastIndex(base, "/"); slash >= 0 {
+		if stripped := base[slash+1:]; stripped != "" {
+			candidates = append(candidates, stripped)
+		}
+	}
 
 	seen := make(map[string]struct{}, len(candidates))
 	matched := ""

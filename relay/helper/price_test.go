@@ -417,6 +417,64 @@ func TestModelPriceHelperHonorsCustomClaudeThinkingAlias(t *testing.T) {
 	assert.Equal(t, 3.0, priceData.ModelRatio)
 }
 
+// A path-prefixed model with no price of its own falls back to the bare model
+// after the last '/'. An explicit price on the full name still wins.
+func TestModelPriceHelperFallsBackToPrefixStrippedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	require.NoError(t, i18n.Init())
+
+	savedRatios := ratio_setting.ModelRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(savedRatios))
+	})
+	oldSelfUse := operation_setting.SelfUseModeEnabled
+	operation_setting.SelfUseModeEnabled = false
+	t.Cleanup(func() { operation_setting.SelfUseModeEnabled = oldSelfUse })
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Set("group", "default")
+
+	setRatios := func(t *testing.T, entries map[string]float64) {
+		t.Helper()
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(savedRatios))
+		ratios := ratio_setting.GetModelRatioCopy()
+		for name, ratio := range entries {
+			ratios[name] = ratio
+		}
+		ratioJSON, err := common.Marshal(ratios)
+		require.NoError(t, err)
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(ratioJSON)))
+	}
+
+	t.Run("unpriced prefix falls back to bare model", func(t *testing.T) {
+		setRatios(t, map[string]float64{"my-model": 2.0})
+		info := &relaycommon.RelayInfo{OriginModelName: "acme/my-model", UserGroup: "default", UsingGroup: "default"}
+		priceData, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
+		require.NoError(t, err)
+		assert.Equal(t, "my-model", info.BillingModelName)
+		assert.Equal(t, "my-model", info.GetBillingModelName())
+		assert.Equal(t, 2.0, priceData.ModelRatio)
+	})
+
+	t.Run("configured prefix wins over bare model", func(t *testing.T) {
+		setRatios(t, map[string]float64{"my-model": 2.0, "acme/my-model": 5.0})
+		info := &relaycommon.RelayInfo{OriginModelName: "acme/my-model", UserGroup: "default", UsingGroup: "default"}
+		priceData, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
+		require.NoError(t, err)
+		assert.Empty(t, info.BillingModelName)
+		assert.Equal(t, "acme/my-model", info.GetBillingModelName())
+		assert.Equal(t, 5.0, priceData.ModelRatio)
+	})
+
+	t.Run("neither configured still errors", func(t *testing.T) {
+		setRatios(t, nil)
+		info := &relaycommon.RelayInfo{OriginModelName: "acme/my-model", UserGroup: "default", UsingGroup: "default"}
+		_, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
+		require.Error(t, err)
+	})
+}
+
 func TestModelPriceHelperCanonicalBillingLadder(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

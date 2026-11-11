@@ -97,6 +97,8 @@ async function renderChannelsPage(
   searchGate: () => Promise<void>,
   options?: {
     initialEntry: string
+    initialItems?: Channel[]
+    initialTotal?: number
     items: Channel[]
     total: number
   }
@@ -120,8 +122,10 @@ async function renderChannelsPage(
         data: {
           success: true,
           data: {
-            items: [{ ...channel('staging'), id: 9, tag: 'shared' }],
-            total: 1,
+            items: options?.initialItems ?? [
+              { ...channel('staging'), id: 9, tag: 'shared' },
+            ],
+            total: options?.initialTotal ?? 1,
             type_counts: {},
           },
         },
@@ -249,4 +253,57 @@ it('searches individual matches in tag mode and restores tag listing when the ke
     '1 channels'
   )
   expect(screen.getByRole('button', { name: 'Go to next page' })).toBeDisabled()
+})
+
+it('does not show the previous tag aggregate while a tag-mode search is pending', async () => {
+  localStorage.setItem('enable-tag-mode', 'true')
+  localStorage.setItem('channels:view-mode', 'table')
+  const tagChannels = Array.from({ length: 54 }, (_, index) => ({
+    ...channel(`tag-channel-${index + 1}`),
+    id: index + 1,
+    tag: 'shared',
+  }))
+  let gate = Promise.resolve()
+  const get = await renderChannelsPage(() => gate, {
+    initialEntry: '/channels/?pageSize=10',
+    initialItems: tagChannels,
+    initialTotal: 54,
+    items: [
+      { ...channel('matching-channel-1'), id: 101 },
+      { ...channel('matching-channel-2'), id: 102 },
+    ],
+    total: 2,
+  })
+
+  expect(
+    within(screen.getByRole('row', { name: /Tag：shared/ })).getByText(
+      '54 channels'
+    )
+  ).toBeVisible()
+
+  let release!: () => void
+  gate = new Promise((resolve) => {
+    release = resolve
+  })
+  await userEvent
+    .setup()
+    .type(
+      screen.getByPlaceholderText('Filter by name, ID, or key...'),
+      'matching'
+    )
+
+  await waitFor(() =>
+    expect(get).toHaveBeenCalledWith('/api/channel/search', {
+      params: expect.objectContaining({
+        keyword: 'matching',
+        tag_mode: false,
+      }),
+    })
+  )
+  expect(screen.queryByText('54 channels')).not.toBeInTheDocument()
+
+  release()
+  expect(await screen.findByText('matching-channel-1')).toBeVisible()
+  expect(screen.getByText('matching-channel-2')).toBeVisible()
+  expect(screen.queryByText('54 channels')).not.toBeInTheDocument()
 })
