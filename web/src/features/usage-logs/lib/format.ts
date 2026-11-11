@@ -236,6 +236,90 @@ export function getResponseTimeColor(
 }
 
 /**
+ * Gateway-observed timing next to the timing the upstream itself reported
+ * (AWS Bedrock `invocationMetrics`). A gap is gateway − upstream in ms: the
+ * time spent outside the upstream model (network, proxy, gateway). A large
+ * first-token gap with a normal upstream first byte points at our side.
+ */
+export interface UpstreamTimingComparison {
+  sourceLabel: string
+  // Gateway-observed values the gaps are computed from. The total comes from
+  // the precise `lat` (ms), not the whole-second `use_time`, so the shown
+  // duration, the upstream value and the gap always add up.
+  ourFirstTokenMs: number | null
+  ourTotalMs: number | null
+  upstreamFirstTokenMs: number | null
+  upstreamTotalMs: number | null
+  firstTokenGapMs: number | null
+  totalGapMs: number | null
+}
+
+const UPSTREAM_TIMING_SOURCE_LABELS: Record<string, string> = {
+  aws_bedrock: 'AWS',
+}
+
+// All compared values are rounded to 10 ms first so that, at the 2-decimal
+// display precision, "ours − upstream" equals the shown gap exactly.
+function positiveMsOrNull(value: number | undefined): number | null {
+  return isPositiveFiniteNumber(value) ? Math.round(value / 10) * 10 : null
+}
+
+function gapOrNull(ours: number | null, upstream: number | null) {
+  return ours != null && upstream != null ? ours - upstream : null
+}
+
+export function getUpstreamTimingComparison(
+  other: LogOtherData | null | undefined,
+  useTimeSec: number
+): UpstreamTimingComparison | null {
+  const upstream = other?.admin_info?.upstream_latency
+  if (!upstream) return null
+  const upstreamFirstTokenMs = positiveMsOrNull(upstream.frt_ms)
+  const upstreamTotalMs = positiveMsOrNull(upstream.total_ms)
+  if (upstreamFirstTokenMs == null && upstreamTotalMs == null) return null
+
+  const ourFirstTokenMs = positiveMsOrNull(other?.frt)
+  let ourTotalMs = positiveMsOrNull(other?.lat)
+  if (ourTotalMs == null && useTimeSec > 0) {
+    ourTotalMs = useTimeSec * 1000
+  }
+
+  const source = upstream.source ?? ''
+  return {
+    sourceLabel: UPSTREAM_TIMING_SOURCE_LABELS[source] ?? source,
+    ourFirstTokenMs,
+    ourTotalMs,
+    upstreamFirstTokenMs,
+    upstreamTotalMs,
+    firstTokenGapMs: gapOrNull(ourFirstTokenMs, upstreamFirstTokenMs),
+    totalGapMs: gapOrNull(ourTotalMs, upstreamTotalMs),
+  }
+}
+
+/** Seconds with 2 decimals (e.g. "1.30s"), used wherever latencies are compared. */
+export function formatLatencyMs(ms: number): string {
+  return `${(ms / 1000).toFixed(2)}s`
+}
+
+/** Signed gap, e.g. "+0.15s" / "−0.02s". */
+export function formatLatencyGapMs(ms: number): string {
+  const sign = ms >= 0 ? '+' : '−'
+  return `${sign}${formatLatencyMs(Math.abs(ms))}`
+}
+
+/**
+ * Color for a gateway − upstream gap. Normal network + gateway overhead stays
+ * well under a second; seconds of gap mean time was lost outside the model.
+ */
+export function getUpstreamGapColor(
+  gapMs: number
+): 'success' | 'warning' | 'danger' {
+  if (gapMs < 1000) return 'success'
+  if (gapMs < 3000) return 'warning'
+  return 'danger'
+}
+
+/**
  * Two tokens-per-second readings for a request:
  * - `total`: completion tokens / total duration (includes the first-token
  *   wait). This is what the UI has always shown.

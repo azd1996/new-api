@@ -7968,6 +7968,9 @@
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
     "Generate Random ID": "Generate Random ID",
-    "Replace the id of each array item with a random one, keeping its type prefix": "Replace the id of each array item with a random one, keeping its type prefix"
+    "Replace the id of each array item with a random one, keeping its type prefix": "Replace the id of each array item with a random one, keeping its type prefix",
+    "Upstream reported": "Upstream reported",
+    "Gap (gateway − upstream)": "Gap (gateway − upstream)",
+    "Gateway": "Gateway"
   }
 }

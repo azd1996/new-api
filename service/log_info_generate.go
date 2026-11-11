@@ -85,6 +85,15 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 		if relayInfo.ConversionDiagnosticsTruncated() {
 			other.SetAdmin("conversion_diagnostics_truncated", true)
 		}
+		// Upstream-reported timing, compared with our own frt/lat in the admin
+		// log view to tell upstream slowness from gateway-to-upstream overhead.
+		if relayInfo.UpstreamLatencySource != "" {
+			other.SetAdmin("upstream_latency", map[string]any{
+				"source":   relayInfo.UpstreamLatencySource,
+				"frt_ms":   relayInfo.UpstreamFirstByteLatencyMs,
+				"total_ms": relayInfo.UpstreamInvocationLatencyMs,
+			})
+		}
 	}
 	if common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey) {
 		other.SetAdmin("is_multi_key", true)

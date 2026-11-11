@@ -59,6 +59,7 @@ import {
   formatModelName,
   decodeBillingExprB64,
   getStreamThroughput,
+  getUpstreamTimingComparison,
   getTieredBillingSummary,
   hasAnyCacheTokens,
   parseLogOther,
@@ -880,6 +881,9 @@ export function useCommonLogsColumns(
               completionTokens={log.completion_tokens}
               frtMs={other?.frt}
               isStream={log.is_stream}
+              upstream={
+                isAdmin ? getUpstreamTimingComparison(other, useTime) : null
+              }
             />
           )
         },

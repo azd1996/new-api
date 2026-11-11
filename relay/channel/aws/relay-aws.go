@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
+	"github.com/tidwall/gjson"
 
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -314,6 +315,12 @@ streamLoop:
 				respErr := claude.HandleStreamResponseData(c, info, claudeInfo, string(v.Value.Bytes))
 				if respErr != nil {
 					return respErr, nil
+				}
+				// Bedrock appends its own timing to the final (message_stop) event.
+				if metrics := gjson.GetBytes(v.Value.Bytes, "amazon-bedrock-invocationMetrics"); metrics.Exists() {
+					info.UpstreamFirstByteLatencyMs = metrics.Get("firstByteLatency").Int()
+					info.UpstreamInvocationLatencyMs = metrics.Get("invocationLatency").Int()
+					info.UpstreamLatencySource = "aws_bedrock"
 				}
 			case *bedrockruntimeTypes.UnknownUnionMember:
 				fmt.Println(common.LogText("unknown tag: %v", v.Tag))

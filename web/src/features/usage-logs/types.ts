@@ -173,6 +173,14 @@ export interface LogOtherData {
     }
     // Reject / intercept reason (admin only)
     reject_reason?: string
+    // Timing the upstream itself reported (AWS Bedrock invocationMetrics),
+    // compared with our own frt / lat to tell upstream slowness from time
+    // lost between the gateway and the upstream. Admin only.
+    upstream_latency?: {
+      source?: string
+      frt_ms?: number
+      total_ms?: number
+    }
     task_plugin?: TaskPluginInfo
     // Set when a process shutdown force-cancelled this request.
     process_shutdown?: {
