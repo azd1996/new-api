@@ -1,5 +1,7 @@
 FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS builder
 
+ARG APP_VERSION
+
 WORKDIR /build/web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
@@ -9,9 +11,14 @@ COPY ./VERSION /build/VERSION
 # time (changelog-dialog.tsx imports ../../../../../CHANGELOG.md?raw, which
 # resolves to /build/CHANGELOG.md here).
 COPY ./CHANGELOG.md /build/CHANGELOG.md
-RUN DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat /build/VERSION) bun run build
+RUN printf '%s\n' "${APP_VERSION}" > /build/VERSION \
+    && DISABLE_ESLINT_PLUGIN='true' \
+       VITE_REACT_APP_VERSION="${APP_VERSION}" \
+       bun run build
 
 FROM golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca AS builder2
+ARG APP_VERSION
+
 ENV GO111MODULE=on CGO_ENABLED=0 GOWORK=off
 ENV GOPROXY=https://goproxy.cn,direct
 
@@ -34,7 +41,10 @@ RUN go mod download
 
 COPY . .
 COPY --from=builder /build/web/dist ./web/dist
-RUN go build -pgo="$(go list -m -f '{{.Dir}}' github.com/Calcium-Ion/moejs)/default.pgo" -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
+RUN go build \
+    -pgo="$(go list -m -f '{{.Dir}}' github.com/Calcium-Ion/moejs)/default.pgo" \
+    -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=${APP_VERSION}'" \
+    -o new-api
 
 FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
 
