@@ -1,6 +1,71 @@
 # behind-cdnaigw 标准与非标会话分流方案
 
-状态：代码已实现，相关功能单测和前端全量类型检查已通过。
+状态：基础分流已实现；原始 affinity 匹配冻结与 Claude fallback 前移已完成。非标 fallback 黏滞、组合身份、完整黏滞优先和单向回退尚未实现。以下状态更新于 2026-11-11。
+
+## 当前实现状态与续接任务
+
+本节记录实际代码行为。后文“黏滞优先与分流身份”“黏滞失效与重试”是已确认的目标，不能据此认为功能已经全部完成。
+
+### 已完成的提交与边界
+
+- CR1：`8d459765c`，骨架累计前缀哈希，用户已确认合入。骨架前缀 metadata 注入属于 `docs/cache-prefix-affinity.md` 的独立任务，不与本分流任务混合。
+- CR2：`e02557e5c`，`refactor(claude): share metadata user ID fallback generation`。将原 relay 的 fallback 算法提取到 `common/claude_metadata_user_id.go`，供 middleware 和 relay 共用。
+- CR3：`1585fb5f4`，`fix(routing): prepare Claude fallback after freezing original affinity`。固定原始路由模型、冻结原始 affinity 输入与匹配结果，再预生成 Claude fallback。CR2、CR3 均已本地提交，且在当前 HEAD 历史中；本任务未执行推送或创建远端 PR。
+
+一次请求只计算一次原始 affinity 匹配，未命中及读取错误也复用同一结果。规则匹配读取客户端原始 body、Header、上下文、路径、User-Agent 和规则配置；后续模型映射、参数覆盖、Header 改写和重试不重新分类。分类不依赖亲和缓存命中，也不受绑定总开关或 `SessionMode=off` 影响。
+
+Claude fallback 目前只提前生成到 Gin context 的 `ContextKeyClaudeMetadataUserID`，不替换或关闭原始 body storage。relay 在实际注入阶段复用该候选值，保留客户端已有值，并继续按实际分组及 outbound model 检查禁用规则；透传分支不注入。参数覆盖和 retry override 仍可在后续改写 metadata。
+
+### 当前请求的实际顺序
+
+普通 Claude `/v1/messages` 且 Content-Type 以 `application/json` 开头、需要自动选渠道的请求：
+
+```text
+鉴权、解析原始路由模型
+  → 冻结原始 affinity 输入并匹配一次
+  → 缺少客户端 user_id 时预生成 fallback 候选到 context，原始 body 不变
+  → 检查显式指定渠道，或在首次选择时查询原有 affinity 绑定
+  → 指定渠道和已有绑定仍需通过分流过滤
+  → 无可用绑定时，按实际分组、客户模型前缀开关、分组开关和非标渠道可用性选池
+  → 装载选中渠道配置
+  → relay 转换请求，按实际分组/outbound model 决定是否注入 prepared fallback
+  → 后续参数/retry 改写，发送上游
+  → 成功且存在 affinity 绑定上下文时，记录或刷新绑定
+```
+
+其他入口在首次调用 affinity matcher 时惰性建立原始匹配快照，不能将上述 Claude 提前准备步骤描述为全部协议入口都已接入。
+
+分流仅对实际组名以 `behind-cdnaigw_` 开头的候选组生效；`auto` 按各实际候选组判断。客户配置按模型前缀匹配、最长前缀优先，未命中默认关闭；但当前代码只对成功解码 trace tag 的客户执行该关闭检查，未解码客户不会进入此显式关闭分支。
+
+在进入分流判断时，原始规则提取不到有效 key 即为非标。分组关闭、客户规则关闭或没有支持当前模型的已启用非标渠道，会使请求走标准池；这只改变候选范围，不将原始非标请求重新分类为标准。
+
+### 尚未完成的三项核心目标
+
+| 目标 | 当前实际行为 | 后续工作 |
+| --- | --- | --- |
+| `key + is_nonstandard` 隔离标准/非标黏滞，非标使用 fallback key | 原有 affinity 缓存没有类别维度；原始无 key 时直接退出 affinity 查找，预生成 fallback 尚未接入绑定查询及回写 | 将稳定 fallback 接入网关 affinity，统一查询、成功回写与刷新身份，覆盖同 key 两类隔离 |
+| 有效黏滞优先，无绑定时才按类别选池 | 已有绑定仍受 `sessionRoutingFilters` 校验，可能因类别过滤被否决、清除并重新绑定 | 区分绑定有效性与新请求池选择，明确 strict、开关变化和渠道禁用边界；使非标回退标准后的成功绑定可跨请求复用 |
+| 请求内只允许非标池 → 标准池单向回退 | 重试先尝试标准池，但标准池无候选时，`getSessionRoutedChannel` 仍会用 `firstFilters` 再尝试非标池 | 增加请求级回退阶段，进入标准阶段后禁止返回非标；继续遵守既有重试预算与策略 |
+
+因此，fallback 提前生成并不等于非标已经具备网关黏滞；已有测试通过也不代表上述三个目标已经实现。当前不能承诺“先命中有效黏滞就一定跳过类别过滤”，也不能承诺“非标失败后绝不回到非标池”。
+
+### 下一会话的实现入口与验证
+
+优先阅读：
+
+- `service/channel_affinity.go`：原始匹配快照、绑定身份、查询和成功回写。
+- `service/channel_select.go`：指定渠道、已有绑定校验与普通候选选择。
+- `service/session_routing.go`：实际组过滤、绑定类别冲突与重试池回退。
+- `middleware/distributor.go`、`relay/claude_handler.go`：fallback 提前准备及最终消费。
+
+后续需要补充的行为验证：
+
+- 非标连续请求通过相同 fallback 复用绑定；非标回退标准成功后，后续请求仍优先复用该绑定。
+- 标准与非标使用相同 key 时互不覆盖；绑定过期、渠道删除/禁用、strict、客户或分组关闭的行为符合确认边界。
+- `auto` 按实际组选择；多轮重试只单向进入标准池；禁止重试时失败即返回，不额外尝试。
+- 原始分类不受 fallback、模型映射及重试改写影响；Responses WebSocket 后续 turn 类别与锁定物理渠道冲突时要求重连。
+
+CR2 拆分后曾运行 `go test ./common ./relay`，通过。CR3 提交前曾运行 `gofmt -w relay/claude_handler.go service/channel_affinity.go`、`git diff --check` 和 `go test ./common ./middleware ./service ./relay`，全部通过。这些是对应提交时的验证记录，本次文档更新不重跑 Go 测试，也不代表真实数据库迁移或真实流量验证。
 
 ## 目标与结构
 
@@ -75,7 +140,9 @@ API Key：behind-cdnaigw_部门A
 - 同渠道 retry override、不可重试错误、请求已无法重放等限制继续遵守现有语义；重试次数大于 0 本身不保证一定重试或一定切到标准渠道。
 - 请求分类始终保持非标；重试进入标准渠道只改变本次尝试的候选范围，不把请求重新归为标准。
 
-## 建议实现
+## 实现设计与待完成目标
+
+本节保留共享匹配和选渠道设计；实际完成情况以文首状态为准。其中完整黏滞优先、组合身份和单向回退仍待实现。
 
 ### 共享亲和规则匹配
 
@@ -86,6 +153,8 @@ API Key：behind-cdnaigw_部门A
 分类读取已配置规则，不受亲和绑定总开关和 `SessionMode=off` 影响。关闭粘性不改变请求类别，原有亲和绑定总开关仍控制绑定相关副作用。
 
 ### 选渠道时机
+
+以下为基础分流流程；完整黏滞优先的目标顺序见“黏滞优先与分流身份”，当前实际顺序见文首。
 
 ```text
 鉴权、读取原始请求模型
@@ -232,7 +301,7 @@ key
 - 网关补全或请求改写不改变分类；读取失败不伪装成分类结果。
 - 按用户确认，本次只进行相关功能单测和必要检查，不扩展真实三数据库验证。
 
-实际结果：渠道复制、会话分流、亲和、固定渠道及 relay WebSocket 相关测试通过。补充覆盖了分流关闭或无可用非标渠道时保留原重试优先级，以及 WebSocket 后续 turn 类别变化时要求重连。前端复制和分流设置 14 项测试通过，涉及文件 lint 通过。按用户追加要求，已修复测试数据缺字段、对象设置读取和 TTFT 表单输入/输出类型问题，全量类型检查通过；新增对象配置读取及损坏配置回退回归测试通过。controller WebSocket 测试夹具补齐 i18n 初始化后，request runner 相关测试通过。
+基础分流阶段的历史验证结果：渠道复制、会话分流、亲和、固定渠道及 relay WebSocket 相关测试通过。补充覆盖了分流关闭或无可用非标渠道时保留原重试优先级，以及 WebSocket 后续 turn 类别变化时要求重连。前端复制和分流设置 14 项测试通过，涉及文件 lint 通过。按用户追加要求，已修复测试数据缺字段、对象设置读取和 TTFT 表单输入/输出类型问题，全量类型检查通过；新增对象配置读取及损坏配置回退回归测试通过。controller WebSocket 测试夹具补齐 i18n 初始化后，request runner 相关测试通过。这些结果不覆盖文首列出的未完成目标。
 
 ## 当前代码参考
 
