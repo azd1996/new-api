@@ -5833,6 +5833,7 @@
     "Retry override rules as a JSON array. Leave empty to disable.": "Retry override rules as a JSON array. Leave empty to disable.",
     "Retry Override Templates": "Retry Override Templates",
     "Retry rate": "Retry rate",
+    "Retry Rule": "Retry Rule",
     "Retry Settings": "Retry Settings",
     "Retry Suggestion": "Retry Suggestion",
     "Retry template content must be a JSON array": "Retry template content must be a JSON array",

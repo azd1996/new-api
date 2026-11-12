@@ -76,6 +76,9 @@ export interface CommonLogFilters extends CommonFilters {
   sessionIdSourceOp?: LogFilterOperator
   // Error logs only: 'true' / 'false'; undefined means no filter.
   retryTriggered?: 'true' | 'false'
+  // Substring of the matched retry-override rule description (admin only).
+  retryRule?: string
+  retryRuleOp?: LogFilterOperator
   statusCode?: string
   errorKeyword?: string
   // Detailed-error-stats drill-down (module K). errorSignatureHash is the
@@ -539,6 +542,8 @@ export interface GetLogsParams {
   session_id_source?: string
   session_id_source_op?: LogFilterOperator
   retry_triggered?: 'true' | 'false'
+  retry_rule?: string
+  retry_rule_op?: LogFilterOperator
   request_key_rename?: 'true'
   status_code?: number
   error_keyword?: string

@@ -183,17 +183,26 @@ func otherFieldAbsentCondition(column, key string) (string, string) {
 // with a time range or other narrowing filter. An empty filter leaves tx
 // unchanged.
 func applyLogOtherFieldFilter(tx *gorm.DB, column, key string, filter LogFieldFilter) *gorm.DB {
+	return applyLogOtherConditionFilter(tx, filter, func(value string) (string, string) {
+		return otherFieldLikeCondition(column, key, value)
+	})
+}
+
+// applyLogOtherConditionFilter combines one LIKE condition per filter value
+// (built by condition) with OR for include and AND for exclude, skipping empty
+// values. An empty filter leaves tx unchanged.
+func applyLogOtherConditionFilter(tx *gorm.DB, filter LogFieldFilter, condition func(value string) (string, string)) *gorm.DB {
 	conditions := make([]string, 0, len(filter.Values))
 	args := make([]any, 0, len(filter.Values))
 	for _, value := range filter.Values {
 		if value == "" {
 			continue
 		}
-		condition, pattern := otherFieldLikeCondition(column, key, value)
+		cond, pattern := condition(value)
 		if filter.Exclude {
-			condition = strings.Replace(condition, " LIKE ", " NOT LIKE ", 1)
+			cond = strings.Replace(cond, " LIKE ", " NOT LIKE ", 1)
 		}
-		conditions = append(conditions, condition)
+		conditions = append(conditions, cond)
 		args = append(args, pattern)
 	}
 	if len(conditions) == 0 {
@@ -204,6 +213,28 @@ func applyLogOtherFieldFilter(tx *gorm.DB, column, key string, filter LogFieldFi
 		joiner = " AND "
 	}
 	return tx.Where("("+strings.Join(conditions, joiner)+")", args...)
+}
+
+// retryRuleDescriptionCondition matches logs whose retry-override audit detail
+// (Other.admin_info.retry_override.rule_descriptions) holds a matched rule
+// description containing keyword. The match is anchored right after the
+// `"rule_descriptions":["` opening so the same text in another field (for
+// example error_message) does not match. The keyword is JSON-encoded first
+// because Other stores descriptions in encoded form (quotes, backslashes and
+// HTML characters are escaped there).
+func retryRuleDescriptionCondition(column, keyword string) (string, string) {
+	encoded, err := common.Marshal(keyword)
+	if err != nil || len(encoded) < 2 {
+		encoded = []byte(`""`)
+	}
+	inner := string(encoded[1 : len(encoded)-1])
+	prefix := `"rule_descriptions":["`
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+		return column + " LIKE ?", "%" + esc.Replace(prefix) + "%" + esc.Replace(inner) + "%"
+	}
+	esc := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`)
+	return column + " LIKE ? ESCAPE '!'", "%" + esc.Replace(prefix) + "%" + esc.Replace(inner) + "%"
 }
 
 // otherFieldPresentCondition is the counterpart of otherFieldAbsentCondition:
@@ -902,7 +933,13 @@ type LogFilter struct {
 	// or "metadata.user_id"; see relay/session_id.go for every value the relay
 	// writes. Matches the unindexed Other blob, so pair it with a time range.
 	// Admin-only.
-	SessionIdSource     LogFieldFilter
+	SessionIdSource LogFieldFilter
+	// RetryRule restricts to logs whose matched retry-override rule description
+	// contains the given keyword (substring match; Exclude negates it). Rule descriptions
+	// are recorded on both the retry-override audit log and the error log of the
+	// attempt that triggered it. Matches the unindexed Other blob, so pair it
+	// with a time range. Admin-only.
+	RetryRule           LogFieldFilter
 	DownstreamRequestId string
 	CustomerId          string
 	// CustomerName / CustomerId match either the dedicated indexed column or the
@@ -959,6 +996,9 @@ func (f LogFilter) apply(tx *gorm.DB) (*gorm.DB, error) {
 		tx = tx.Where("logs.session_id = ?", f.SessionId)
 	}
 	tx = applyLogOtherFieldFilter(tx, "logs.other", "session_id_source", f.SessionIdSource)
+	tx = applyLogOtherConditionFilter(tx, f.RetryRule, func(keyword string) (string, string) {
+		return retryRuleDescriptionCondition("logs.other", keyword)
+	})
 	if f.DownstreamRequestId != "" {
 		tx = tx.Where("logs.downstream_request_id = ?", f.DownstreamRequestId)
 	}

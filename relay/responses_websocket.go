@@ -611,7 +611,7 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 	}
 	common.SetContextKey(c, appconstant.ContextKeyChannelSetting, channel.GetSetting())
 	common.SetContextKey(c, appconstant.ContextKeyChannelOtherSetting, channel.GetOtherSettings())
-	common.SetContextKey(c, appconstant.ContextKeyChannelParamOverride, channel.GetParamOverride())
+	common.SetContextKey(c, appconstant.ContextKeyChannelParamOverride, service.ResolveChannelParamOverride(c, channel))
 	common.SetContextKey(c, appconstant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, appconstant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 	policy := service.RequestPolicy(c)

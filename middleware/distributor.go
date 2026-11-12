@@ -658,14 +658,8 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		}
 	}
 	logTaskPluginChannelDecision(c, channel, modelName, "channel_selected", "")
-	paramOverride := channel.GetParamOverride()
+	paramOverride := service.ResolveChannelParamOverride(c, channel)
 	headerOverride := channel.GetHeaderOverride()
-	if refs := channel.GetSetting().ParamOverrideTemplateRefs; len(refs) > 0 {
-		paramOverride = service.MergeParamOverrideTemplates(refs, paramOverride)
-	}
-	if mergedParam, applied := service.ApplyChannelAffinityOverrideTemplate(c, paramOverride); applied {
-		paramOverride = mergedParam
-	}
 	common.SetContextKey(c, constant.ContextKeyChannelParamOverride, paramOverride)
 	common.SetContextKey(c, constant.ContextKeyChannelHeaderOverride, headerOverride)
 	if nil != channel.OpenAIOrganization && *channel.OpenAIOrganization != "" {
