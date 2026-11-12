@@ -284,3 +284,19 @@ func TestAcquireLogExportLock(t *testing.T) {
 		})
 	}
 }
+
+// The retry_rule keyword is admin-only and is kept whole: a description may
+// contain commas, which must not split it into several keywords.
+func TestLogFilterRetryRuleQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	parse := func(query string, admin bool) model.LogFieldFilter {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/log/?"+query, nil)
+		return logFilterFromQuery(c, admin).RetryRule
+	}
+
+	assert.Equal(t, model.LogFieldFilter{Values: []string{"case2 a,b"}}, parse("retry_rule=case2+a%2Cb", true))
+	assert.Equal(t, model.LogFieldFilter{Values: []string{"case2"}, Exclude: true}, parse("retry_rule=case2&retry_rule_op=exclude", true))
+	assert.Empty(t, parse("retry_rule=%20%20", true).Values, "blank keyword is no filter")
+	assert.Empty(t, parse("retry_rule=case2", false).Values, "non-admin cannot filter by retry rule")
+}

@@ -5833,6 +5833,7 @@
     "Retry override rules as a JSON array. Leave empty to disable.": "以 JSON 数组形式填写重试覆盖规则，留空则禁用。",
     "Retry Override Templates": "重试覆盖模板",
     "Retry rate": "重试率",
+    "Retry Rule": "重试规则",
     "Retry Settings": "重试设置",
     "Retry Suggestion": "重试建议",
     "Retry template content must be a JSON array": "重试模板内容必须是 JSON 数组",

@@ -28,6 +28,8 @@ const adminSearch = {
   nodeOp: 'exclude',
   sessionIdSource: 'prompt_cache_key,metadata.user_id',
   sessionIdSourceOp: 'exclude',
+  retryRule: 'case2, a',
+  retryRuleOp: 'exclude',
 }
 
 describe('usage log admin filter params', () => {
@@ -47,6 +49,8 @@ describe('usage log admin filter params', () => {
       node_name_op: 'exclude',
       session_id_source: 'prompt_cache_key,metadata.user_id',
       session_id_source_op: 'exclude',
+      retry_rule: 'case2, a',
+      retry_rule_op: 'exclude',
     })
   })
 
@@ -65,6 +69,8 @@ describe('usage log admin filter params', () => {
     expect(params.node_name_op).toBeUndefined()
     expect(params.session_id_source).toBeUndefined()
     expect(params.session_id_source_op).toBeUndefined()
+    expect(params.retry_rule).toBeUndefined()
+    expect(params.retry_rule_op).toBeUndefined()
   })
 
   test('ignores a retry flag that is neither true nor false', () => {
@@ -76,5 +82,17 @@ describe('usage log admin filter params', () => {
     })
 
     expect(params.retry_triggered).toBeUndefined()
+  })
+
+  test('sends the retry rule keyword without an operator by default', () => {
+    const params = buildApiParams({
+      page: 1,
+      pageSize: 20,
+      searchParams: { retryRule: 'case1', retryRuleOp: 'include' },
+      isAdmin: true,
+    })
+
+    expect(params.retry_rule).toBe('case1')
+    expect(params.retry_rule_op).toBeUndefined()
   })
 })

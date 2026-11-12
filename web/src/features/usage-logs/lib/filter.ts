@@ -115,6 +115,14 @@ export function buildSearchParams(
         ...(commonFilters.retryTriggered && {
           retryTriggered: commonFilters.retryTriggered,
         }),
+        ...(commonFilters.retryRule && {
+          retryRule: commonFilters.retryRule,
+        }),
+        ...(commonFilters.retryRuleOp &&
+        commonFilters.retryRuleOp !== 'include' &&
+        commonFilters.retryRule
+          ? { retryRuleOp: commonFilters.retryRuleOp }
+          : {}),
         ...(commonFilters.statusCode && {
           statusCode: commonFilters.statusCode,
         }),

@@ -288,6 +288,14 @@ export function buildApiParams(config: {
       searchParams.retryTriggered === 'false')
       ? { retry_triggered: searchParams.retryTriggered }
       : {}),
+    ...(isAdmin && searchParams.retryRule
+      ? {
+          retry_rule: String(searchParams.retryRule),
+          ...(searchParams.retryRuleOp === 'exclude'
+            ? { retry_rule_op: 'exclude' as const }
+            : {}),
+        }
+      : {}),
     ...(isAdmin && searchParams.errorSignatureHash
       ? { error_signature_hash: String(searchParams.errorSignatureHash) }
       : {}),

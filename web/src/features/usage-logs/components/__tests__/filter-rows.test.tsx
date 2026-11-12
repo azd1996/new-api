@@ -133,6 +133,18 @@ it('puts node, retry, status code and error keyword on their own row', async () 
   expect(nodeRow).not.toBe(rowOf('Customer Name'))
 })
 
+it('puts the retry rule keyword filter beside error keyword with an exclude toggle', async () => {
+  await renderAdminFilter()
+
+  expect(rowOf('Retry Rule')).toBe(rowOf('Error Keyword'))
+
+  const toggle = screen.getByRole('button', { name: 'Retry Rule: Equals' })
+  await userEvent.click(toggle)
+  expect(
+    screen.getByRole('button', { name: 'Retry Rule: Exclude' })
+  ).toHaveAttribute('aria-pressed', 'true')
+})
+
 it('keeps Session ID Source beside Session ID in the first advanced row', async () => {
   await renderAdminFilter()
 

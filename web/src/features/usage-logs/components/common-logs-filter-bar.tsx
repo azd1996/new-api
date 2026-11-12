@@ -159,6 +159,8 @@ function buildSearchSourceKey(values: {
   sessionIdSource?: unknown
   sessionIdSourceOp?: unknown
   retryTriggered?: unknown
+  retryRule?: unknown
+  retryRuleOp?: unknown
   statusCode?: unknown
   errorKeyword?: unknown
   errorSignatureHash?: unknown
@@ -190,6 +192,8 @@ function buildSearchSourceKey(values: {
     values.sessionIdSource,
     values.sessionIdSourceOp,
     values.retryTriggered,
+    values.retryRule,
+    values.retryRuleOp,
     values.statusCode,
     values.errorKeyword,
     values.errorSignatureHash,
@@ -307,6 +311,8 @@ export function CommonLogsFilterBar<TData>(
       sessionIdSource: searchParams.sessionIdSource,
       sessionIdSourceOp: searchParams.sessionIdSourceOp,
       retryTriggered: searchParams.retryTriggered,
+      retryRule: searchParams.retryRule,
+      retryRuleOp: searchParams.retryRuleOp,
       statusCode: searchParams.statusCode,
       errorKeyword: searchParams.errorKeyword,
       errorSignatureHash: searchParams.errorSignatureHash,
@@ -340,6 +346,8 @@ export function CommonLogsFilterBar<TData>(
       sessionIdSource: searchParams.sessionIdSource || undefined,
       sessionIdSourceOp: searchParams.sessionIdSourceOp || 'include',
       retryTriggered: searchParams.retryTriggered,
+      retryRule: searchParams.retryRule || undefined,
+      retryRuleOp: searchParams.retryRuleOp || 'include',
       statusCode: searchParams.statusCode || undefined,
       errorKeyword: searchParams.errorKeyword || undefined,
       errorSignatureHash: searchParams.errorSignatureHash || undefined,
@@ -375,6 +383,8 @@ export function CommonLogsFilterBar<TData>(
     searchParams.sessionIdSource,
     searchParams.sessionIdSourceOp,
     searchParams.retryTriggered,
+    searchParams.retryRule,
+    searchParams.retryRuleOp,
     searchParams.statusCode,
     searchParams.errorKeyword,
     searchParams.errorSignatureHash,
@@ -470,6 +480,7 @@ export function CommonLogsFilterBar<TData>(
     !!filters.node ||
     !!filters.sessionIdSource ||
     !!filters.retryTriggered ||
+    !!filters.retryRule ||
     !!filters.statusCode ||
     !!filters.errorKeyword ||
     !!filters.errorSignatureHash
@@ -492,6 +503,7 @@ export function CommonLogsFilterBar<TData>(
     isAdmin ? filters.node : undefined,
     isAdmin ? filters.sessionIdSource : undefined,
     isAdmin ? filters.retryTriggered : undefined,
+    isAdmin ? filters.retryRule : undefined,
     filters.statusCode,
     filters.errorKeyword,
     isAdmin ? filters.errorSignatureHash : undefined,
@@ -862,6 +874,24 @@ export function CommonLogsFilterBar<TData>(
             onKeyDown={handleKeyDown}
           />
         </LogsFilterField>
+        {isAdmin && (
+          <LogsFilterField wide>
+            <div className='flex min-w-0 gap-1'>
+              <LogsFilterInput
+                className='flex-1'
+                placeholder={t('Retry Rule')}
+                value={filters.retryRule || ''}
+                onChange={(e) => handleChange('retryRule', e.target.value)}
+                onKeyDown={handleKeyDown}
+              />
+              <LogFilterModeButton
+                fieldLabel={t('Retry Rule')}
+                operator={filters.retryRuleOp}
+                onChange={(value) => handleChange('retryRuleOp', value)}
+              />
+            </div>
+          </LogsFilterField>
+        )}
         {isAdmin && filters.errorSignatureHash && (
           <LogsFilterField>
             <LogsFilterInput

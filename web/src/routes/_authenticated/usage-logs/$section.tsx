@@ -56,6 +56,8 @@ const usageLogsSearchSchema = z.object({
   sessionIdSource: z.string().optional().catch(''),
   sessionIdSourceOp: z.enum(['include', 'exclude']).optional().catch('include'),
   retryTriggered: z.enum(['true', 'false']).optional().catch(undefined),
+  retryRule: z.string().optional().catch(''),
+  retryRuleOp: z.enum(['include', 'exclude']).optional().catch('include'),
   statusCode: z.string().optional().catch(''),
   errorKeyword: z.string().optional().catch(''),
   // Drill-down params carried by the detailed-error-stats page (module K).

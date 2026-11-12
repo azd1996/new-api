@@ -658,3 +658,63 @@ func TestLogFilterRequestKeyRenamedDatabaseMatrix(t *testing.T) {
 		})
 	}
 }
+
+// TestLogFilterRetryRuleMatchesRuleDescription pins the retry-rule filter on
+// logs written by RecordRetryOverrideLog: substring match on the matched rule
+// description only, JSON-escaped characters, LIKE metacharacters as literals,
+// commas kept inside one keyword, and exclude semantics.
+func TestLogFilterRetryRuleMatchesRuleDescription(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&Log{}, &User{}))
+
+	oldDB, oldLogDB := DB, LOG_DB
+	oldMainType, oldLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	oldRedis := common.RedisEnabled
+	t.Cleanup(func() {
+		DB, LOG_DB = oldDB, oldLogDB
+		common.SetDatabaseTypes(oldMainType, oldLogType)
+		common.RedisEnabled = oldRedis
+	})
+	DB, LOG_DB = db, db
+	common.RedisEnabled = false
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+
+	record := func(requestId string, detail map[string]any) {
+		RecordRetryOverrideLog(OverrideAuditLogParams{UserId: 7, ChannelId: 3, RequestId: requestId}, "retry override matched", detail)
+	}
+	record("decrypt", map[string]any{"action": "retry_same_channel", "rule_descriptions": []string{"case1 解密失败（有function_call时才删id）"}})
+	record("quoted", map[string]any{"action": "fallback_next_channel", "rule_descriptions": []string{`case2 "quoted" <b>&`}})
+	record("comma", map[string]any{"action": "return_error", "rule_descriptions": []string{"limit a,b"}})
+	record("no-description", map[string]any{"action": "retry_same_channel"})
+	// The same text outside rule_descriptions must not match.
+	record("elsewhere", map[string]any{"action": "retry_same_channel", "error_message": "case1 failed", "rule_descriptions": []string{"unrelated"}})
+
+	findRequestIds := func(filter LogFilter) []string {
+		query, applyErr := filter.apply(db.Model(&Log{}))
+		require.NoError(t, applyErr)
+		var ids []string
+		require.NoError(t, query.Order("id").Pluck("request_id", &ids).Error)
+		return ids
+	}
+	include := func(keyword string) LogFilter {
+		return LogFilter{RetryRule: LogFieldFilter{Values: []string{keyword}}}
+	}
+
+	assert.Equal(t, []string{"decrypt"}, findRequestIds(include("case1")))
+	assert.Equal(t, []string{"decrypt"}, findRequestIds(include("解密失败")))
+	assert.Equal(t, []string{"decrypt"}, findRequestIds(include("function_call")), "underscore is literal")
+	assert.Empty(t, findRequestIds(include("function.call")))
+	assert.Equal(t, []string{"quoted"}, findRequestIds(include(`"quoted"`)), "quotes are JSON-escaped in Other")
+	assert.Equal(t, []string{"quoted"}, findRequestIds(include("<b>&")), "HTML characters are JSON-escaped in Other")
+	assert.Equal(t, []string{"comma"}, findRequestIds(include("a,b")))
+	assert.Empty(t, findRequestIds(include("%")), "percent is literal, not a wildcard")
+	assert.Empty(t, findRequestIds(include("missing")))
+	assert.Equal(t, []string{"decrypt", "quoted", "comma", "no-description", "elsewhere"}, findRequestIds(LogFilter{}), "empty filter changes nothing")
+	assert.Equal(t, []string{"quoted", "comma", "no-description", "elsewhere"},
+		findRequestIds(LogFilter{RetryRule: LogFieldFilter{Values: []string{"case1"}, Exclude: true}}))
+}

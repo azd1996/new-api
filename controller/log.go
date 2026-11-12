@@ -83,6 +83,11 @@ func logFilterFromQuery(c *gin.Context, admin bool) model.LogFilter {
 		filter.CustomerName = c.Query("customer_name")
 		filter.NodeName = logFieldFilterFromQuery(c, "node_name")
 		filter.SessionIdSource = logFieldFilterFromQuery(c, "session_id_source")
+		// A rule description is free text that may contain commas, so the keyword
+		// is read whole instead of split into several values.
+		if keyword := strings.TrimSpace(c.Query("retry_rule")); keyword != "" {
+			filter.RetryRule = model.LogFieldFilter{Values: []string{keyword}, Exclude: logFilterExclude(c, "retry_rule")}
+		}
 		filter.DownstreamTraceTag = c.Query("downstream_trace_tag")
 		filter.ErrorSignatureHash = c.Query("error_signature_hash")
 		// retry_triggered is a tri-state admin filter: absent = no filter; only
