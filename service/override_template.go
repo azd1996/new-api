@@ -5,8 +5,11 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+
+	"github.com/gin-gonic/gin"
 )
 
 // MergeParamOverrideTemplates folds the named parameter-override templates
@@ -66,6 +69,34 @@ func ResolveRetryOverrideTemplates(refs []string) []dto.RetryRule {
 		}
 	}
 	return out
+}
+
+// EffectiveRetryOverrideRules returns a channel's complete retry-override rule
+// list: referenced template rules in selection order, then the channel's own
+// rules. Every retry-override consumer (error-triggered fallback, 200-body
+// detection, stream pre-commit guard) must read rules through this function so a
+// rule behaves the same whether it is written on the channel or in a template.
+func EffectiveRetryOverrideRules(setting dto.ChannelSettings) []dto.RetryRule {
+	templateRules := ResolveRetryOverrideTemplates(setting.RetryOverrideTemplateRefs)
+	if len(templateRules) == 0 {
+		return setting.RetryOverride
+	}
+	return append(templateRules, setting.RetryOverride...)
+}
+
+// ResolveChannelParamOverride returns the param-override a request through
+// channel runs with: the channel's own JSON merged with its referenced templates
+// and the channel-affinity template. Every place that installs a channel's
+// override into the request context must use it.
+func ResolveChannelParamOverride(c *gin.Context, channel *model.Channel) map[string]any {
+	paramOverride := channel.GetParamOverride()
+	if refs := channel.GetSetting().ParamOverrideTemplateRefs; len(refs) > 0 {
+		paramOverride = MergeParamOverrideTemplates(refs, paramOverride)
+	}
+	if mergedParam, applied := ApplyChannelAffinityOverrideTemplate(c, paramOverride); applied {
+		paramOverride = mergedParam
+	}
+	return paramOverride
 }
 
 // ResolveRequestKeyRenameRules returns a channel's effective request key

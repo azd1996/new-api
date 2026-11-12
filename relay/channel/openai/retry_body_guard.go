@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/retryrule"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 )
 
 // retryBodyGuardMaxBytes caps how much of a success body is scanned for the
@@ -57,7 +58,7 @@ func newPrecommitGuard(info *relaycommon.RelayInfo, statusCode int) *precommitGu
 		statusCode: statusCode,
 		maxChunks:  precommitChunks(info),
 	}
-	if info == nil || info.ChannelMeta == nil || len(info.ChannelSetting.RetryOverride) == 0 {
+	if info == nil || info.ChannelMeta == nil || len(service.EffectiveRetryOverrideRules(info.ChannelSetting)) == 0 {
 		g.committed = true
 	}
 	return g
@@ -113,7 +114,7 @@ func retryBodyGuardError(info *relaycommon.RelayInfo, statusCode int, body []byt
 	if info == nil || info.ChannelMeta == nil {
 		return nil
 	}
-	ops := info.ChannelSetting.RetryOverride
+	ops := service.EffectiveRetryOverrideRules(info.ChannelSetting)
 	if len(ops) == 0 {
 		return nil
 	}

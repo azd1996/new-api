@@ -46,23 +46,16 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 		return false, nil, nil
 	}
 	chSetting := channel.GetSetting()
-	ops := chSetting.RetryOverride
-	refs := chSetting.RetryOverrideTemplateRefs
-	if len(ops) == 0 && len(refs) == 0 {
+	if len(chSetting.RetryOverride) == 0 && len(chSetting.RetryOverrideTemplateRefs) == 0 {
 		// The channel handed in by the relay loop can be a stub carrying only
 		// Id/Type/Name/AutoBan (getChannel's ChannelMeta==nil branch), so its
 		// Setting is empty. Re-read the full channel to get retry_override.
 		if full, err := model.CacheGetChannel(channel.Id); err == nil && full != nil {
-			fullSetting := full.GetSetting()
-			ops = fullSetting.RetryOverride
-			refs = fullSetting.RetryOverrideTemplateRefs
+			chSetting = full.GetSetting()
 		}
 	}
-	// Prepend rules contributed by referenced shared templates (selection order),
-	// so the effective list is [template rules..., channel own rules...].
-	if templateRules := service.ResolveRetryOverrideTemplates(refs); len(templateRules) > 0 {
-		ops = append(templateRules, ops...)
-	}
+	// Effective list is [template rules..., channel own rules...].
+	ops := service.EffectiveRetryOverrideRules(chSetting)
 	logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: hook reached on channel #%d, configured operations=%d", channel.Id, len(ops)))
 	if len(ops) == 0 {
 		return false, nil, nil
