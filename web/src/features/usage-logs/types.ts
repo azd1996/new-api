@@ -375,6 +375,12 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
+  // Outcome counts behind the error-rate row (admin only). The UI derives
+  // actual requests, original/actual errors and the two error rates from these.
+  consume?: number
+  error?: number
+  retry_override?: number
+  param_override?: number
 }
 
 // ============================================================================

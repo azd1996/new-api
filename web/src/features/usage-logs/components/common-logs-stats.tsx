@@ -22,13 +22,15 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatLogQuota } from '@/lib/format'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatLogQuota, formatNumber, formatPercent } from '@/lib/format'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import { getLogStats, getUserLogStats } from '../api'
 import { DEFAULT_LOG_STATS } from '../constants'
 import { buildApiParams } from '../lib/utils'
+import type { LogStatistics } from '../types'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
@@ -50,7 +52,7 @@ function StatBadge(props: {
 }
 
 export function CommonLogsStats() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const searchParams = route.useSearch()
   const { sensitiveVisible } = useUsageLogsContext()
@@ -102,22 +104,83 @@ export function CommonLogsStats() {
     )
   }
 
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+
+  return (
+    <div className='flex flex-col gap-2'>
+      <div className='flex flex-wrap items-center gap-2'>
+        <StatBadge
+          label={t('Usage')}
+          value={sensitiveVisible ? formatLogQuota(stats?.quota || 0) : '••••'}
+          accent='bg-sky-500/70'
+        />
+        <StatBadge
+          label={t('RPM')}
+          value={stats?.rpm || 0}
+          accent='bg-rose-500/65'
+        />
+        <StatBadge
+          label={t('TPM')}
+          value={stats?.tpm || 0}
+          accent='bg-slate-400/70'
+        />
+      </div>
+      {isAdmin && <CommonLogsErrorRateRow stats={stats} locale={locale} />}
+    </div>
+  )
+}
+
+// CommonLogsErrorRateRow derives the "what-if" error stats from the raw outcome
+// counts: actual requests (consume + error - retry-override), the original error
+// count if neither override existed (error + param-override), and the actual
+// error count (error - retry-override). The two rates divide each by actual
+// requests. The param-override count only covers consume logs, mirroring the
+// audit written to each consume log.
+function CommonLogsErrorRateRow(props: {
+  stats: LogStatistics
+  locale: Intl.LocalesArgument
+}) {
+  const { t } = useTranslation()
+
+  const consume = props.stats.consume || 0
+  const errorCount = props.stats.error || 0
+  const retryOverride = props.stats.retry_override || 0
+  const paramOverride = props.stats.param_override || 0
+
+  const actualRequests = Math.max(consume + errorCount - retryOverride, 0)
+  const originalErrors = errorCount + paramOverride
+  const actualErrors = Math.max(errorCount - retryOverride, 0)
+  const originalRate =
+    actualRequests > 0 ? (originalErrors / actualRequests) * 100 : 0
+  const actualRate =
+    actualRequests > 0 ? (actualErrors / actualRequests) * 100 : 0
+
   return (
     <div className='flex flex-wrap items-center gap-2'>
       <StatBadge
-        label={t('Usage')}
-        value={sensitiveVisible ? formatLogQuota(stats?.quota || 0) : '••••'}
-        accent='bg-sky-500/70'
+        label={t('Actual Requests')}
+        value={formatNumber(actualRequests, props.locale)}
+        accent='bg-emerald-500/70'
       />
       <StatBadge
-        label={t('RPM')}
-        value={stats?.rpm || 0}
-        accent='bg-rose-500/65'
+        label={t('Original Errors')}
+        value={formatNumber(originalErrors, props.locale)}
+        accent='bg-amber-500/70'
       />
       <StatBadge
-        label={t('TPM')}
-        value={stats?.tpm || 0}
-        accent='bg-slate-400/70'
+        label={t('Actual Errors')}
+        value={formatNumber(actualErrors, props.locale)}
+        accent='bg-red-500/70'
+      />
+      <StatBadge
+        label={t('Original Error Rate')}
+        value={formatPercent(originalRate)}
+        accent='bg-amber-500/70'
+      />
+      <StatBadge
+        label={t('Actual Error Rate')}
+        value={formatPercent(actualRate)}
+        accent='bg-red-500/70'
       />
     </div>
   )

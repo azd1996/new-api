@@ -336,7 +336,37 @@ func TestSuccessCountsRetainCustomerAndTraceFilters(t *testing.T) {
 	}
 }
 
-// TestLogSessionsClickHouse pins the session table contract on a real
+// TestCountRequestOutcomes guards the usage-log error-rate counts: consume and
+// error totals, retry-override error count, and the consume-with-param-override
+// count matched from the Other "po" key. The error-drill filters (Type /
+// RetryTriggered) must not leak into the consume side.
+func TestCountRequestOutcomes(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	oldDB, oldType := LOG_DB, common.LogDatabaseType()
+	t.Cleanup(func() { LOG_DB = oldDB; common.SetLogDatabaseType(oldType) })
+	LOG_DB = db
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+	require.NoError(t, db.Create([]Log{
+		{ChannelId: 1, Type: LogTypeConsume, Other: `{}`},
+		{ChannelId: 1, Type: LogTypeConsume, Other: `{"po":["set temperature = 0.5"]}`},
+		{ChannelId: 2, Type: LogTypeConsume, Other: `{"po":["set max_tokens = 1024"]}`},
+		{ChannelId: 1, Type: LogTypeError, Other: `{}`},
+		{ChannelId: 1, Type: LogTypeError, RetryTriggered: true, Other: `{"admin_info":{"retry_triggered":true}}`},
+	}).Error)
+
+	notRetry := false
+	// Type/RetryTriggered are error-drill filters and must be stripped so the
+	// consume and param-override counts stay intact.
+	got, err := CountRequestOutcomes(LogFilter{Type: LogTypeError, RetryTriggered: &notRetry})
+	require.NoError(t, err)
+	assert.Equal(t, RequestOutcomeCounts{Consume: 3, Error: 2, RetryOverride: 1, ParamOverride: 2}, got)
+}
+
 // ClickHouse: the materialized view folds new consume/error logs with a real
 // session id into log_sessions, listing uses lifetime totals filtered by
 // lifetime overlap and the kept dimensions, intervals come from consume logs,

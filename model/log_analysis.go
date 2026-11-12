@@ -597,3 +597,71 @@ func countConsumeErrorByChannel(core LogFilter) (consume, errs, retryOverride ma
 
 	return consume, errs, retryOverride, nil
 }
+
+// RequestOutcomeCounts holds the filtered outcome counts behind the usage-log
+// error-rate row. Consume/Error/RetryOverride are the raw log counts; the UI
+// derives actual requests (Consume+Error-RetryOverride), the original error
+// count (Error+ParamOverride) and the actual error count (Error-RetryOverride).
+type RequestOutcomeCounts struct {
+	Consume       int64 `json:"consume"`
+	Error         int64 `json:"error"`
+	RetryOverride int64 `json:"retry_override"`
+	ParamOverride int64 `json:"param_override"`
+}
+
+// CountRequestOutcomes returns the overall consume, error, retry-override, and
+// consume-with-param-override counts for the given admin filter. It applies the
+// same core filter as the success-rate table (see coreFilterForSuccess) so
+// error-only drill filters do not zero out the consume side, and the param-
+// override count matches consume logs carrying the "po" audit key in Other. The
+// scalar COUNT runs on every supported log dialect, including ClickHouse.
+func CountRequestOutcomes(filter LogFilter) (RequestOutcomeCounts, error) {
+	core := coreFilterForSuccess(filter)
+	scalarCount := func(f LogFilter) (int64, error) {
+		tx, e := f.apply(LOG_DB)
+		if e != nil {
+			return 0, e
+		}
+		var n int64
+		if e := tx.Model(&Log{}).Count(&n).Error; e != nil {
+			return 0, e
+		}
+		return n, nil
+	}
+
+	var out RequestOutcomeCounts
+	var err error
+
+	consumeF := core
+	consumeF.Type = LogTypeConsume
+	if out.Consume, err = scalarCount(consumeF); err != nil {
+		return out, err
+	}
+
+	errorF := core
+	errorF.Type = LogTypeError
+	if out.Error, err = scalarCount(errorF); err != nil {
+		return out, err
+	}
+
+	retryF := core
+	retryF.Type = LogTypeError
+	retryTriggered := true
+	retryF.RetryTriggered = &retryTriggered
+	if out.RetryOverride, err = scalarCount(retryF); err != nil {
+		return out, err
+	}
+
+	paramF := core
+	paramF.Type = LogTypeConsume
+	paramTx, e := paramF.apply(LOG_DB)
+	if e != nil {
+		return out, e
+	}
+	cond, pat := otherFieldPresentCondition("logs.other", "po")
+	if e := paramTx.Where(cond, pat).Model(&Log{}).Count(&out.ParamOverride).Error; e != nil {
+		return out, e
+	}
+
+	return out, nil
+}
