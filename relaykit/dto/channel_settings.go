@@ -138,13 +138,18 @@ type RetryRule struct {
 //   - an object, e.g. {"action": "return_error", "status_code": 429,
 //     "status_msg": "rate limited"}.
 //
-// StatusCode/StatusMsg apply only to the "return_error" action, which stops all
-// retrying and returns the given HTTP status (and optional message) to the
-// caller. An unknown or empty action resolves to retry_same_channel.
+// StatusCode/StatusMsg/ResponseHeaders apply only to the "return_error" action,
+// which stops all retrying and returns the given HTTP status (and optional
+// message and response headers) to the caller. An unknown or empty action
+// resolves to retry_same_channel.
 type RetryAction struct {
 	Action     string `json:"action,omitempty"`
 	StatusCode int    `json:"status_code,omitempty"`
 	StatusMsg  string `json:"status_msg,omitempty"`
+	// ResponseHeaders are written to the response only when this error is the one
+	// returned to the caller, mirroring the param-override return_error field of
+	// the same name.
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
 }
 
 // UnmarshalJSON accepts both the bare-string and object forms. It is tolerant by
@@ -176,9 +181,10 @@ func (a *RetryAction) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON emits the bare-string form when only the action is set, keeping
 // stored configs compatible with the original string-only representation; it
-// emits the object form once status_code/status_msg carry a value.
+// emits the object form once status_code/status_msg/response_headers carry a
+// value.
 func (a RetryAction) MarshalJSON() ([]byte, error) {
-	if a.StatusCode == 0 && a.StatusMsg == "" {
+	if a.StatusCode == 0 && a.StatusMsg == "" && len(a.ResponseHeaders) == 0 {
 		return kitutil.Marshal(a.Action)
 	}
 	type retryActionAlias RetryAction

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -281,6 +282,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError.StatusCode = retryTerminate.StatusCode
 			if retryTerminate.Message != "" {
 				newAPIError.SetMessage(retryTerminate.Message)
+			}
+			if len(retryTerminate.Headers) > 0 {
+				if newAPIError.ResponseHeaders == nil {
+					newAPIError.ResponseHeaders = make(map[string]string, len(retryTerminate.Headers))
+				}
+				maps.Copy(newAPIError.ResponseHeaders, retryTerminate.Headers)
 			}
 			break
 		}

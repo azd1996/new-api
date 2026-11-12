@@ -22,6 +22,7 @@ import (
 type retryOverrideTerminate struct {
 	StatusCode int
 	Message    string
+	Headers    map[string]string
 }
 
 // maybeApplyRetryRuleFallback drives the channel's retry-override: it evaluates
@@ -91,7 +92,7 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 		// Terminate: no retry, no body rewrite. Hand the configured status/message
 		// back to the caller, which applies it to the response after logging.
 		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: terminating channel #%d, caller will return status=%d", channel.Id, decision.ReturnStatus))
-		return false, &retryOverrideTerminate{StatusCode: decision.ReturnStatus, Message: decision.ReturnMessage}, detail
+		return false, &retryOverrideTerminate{StatusCode: decision.ReturnStatus, Message: decision.ReturnMessage, Headers: decision.ReturnHeaders}, detail
 	case retryrule.ActionFallbackNextChannel:
 		// Fallback is multi-hop: do NOT set the one-shot RetryFallbackDone, and do
 		// NOT pin or reset the budget. The normal loop's IncreaseRetry advances the
@@ -130,6 +131,9 @@ func recordRetryOverrideAudit(c *gin.Context, info *relaycommon.RelayInfo, chann
 		detail["return_status"] = decision.ReturnStatus
 		if decision.ReturnMessage != "" {
 			detail["return_message"] = decision.ReturnMessage
+		}
+		if len(decision.ReturnHeaders) > 0 {
+			detail["return_headers"] = decision.ReturnHeaders
 		}
 	}
 	if hasNonEmpty(descriptions) {

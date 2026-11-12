@@ -14,16 +14,18 @@ import (
 // tolerated (zero value) rather than failing the whole settings blob.
 func TestRetryActionUnmarshalForms(t *testing.T) {
 	cases := []struct {
-		name       string
-		raw        string
-		wantAction string
-		wantStatus int
-		wantMsg    string
+		name        string
+		raw         string
+		wantAction  string
+		wantStatus  int
+		wantMsg     string
+		wantHeaders map[string]string
 	}{
-		{"string form", `"fallback_next_channel"`, "fallback_next_channel", 0, ""},
-		{"object form", `{"action":"return_error","status_code":429,"status_msg":"rate limited"}`, "return_error", 429, "rate limited"},
-		{"object action only", `{"action":"retry_same_channel"}`, "retry_same_channel", 0, ""},
-		{"malformed tolerated", `12345`, "", 0, ""},
+		{"string form", `"fallback_next_channel"`, "fallback_next_channel", 0, "", nil},
+		{"object form", `{"action":"return_error","status_code":429,"status_msg":"rate limited"}`, "return_error", 429, "rate limited", nil},
+		{"object action only", `{"action":"retry_same_channel"}`, "retry_same_channel", 0, "", nil},
+		{"object with response headers", `{"action":"return_error","status_code":422,"response_headers":{"x-bce-aigw-failover":"last_tier"}}`, "return_error", 422, "", map[string]string{"x-bce-aigw-failover": "last_tier"}},
+		{"malformed tolerated", `12345`, "", 0, "", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -32,6 +34,7 @@ func TestRetryActionUnmarshalForms(t *testing.T) {
 			assert.Equal(t, tc.wantAction, a.Action)
 			assert.Equal(t, tc.wantStatus, a.StatusCode)
 			assert.Equal(t, tc.wantMsg, a.StatusMsg)
+			assert.Equal(t, tc.wantHeaders, a.ResponseHeaders)
 		})
 	}
 }
@@ -47,6 +50,10 @@ func TestRetryActionMarshalRoundTrip(t *testing.T) {
 	object, err := kitutil.Marshal(RetryAction{Action: "return_error", StatusCode: 403, StatusMsg: "no"})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"action":"return_error","status_code":403,"status_msg":"no"}`, string(object))
+
+	withHeaders, err := kitutil.Marshal(RetryAction{Action: "return_error", StatusCode: 422, ResponseHeaders: map[string]string{"x-bce-aigw-failover": "last_tier"}})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"action":"return_error","status_code":422,"response_headers":{"x-bce-aigw-failover":"last_tier"}}`, string(withHeaders))
 }
 
 // TestRetryRulePhase4OmittedWhenNil asserts a rule without phase4 does not emit

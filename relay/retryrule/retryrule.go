@@ -24,6 +24,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 // Retry actions decide, on a matched retry-override, what happens next:
@@ -43,6 +45,46 @@ const (
 // defaultReturnErrorStatus is used for ActionReturnError when the rule omits
 // status_code or sets it outside the valid HTTP range.
 const defaultReturnErrorStatus = http.StatusTooManyRequests
+
+// managedReturnErrorHeaders are owned by the response writer or the relay error
+// renderer and cannot be set by a rule, matching the param-override return_error
+// constraints.
+var managedReturnErrorHeaders = map[string]struct{}{
+	"Content-Length":    {},
+	"Transfer-Encoding": {},
+	"Connection":        {},
+	"Keep-Alive":        {},
+	"Trailer":           {},
+	"Upgrade":           {},
+	"Proxy-Connection":  {},
+	"Content-Type":      {},
+	"Content-Encoding":  {},
+}
+
+// sanitizeReturnErrorHeaders canonicalizes the configured header names and drops
+// entries that are malformed or reserved. Dropping rather than failing keeps a
+// bad header from disabling the whole rule: the status/message override still
+// applies.
+func sanitizeReturnErrorHeaders(configured map[string]string) map[string]string {
+	if len(configured) == 0 {
+		return nil
+	}
+	headers := make(map[string]string, len(configured))
+	for name, value := range configured {
+		if !httpguts.ValidHeaderFieldName(name) || !httpguts.ValidHeaderFieldValue(value) {
+			continue
+		}
+		canonical := http.CanonicalHeaderKey(name)
+		if _, managed := managedReturnErrorHeaders[canonical]; managed {
+			continue
+		}
+		headers[canonical] = value
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
+}
 
 // ResponseContext builds the phase2 match document for an upstream error: status
 // code and error message. When the status is 200 (a body-detected pseudo error,
@@ -94,7 +136,10 @@ type Decision struct {
 	Action        string
 	ReturnStatus  int    // only meaningful when Action == ActionReturnError
 	ReturnMessage string // only meaningful when Action == ActionReturnError
-	MatchedIndex  int    // index into rules of the matched rule, -1 when none
+	// ReturnHeaders are the sanitized response_headers of a return_error rule;
+	// they reach the caller only if this error is the one returned.
+	ReturnHeaders map[string]string
+	MatchedIndex  int // index into rules of the matched rule, -1 when none
 }
 
 // CollectRewrites evaluates rules in order and returns the Decision for the FIRST
@@ -113,7 +158,7 @@ func CollectRewrites(rules []dto.RetryRule, reqCtx, respCtx map[string]any) Deci
 		if !rulePhasesPass(rule, reqDoc, respDoc) {
 			continue
 		}
-		action, status, message := resolveAction(rule.Phase4RetryAction)
+		action, status, message, headers := resolveAction(rule.Phase4RetryAction)
 		rewrites := make([]map[string]any, 0, len(rule.Phase3RequestRewrite))
 		for _, rewrite := range rule.Phase3RequestRewrite {
 			if rewrite == nil {
@@ -131,6 +176,7 @@ func CollectRewrites(rules []dto.RetryRule, reqCtx, respCtx map[string]any) Deci
 			Action:        action,
 			ReturnStatus:  status,
 			ReturnMessage: message,
+			ReturnHeaders: headers,
 			MatchedIndex:  i,
 		}
 	}
@@ -158,23 +204,23 @@ func phasePass(phase *dto.RetryRulePhaseCondition, doc []byte) bool {
 
 // resolveAction reads a rule's phase4 action, defaulting to (and falling back to
 // on nil/unknown values) ActionRetrySameChannel. For ActionReturnError it also
-// resolves the status code (defaultReturnErrorStatus when missing/out of range)
-// and the optional custom message.
-func resolveAction(a *dto.RetryAction) (action string, returnStatus int, returnMessage string) {
+// resolves the status code (defaultReturnErrorStatus when missing/out of range),
+// the optional custom message, and the optional response headers.
+func resolveAction(a *dto.RetryAction) (action string, returnStatus int, returnMessage string, returnHeaders map[string]string) {
 	if a == nil {
-		return ActionRetrySameChannel, 0, ""
+		return ActionRetrySameChannel, 0, "", nil
 	}
 	switch a.Action {
 	case ActionFallbackNextChannel:
-		return ActionFallbackNextChannel, 0, ""
+		return ActionFallbackNextChannel, 0, "", nil
 	case ActionReturnError:
 		status := a.StatusCode
 		if status < 100 || status > 599 {
 			status = defaultReturnErrorStatus
 		}
-		return ActionReturnError, status, a.StatusMsg
+		return ActionReturnError, status, a.StatusMsg, sanitizeReturnErrorHeaders(a.ResponseHeaders)
 	default:
-		return ActionRetrySameChannel, 0, ""
+		return ActionRetrySameChannel, 0, "", nil
 	}
 }
 

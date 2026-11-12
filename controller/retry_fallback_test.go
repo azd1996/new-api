@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http/httptest"
 	"testing"
 
@@ -51,7 +52,7 @@ func TestRetryOverrideReturnErrorTerminates(t *testing.T) {
 	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
 
 	// Object form of phase4 with a return_error action, custom code and message.
-	setting := `{"retry_override":[{"description":"hard stop on policy block","phase2_response_conditions":{"conditions":[{"path":"status_code","mode":"full","value":400}]},"phase4_retry_action":{"action":"return_error","status_code":451,"status_msg":"blocked by policy"}}]}`
+	setting := `{"retry_override":[{"description":"hard stop on policy block","phase2_response_conditions":{"conditions":[{"path":"status_code","mode":"full","value":400}]},"phase4_retry_action":{"action":"return_error","status_code":451,"status_msg":"blocked by policy","response_headers":{"x-bce-aigw-failover":"last_tier"}}}]}`
 	channel := &model.Channel{Id: 21, Setting: &setting}
 	info := &relaycommon.RelayInfo{UserId: 1}
 	apiErr := types.NewErrorWithStatusCode(errors.New("upstream rejected"), types.ErrorCodeBadResponse, 400)
@@ -61,24 +62,32 @@ func TestRetryOverrideReturnErrorTerminates(t *testing.T) {
 	require.NotNil(t, terminate, "return_error signals terminate")
 	assert.Equal(t, 451, terminate.StatusCode)
 	assert.Equal(t, "blocked by policy", terminate.Message)
+	assert.Equal(t, map[string]string{"X-Bce-Aigw-Failover": "last_tier"}, terminate.Headers)
 	require.NotNil(t, detail)
 	assert.False(t, info.RetryFallbackDone, "terminate neither pins nor consumes the one-shot retry")
 
 	// apiErr is NOT mutated by the hook: the error log must record the original.
 	assert.Equal(t, 400, apiErr.StatusCode)
 	assert.Equal(t, "upstream rejected", apiErr.Error())
+	assert.Empty(t, apiErr.ResponseHeaders)
 
 	// The audit detail carries the override for the admin-only retry_override log.
 	assert.Equal(t, retryrule.ActionReturnError, detail["action"])
 	assert.Equal(t, 451, detail["return_status"])
 	assert.Equal(t, "blocked by policy", detail["return_message"])
+	assert.Equal(t, map[string]string{"X-Bce-Aigw-Failover": "last_tier"}, detail["return_headers"])
 
 	// Only after logging does the relay loop apply the override to what the caller
 	// sees (mirrors controller.Relay's terminate branch).
 	apiErr.StatusCode = terminate.StatusCode
 	apiErr.SetMessage(terminate.Message)
+	if apiErr.ResponseHeaders == nil {
+		apiErr.ResponseHeaders = make(map[string]string, len(terminate.Headers))
+	}
+	maps.Copy(apiErr.ResponseHeaders, terminate.Headers)
 	assert.Equal(t, 451, apiErr.StatusCode)
 	assert.Equal(t, "blocked by policy", apiErr.Error())
+	assert.Equal(t, "last_tier", apiErr.ResponseHeaders["X-Bce-Aigw-Failover"])
 }
 
 type retryOutcome struct {
@@ -178,6 +187,16 @@ func TestRetryOverrideTemplateMatchesChannelOwn(t *testing.T) {
 				assert.Equal(t, "blocked", got.Terminate.Message)
 				assert.Zero(t, got.Pinned)
 				assert.Empty(t, got.Rewrites)
+			},
+		},
+		{
+			name:   "return_error carries canonicalized response headers and drops managed ones",
+			rules:  `[{` + cond429 + `,"phase4_retry_action":{"action":"return_error","status_code":422,"response_headers":{"x-bce-aigw-failover":"last_tier","Content-Length":"5"}}}]`,
+			status: 429,
+			check: func(t *testing.T, got retryOutcome) {
+				require.NotNil(t, got.Terminate)
+				assert.Equal(t, 422, got.Terminate.StatusCode)
+				assert.Equal(t, map[string]string{"X-Bce-Aigw-Failover": "last_tier"}, got.Terminate.Headers)
 			},
 		},
 		{

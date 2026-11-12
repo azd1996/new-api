@@ -1,0 +1,18 @@
+[
+  {
+    "description": "上游网关自身的配置缺失（该模型在它那边没定价：'Model xxx has not been priced by the administrator yet...'）。命中即 return_error：本层立即停手，不再消耗本层重试预算去反复打一个配置就错的渠道；返回的 503 对调用方是可重试语义，真正的重试交给下游网关去做（由它换自己的其它渠道）。同时必须用 status_msg 覆盖文案：上游原文把『某模型没定价』这种内部配置细节暴露给最终用户观感很差，日志侧仍保留上游原始 400 与原文供管理员排查（错误日志在覆盖之前落库）。不锁 phase2 的 status_code（上游 new-api 该错误回 400，旧版本/不同协议可能不同），只按 error_message 文案匹配；OR 兼容英文文案与中文文案（含管理员视角的 '价格未配置' 变体）",
+    "phase2_response_conditions": {
+      "conditions": [
+        { "path": "error_message", "mode": "contains", "value": "has not been priced by the administrator yet" },
+        { "path": "error_message", "mode": "contains", "value": "的价格尚未由管理员配置" },
+        { "path": "error_message", "mode": "contains", "value": "的价格未配置" }
+      ],
+      "logic": "OR"
+    },
+    "phase4_retry_action": {
+      "action": "return_error",
+      "status_code": 503,
+      "status_msg": "The model is temporarily unavailable on the upstream provider. Please retry later."
+    }
+  }
+]

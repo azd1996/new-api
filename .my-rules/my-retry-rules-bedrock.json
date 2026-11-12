@@ -1,0 +1,19 @@
+[
+  {
+    "description": "Bedrock 侧的请求约束校验失败（ValidationException: Request does not satisfy the required constraints）：请求已被上游拒到参数层，本层重试或用别的渠道打同一份 body 只会拿到同样的错误，故 return_error 立即停止。状态码用 422 而非 400：语义是「请求无法被处理」，同时和真正的 400（参数语法错）区分开，便于调用方与下游网关单独识别这条链路。status_msg 留空表示不改上游原始报错文案；response_headers 打 x-bce-aigw-failover: last_tier 供下游网关识别这是最后一跳渠道返回的失败。响应头只在错误响应尚未开始写出的路径上生效，SSE 心跳已提交后无法再改状态码/加头",
+    "phase2_response_conditions": {
+      "conditions": [
+        { "path": "error_message", "mode": "contains", "value": "ValidationException" },
+        { "path": "error_message", "mode": "contains", "value": "Request does not satisfy the required constraints" }
+      ],
+      "logic": "AND"
+    },
+    "phase4_retry_action": {
+      "action": "return_error",
+      "status_code": 422,
+      "response_headers": {
+        "x-bce-aigw-failover": "last_tier"
+      }
+    }
+  }
+]
