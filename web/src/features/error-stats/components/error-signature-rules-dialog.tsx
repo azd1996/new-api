@@ -28,6 +28,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 
 import { getErrorSignatureRules, updateErrorSignatureRules } from '../api'
 import type { SignatureRule } from '../types'
@@ -63,13 +64,21 @@ function toRules(rows: RuleRow[]): SignatureRule[] {
   return rows.map((row) => ({
     name: row.name,
     pattern: row.pattern,
-    replacement: row.replacement,
+    attribution: row.attribution,
+    note: row.note,
     enabled: row.enabled,
   }))
 }
 
 function emptyRow(): RuleRow {
-  return { name: '', pattern: '', replacement: '', enabled: true, _id: newId() }
+  return {
+    name: '',
+    pattern: '',
+    attribution: '',
+    note: '',
+    enabled: true,
+    _id: newId(),
+  }
 }
 
 export function ErrorSignatureRulesDialog(
@@ -152,7 +161,7 @@ export function ErrorSignatureRulesDialog(
       onOpenChange={props.onOpenChange}
       title={t('Normalization rules')}
       description={t(
-        'Rules run top to bottom as regex replacements; $1 capture groups are supported.'
+        'Rules match the complete raw error string from top to bottom. The first match sets the detailed error type to the rule name and supplies its attribution.'
       )}
       contentClassName='sm:max-w-3xl'
       footer={
@@ -277,20 +286,36 @@ export function ErrorSignatureRulesDialog(
                   </div>
                   <div className='space-y-1.5'>
                     <Label
-                      htmlFor={`rule-replacement-${index}`}
+                      htmlFor={`rule-attribution-${index}`}
                       className='text-muted-foreground text-xs'
                     >
-                      {t('Replacement')}
+                      {t('Error Attribution')}
                     </Label>
                     <Input
-                      id={`rule-replacement-${index}`}
-                      value={rule.replacement}
+                      id={`rule-attribution-${index}`}
+                      value={rule.attribution}
                       onChange={(e) =>
-                        updateRule(index, { replacement: e.target.value })
+                        updateRule(index, { attribution: e.target.value })
                       }
-                      className='h-8 font-mono'
+                      className='h-8'
                     />
                   </div>
+                </div>
+                <div className='space-y-1.5'>
+                  <Label
+                    htmlFor={`rule-note-${index}`}
+                    className='text-muted-foreground text-xs'
+                  >
+                    {t('Note')}
+                  </Label>
+                  <Textarea
+                    id={`rule-note-${index}`}
+                    value={rule.note}
+                    onChange={(e) =>
+                      updateRule(index, { note: e.target.value })
+                    }
+                    rows={2}
+                  />
                 </div>
               </div>
             ))}

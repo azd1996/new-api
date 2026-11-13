@@ -17,16 +17,14 @@ import (
 // the controller package.
 const errorSignatureRulesOptionKey = "ErrorSignatureRules"
 
-// SignatureRule is one ordered normalization step applied to a raw error
-// message to derive its stable "signature". Each rule is a pure regexp
-// substitution: every match of Pattern is replaced by Replacement (which may
-// reference capture groups via $1 / ${1}). Rules are admin-editable and seeded
-// with DefaultErrorSignatureRules; because new-api runs on Go's RE2 engine
-// there is no catastrophic backtracking to guard against.
+// SignatureRule is one ordered user classification rule. Pattern is matched
+// against the complete raw error string; the first matching enabled rule
+// determines the detailed error type (Name) and attribution.
 type SignatureRule struct {
 	Name        string `json:"name"`
 	Pattern     string `json:"pattern"`
-	Replacement string `json:"replacement"`
+	Attribution string `json:"attribution"`
+	Note        string `json:"note"`
 	Enabled     bool   `json:"enabled"`
 }
 
@@ -37,7 +35,25 @@ const maxSignatureLen = 2000
 type compiledSignatureRule struct {
 	name        string
 	re          *regexp.Regexp
+	attribution string
+	note        string
+}
+
+type fallbackSignatureRule struct {
+	re          *regexp.Regexp
 	replacement string
+}
+
+// ErrorClassification is the write-time result used by error logs, stats and
+// Prometheus. UserRuleMatched distinguishes a persisted classification from a
+// fallback-only signature.
+type ErrorClassification struct {
+	Signature         string
+	SignatureHash     string
+	DetailedErrorType string
+	Attribution       string
+	Note              string
+	UserRuleMatched   bool
 }
 
 var (
@@ -47,24 +63,17 @@ var (
 	signatureRulesSet bool
 )
 
-// DefaultErrorSignatureRules returns the seed rule set. Order matters: whitespace
-// is collapsed first, our own request-id suffixes are stripped, the body of an
-// "encrypted content <...> could not be verified" message is masked, then
-// request-id shaped tokens (UUID, vendor-prefixed ids, long hex, key-anchored
-// ids) and timestamps are masked.
-func DefaultErrorSignatureRules() []SignatureRule {
-	return []SignatureRule{
-		{Name: "collapse-whitespace", Pattern: `\s+`, Replacement: " ", Enabled: true},
-		{Name: "strip-newapi-request-id", Pattern: ` *\(request id: [^)]*\)`, Replacement: "", Enabled: true},
-		{Name: "encrypted-content-blob", Pattern: `(encrypted content ).*?( could not be verified)`, Replacement: "${1}*${2}", Enabled: true},
-		{Name: "uuid", Pattern: `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`, Replacement: "********-****-****-****-************", Enabled: true},
-		{Name: "vendor-prefixed-id", Pattern: `\b(toolu|rs|resp|msg|item|fc|call|chatcmpl|req)_[A-Za-z0-9_]{6,}`, Replacement: "${1}_*", Enabled: true},
-		{Name: "long-hex", Pattern: `\b[0-9a-fA-F]{16,}\b`, Replacement: "*", Enabled: true},
-		{Name: "request-id-by-key", Pattern: `(?i)(request[ -]?id:\s*)[A-Za-z0-9._-]+`, Replacement: "${1}*", Enabled: true},
-		{Name: "amzn-request-id", Pattern: `(?i)(x-amzn-requestid:\s*)[A-Za-z0-9._-]+`, Replacement: "${1}*", Enabled: true},
-		{Name: "ms-request-id", Pattern: `(?i)((?:apim|x-ms)-request-id:\s*)[A-Za-z0-9._-]+`, Replacement: "${1}*", Enabled: true},
-		{Name: "iso-timestamp", Pattern: `\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\S*`, Replacement: "*", Enabled: true},
-	}
+var fallbackSignatureRules = []fallbackSignatureRule{
+	{re: regexp.MustCompile(`\s+`), replacement: " "},
+	{re: regexp.MustCompile(` *\(request id: [^)]*\)`), replacement: ""},
+	{re: regexp.MustCompile(`(encrypted content ).*?( could not be verified)`), replacement: "${1}*${2}"},
+	{re: regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`), replacement: "********-****-****-****-************"},
+	{re: regexp.MustCompile(`\b(toolu|rs|resp|msg|item|fc|call|chatcmpl|req)_[A-Za-z0-9_]{6,}`), replacement: "${1}_*"},
+	{re: regexp.MustCompile(`\b[0-9a-fA-F]{16,}\b`), replacement: "*"},
+	{re: regexp.MustCompile(`(?i)(request[ -]?id:\s*)[A-Za-z0-9._-]+`), replacement: "${1}*"},
+	{re: regexp.MustCompile(`(?i)(x-amzn-requestid:\s*)[A-Za-z0-9._-]+`), replacement: "${1}*"},
+	{re: regexp.MustCompile(`(?i)((?:apim|x-ms)-request-id:\s*)[A-Za-z0-9._-]+`), replacement: "${1}*"},
+	{re: regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\S*`), replacement: "*"},
 }
 
 // SetErrorSignatureRules compiles and installs the active rule set. On any
@@ -81,7 +90,12 @@ func SetErrorSignatureRules(rules []SignatureRule) error {
 		if err != nil {
 			return err
 		}
-		compiled = append(compiled, compiledSignatureRule{name: r.Name, re: re, replacement: r.Replacement})
+		compiled = append(compiled, compiledSignatureRule{
+			name:        r.Name,
+			attribution: r.Attribution,
+			note:        r.Note,
+			re:          re,
+		})
 	}
 	stored := make([]SignatureRule, len(rules))
 	copy(stored, rules)
@@ -100,31 +114,59 @@ func ensureSignatureRules() {
 	if ready {
 		return
 	}
-	// Defaults are static and always compile; the error is impossible here.
-	_ = SetErrorSignatureRules(DefaultErrorSignatureRules())
+	// An empty user rule set is valid: fallback normalizers are hard-coded.
+	_ = SetErrorSignatureRules(nil)
 }
 
-// NormalizeErrorSignature derives a stable signature from a raw error message by
-// applying the active ordered regexp rules. Identical upstream errors that
-// differ only by request ids / timestamps collapse to the same signature.
-func NormalizeErrorSignature(content string) string {
+func truncateErrorSignature(content string) string {
+	ensureSignatureRules()
+	s := strings.TrimSpace(content)
+	if len(s) > maxSignatureLen {
+		s = strings.ToValidUTF8(s[:maxSignatureLen], "")
+	}
+	return s
+}
+
+// ClassifyError matches user rules against the complete raw error string. The
+// first match determines the detailed error type and attribution. Only when no
+// user rule matches are the built-in fallback normalizers applied.
+func ClassifyError(content string) ErrorClassification {
 	if content == "" {
-		return ""
+		return ErrorClassification{}
 	}
 	ensureSignatureRules()
 	signatureRulesMu.RLock()
 	rules := signatureRules
 	signatureRulesMu.RUnlock()
+	for _, rule := range rules {
+		if rule.re.MatchString(content) {
+			signature := truncateErrorSignature(content)
+			return ErrorClassification{
+				Signature:         signature,
+				SignatureHash:     ErrorSignatureHash(signature),
+				DetailedErrorType: rule.name,
+				Attribution:       rule.attribution,
+				Note:              rule.note,
+				UserRuleMatched:   true,
+			}
+		}
+	}
 
-	s := content
-	for _, r := range rules {
-		s = r.re.ReplaceAllString(s, r.replacement)
+	signature := content
+	for _, rule := range fallbackSignatureRules {
+		signature = rule.re.ReplaceAllString(signature, rule.replacement)
 	}
-	s = strings.TrimSpace(s)
-	if len(s) > maxSignatureLen {
-		s = strings.ToValidUTF8(s[:maxSignatureLen], "")
+	signature = truncateErrorSignature(signature)
+	return ErrorClassification{
+		Signature:     signature,
+		SignatureHash: ErrorSignatureHash(signature),
 	}
-	return s
+}
+
+// NormalizeErrorSignature keeps the existing API for callers that only need a
+// stable signature.
+func NormalizeErrorSignature(content string) string {
+	return ClassifyError(content).Signature
 }
 
 // ErrorSignatureHash returns a short stable fingerprint of a signature, used as
@@ -178,7 +220,7 @@ func ApplyPersistedErrorSignatureRules() error {
 	jsonStr := common.OptionMap[errorSignatureRulesOptionKey]
 	common.OptionMapRWMutex.RUnlock()
 	if strings.TrimSpace(jsonStr) == "" {
-		return SetErrorSignatureRules(DefaultErrorSignatureRules())
+		return SetErrorSignatureRules(nil)
 	}
 	return ApplyErrorSignatureRulesJSON(jsonStr)
 }
@@ -218,9 +260,9 @@ func SyncErrorSignatureRules(frequency int) {
 
 		var err error
 		if strings.TrimSpace(jsonStr) == "" {
-			// Option cleared or never set: fall back to the built-in defaults
+			// Option cleared or never set: remove user classification rules
 			// instead of leaving whatever was last compiled in place.
-			err = SetErrorSignatureRules(DefaultErrorSignatureRules())
+			err = SetErrorSignatureRules(nil)
 		} else {
 			err = ApplyErrorSignatureRulesJSON(jsonStr)
 		}

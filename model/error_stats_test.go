@@ -22,6 +22,9 @@ func TestErrorSignatureOtherReadsLogOtherAdminInfo(t *testing.T) {
 	other.SetPublic("status_code", 400)
 	other.SetAdmin("error_signature", "ValidationException: bad input")
 	other.SetAdmin("error_signature_hash", "abc123")
+	other.SetAdmin("error_detailed_type", "requests-donot-satisfy-constrains")
+	other.SetAdmin("error_attribution", "upstream")
+	other.SetAdmin("error_note", "request constraint rejection")
 	other.SetAdmin("customer_id", "cust-7")
 
 	var o errorSignatureOther
@@ -30,6 +33,9 @@ func TestErrorSignatureOtherReadsLogOtherAdminInfo(t *testing.T) {
 	assert.Equal(t, "abc123", o.signatureHash())
 	assert.Equal(t, "ValidationException: bad input", o.signature())
 	assert.Equal(t, "cust-7", o.customerId())
+	assert.Equal(t, "requests-donot-satisfy-constrains", o.detailedErrorType("abc123"))
+	assert.Equal(t, "upstream", o.attribution("abc123"))
+	assert.Equal(t, "request constraint rejection", o.note("abc123"))
 }
 
 // TestErrorSignatureOtherLegacyTopLevel keeps error logs written before the

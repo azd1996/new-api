@@ -131,12 +131,14 @@ export interface UpsertErrorAliasPayload {
   note: string
 }
 
-// A single error-signature normalization rule. Rules are applied in order
-// (top to bottom) as sequential regex replacements, so ORDER MATTERS.
+// A single ordered user classification rule. The pattern is matched against the
+// complete raw error string; the first matching rule supplies the detailed error
+// type (name) and attribution.
 export interface SignatureRule {
   name: string
   pattern: string
-  replacement: string
+  attribution: string
+  note: string
   enabled: boolean
 }
 
@@ -146,7 +148,8 @@ export interface SignatureRule {
 export interface SuggestedRule {
   name: string
   pattern: string
-  replacement: string
+  attribution: string
+  note: string
   enabled: boolean
   // A sample signature that this suggested pattern matched.
   example: string

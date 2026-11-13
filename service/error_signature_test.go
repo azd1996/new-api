@@ -15,7 +15,7 @@ import (
 // the message (including the `status_code=400` prefix and the `content.0` index)
 // is preserved verbatim.
 func TestNormalizeErrorSignatureBedrockExample(t *testing.T) {
-	require.NoError(t, SetErrorSignatureRules(DefaultErrorSignatureRules()))
+	require.NoError(t, SetErrorSignatureRules(nil))
 
 	input := "status_code=400, InvokeModelWithResponseStream: operation error Bedrock Runtime: InvokeModelWithResponseStream, https response error StatusCode: 400, RequestID: 31e9df3c-9b25-4c41-87b5-f488925da305, ValidationException: ***.***.content.0: Invalid `signature` in `thinking` block (request id: 20261022064033677950145A81UZSgs) (request id: 202610220640310817494408268d9d6tsVahoWk) (request id: 67f75edb3cdb3d290c2052b111f99051)"
 	want := "status_code=400, InvokeModelWithResponseStream: operation error Bedrock Runtime: InvokeModelWithResponseStream, https response error StatusCode: 400, RequestID: ********-****-****-****-************, ValidationException: ***.***.content.0: Invalid `signature` in `thinking` block"
@@ -24,7 +24,7 @@ func TestNormalizeErrorSignatureBedrockExample(t *testing.T) {
 }
 
 func TestNormalizeErrorSignatureRules(t *testing.T) {
-	require.NoError(t, SetErrorSignatureRules(DefaultErrorSignatureRules()))
+	require.NoError(t, SetErrorSignatureRules(nil))
 
 	cases := []struct {
 		name  string
@@ -99,7 +99,7 @@ func TestNormalizeErrorSignatureRules(t *testing.T) {
 // request ids collapse to the same signature (and thus the same hash), while a
 // genuinely different error does not.
 func TestNormalizeErrorSignatureStability(t *testing.T) {
-	require.NoError(t, SetErrorSignatureRules(DefaultErrorSignatureRules()))
+	require.NoError(t, SetErrorSignatureRules(nil))
 
 	a := NormalizeErrorSignature("boom (request id: 111aaa)")
 	b := NormalizeErrorSignature("boom (request id: 222bbb)")
@@ -116,10 +116,10 @@ func TestNormalizeErrorSignatureStability(t *testing.T) {
 // TestSetErrorSignatureRulesRejectsBadPattern verifies an invalid regexp is
 // rejected and leaves the previously-installed rules untouched.
 func TestSetErrorSignatureRulesRejectsBadPattern(t *testing.T) {
-	require.NoError(t, SetErrorSignatureRules(DefaultErrorSignatureRules()))
+	require.NoError(t, SetErrorSignatureRules(nil))
 	before := NormalizeErrorSignature("boom (request id: x)")
 
-	err := SetErrorSignatureRules([]SignatureRule{{Name: "bad", Pattern: "(", Replacement: "", Enabled: true}})
+	err := SetErrorSignatureRules([]SignatureRule{{Name: "bad", Pattern: "(", Enabled: true}})
 	require.Error(t, err)
 
 	assert.Equal(t, before, NormalizeErrorSignature("boom (request id: x)"))
@@ -129,15 +129,17 @@ func TestSetErrorSignatureRulesRejectsBadPattern(t *testing.T) {
 // valid JSON rule set applies and is readable back; empty input is a no-op that
 // keeps the current rules; invalid JSON is rejected without changing anything.
 func TestApplyErrorSignatureRulesJSON(t *testing.T) {
-	require.NoError(t, SetErrorSignatureRules(DefaultErrorSignatureRules()))
+	require.NoError(t, SetErrorSignatureRules(nil))
 
-	custom := `[{"name":"mask-foo","pattern":"foo[0-9]+","replacement":"foo*","enabled":true}]`
+	custom := `[{"name":"foo-error","pattern":"foo[0-9]+","attribution":"upstream","enabled":true}]`
 	require.NoError(t, ApplyErrorSignatureRulesJSON(custom))
-	assert.Equal(t, "bar foo* baz", NormalizeErrorSignature("bar foo12345 baz"))
+	classification := ClassifyError("bar foo12345 baz")
+	assert.Equal(t, "foo-error", classification.DetailedErrorType)
+	assert.Equal(t, "upstream", classification.Attribution)
 
 	rules := GetEffectiveErrorSignatureRules()
 	require.Len(t, rules, 1)
-	assert.Equal(t, "mask-foo", rules[0].Name)
+	assert.Equal(t, "foo-error", rules[0].Name)
 
 	// Empty string is a no-op: the custom rule stays in effect.
 	require.NoError(t, ApplyErrorSignatureRulesJSON(""))
@@ -147,7 +149,7 @@ func TestApplyErrorSignatureRulesJSON(t *testing.T) {
 	require.Error(t, ApplyErrorSignatureRulesJSON("not json"))
 	assert.Len(t, GetEffectiveErrorSignatureRules(), 1)
 
-	require.NoError(t, SetErrorSignatureRules(DefaultErrorSignatureRules()))
+	require.NoError(t, SetErrorSignatureRules(nil))
 }
 
 // TestApplyPersistedErrorSignatureRules locks the startup contract: the admin's
@@ -160,23 +162,54 @@ func TestApplyPersistedErrorSignatureRules(t *testing.T) {
 	if common.OptionMap == nil {
 		common.OptionMap = make(map[string]string)
 	}
-	common.OptionMap[errorSignatureRulesOptionKey] = `[{"name":"mask-digits","pattern":"[0-9]+","replacement":"#","enabled":true}]`
+	common.OptionMap[errorSignatureRulesOptionKey] = `[{"name":"numeric-error","pattern":"[0-9]+","attribution":"validation","enabled":true}]`
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, errorSignatureRulesOptionKey)
 		common.OptionMapRWMutex.Unlock()
-		_ = SetErrorSignatureRules(DefaultErrorSignatureRules())
+		_ = SetErrorSignatureRules(nil)
 	})
 
 	require.NoError(t, ApplyPersistedErrorSignatureRules())
-	assert.Equal(t, "code=#", NormalizeErrorSignature("code=4096"))
+	assert.Equal(t, "numeric-error", ClassifyError("code=4096").DetailedErrorType)
 
-	// Clearing the option falls back to the built-in defaults, which leave a
-	// plain numeric body untouched.
+	// Clearing the option removes user classification rules and re-enables
+	// built-in fallback normalization.
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap[errorSignatureRulesOptionKey] = ""
 	common.OptionMapRWMutex.Unlock()
 	require.NoError(t, ApplyPersistedErrorSignatureRules())
 	assert.Equal(t, "code=4096", NormalizeErrorSignature("code=4096"))
+}
+
+func TestClassifyErrorUsesFirstMatchingUserRule(t *testing.T) {
+	require.NoError(t, SetErrorSignatureRules([]SignatureRule{
+		{Name: "generic", Pattern: `requests-\w+`, Attribution: "provider", Enabled: true},
+		{Name: "specific", Pattern: `requests-donot-satisfy-constrains`, Attribution: "request", Enabled: true},
+	}))
+	t.Cleanup(func() {
+		_ = SetErrorSignatureRules(nil)
+	})
+
+	result := ClassifyError("status_code=400: requests-donot-satisfy-constrains")
+	assert.Equal(t, "generic", result.DetailedErrorType)
+	assert.Equal(t, "provider", result.Attribution)
+	assert.True(t, result.UserRuleMatched)
+	assert.Equal(t, "status_code=400: requests-donot-satisfy-constrains", result.Signature)
+}
+
+func TestClassifyErrorUsesFallbackOnlyWhenNoUserRuleMatches(t *testing.T) {
+	require.NoError(t, SetErrorSignatureRules([]SignatureRule{
+		{Name: "known-error", Pattern: `known-error`, Attribution: "upstream", Enabled: true},
+	}))
+	t.Cleanup(func() {
+		_ = SetErrorSignatureRules(nil)
+	})
+
+	result := ClassifyError("unknown error 67f75edb3cdb3d290c2052b111f99051")
+	assert.False(t, result.UserRuleMatched)
+	assert.Empty(t, result.DetailedErrorType)
+	assert.Empty(t, result.Attribution)
+	assert.Equal(t, "unknown error *", result.Signature)
 }

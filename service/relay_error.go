@@ -91,9 +91,12 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other.SetPublic("error_type", err.GetErrorType())
 		other.SetPublic("error_code", err.GetErrorCode())
 		other.SetPublic("status_code", err.StatusCode)
-		signature := NormalizeErrorSignature(err.Error())
-		other.SetAdmin("error_signature", signature)
-		other.SetAdmin("error_signature_hash", ErrorSignatureHash(signature))
+		classification := ClassifyError(err.Error())
+		other.SetAdmin("error_signature", classification.Signature)
+		other.SetAdmin("error_signature_hash", classification.SignatureHash)
+		other.SetAdmin("error_detailed_type", classification.DetailedErrorType)
+		other.SetAdmin("error_attribution", classification.Attribution)
+		other.SetAdmin("error_note", classification.Note)
 		AppendRelayLogAdminInfo(c, relayInfo, other)
 		AppendResponseModelLogInfo(relayInfo, other)
 		AppendRequestKeyRenameInfo(relayInfo, other)
@@ -116,7 +119,6 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		// Export one error metric sample labeled by the admin-configured short
 		// name (bounded) plus request dimensions, for Prometheus/VM dashboards.
 		if prommetrics.Enabled() {
-			signatureHash := ErrorSignatureHash(signature)
 			stream := "false"
 			if common.GetContextKeyBool(c, constant.ContextKeyIsStream) {
 				stream = "true"
@@ -131,7 +133,7 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			if _, _, customerID, decoded := common.TraceTagFromContext(c); decoded && customerID != "" {
 				customerLabel = customerID
 			}
-			prommetrics.RecordError(model.ResolveErrorShortName(signatureHash), model.ResolveErrorAttribution(signatureHash),
+			prommetrics.RecordError(classification.DetailedErrorType, classification.Attribution,
 				modelName, channelError.ChannelName, strconv.Itoa(err.StatusCode), protocol, stream, customerLabel)
 		}
 	}

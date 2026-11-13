@@ -35,7 +35,7 @@ func SystemPerformanceCheck() gin.HandlerFunc {
 			config := common.GetPerformanceMonitorConfig()
 			// Signature is based on the stable error code only (no live usage or
 			// threshold), so usage fluctuations do not split the error group.
-			signature := service.NormalizeErrorSignature("status_code=503, " + string(err.GetErrorCode()))
+			classification := service.ClassifyError("status_code=503, " + string(err.GetErrorCode()))
 			other := model.NewLogOther()
 			other.SetPublic("request_path", c.Request.URL.Path)
 			other.SetPublic("error_type", err.GetErrorType())
@@ -44,8 +44,11 @@ func SystemPerformanceCheck() gin.HandlerFunc {
 			// error_signature / error_signature_hash live in the admin tier so that
 			// RecordErrorLog dual-writes the ErrorSignatureHash column, matching the
 			// K error-signature convention (see service/relay_error.go).
-			other.SetAdmin("error_signature", signature)
-			other.SetAdmin("error_signature_hash", service.ErrorSignatureHash(signature))
+			other.SetAdmin("error_signature", classification.Signature)
+			other.SetAdmin("error_signature_hash", classification.SignatureHash)
+			other.SetAdmin("error_detailed_type", classification.DetailedErrorType)
+			other.SetAdmin("error_attribution", classification.Attribution)
+			other.SetAdmin("error_note", classification.Note)
 			other.SetAdmin("node_name", common.NodeName)
 			other.SetAdmin("system_overload", map[string]any{
 				"cpu_usage":        status.CPUUsage,
@@ -57,9 +60,8 @@ func SystemPerformanceCheck() gin.HandlerFunc {
 				"authenticated":    false,
 			})
 			model.RecordErrorLog(c, 0, 0, "", "", err.ErrorWithStatusCode(), 0, 0, false, "", other)
-			signatureHash := service.ErrorSignatureHash(signature)
-			prommetrics.RecordError(model.ResolveErrorShortName(signatureHash),
-				model.ResolveErrorAttribution(signatureHash), "", "", "503", "", "false", "")
+			prommetrics.RecordError(classification.DetailedErrorType,
+				classification.Attribution, "", "", "503", "", "false", "")
 		}
 		if strings.HasPrefix(c.Request.URL.Path, "/v1/messages") {
 			c.JSON(err.StatusCode, gin.H{

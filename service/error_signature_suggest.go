@@ -12,7 +12,8 @@ import (
 type SuggestedRule struct {
 	Name        string `json:"name"`
 	Pattern     string `json:"pattern"`
-	Replacement string `json:"replacement"`
+	Attribution string `json:"attribution"`
+	Note        string `json:"note"`
 	Enabled     bool   `json:"enabled"`
 	Example     string `json:"example"`
 	MatchCount  int    `json:"match_count"`
@@ -22,9 +23,8 @@ type SuggestedRule struct {
 // input signatures are already normalized by the active rules, anything a
 // detector still matches is leftover variance worth collapsing.
 type signatureSuggestionDetector struct {
-	name        string
-	re          *regexp.Regexp
-	replacement string
+	name string
+	re   *regexp.Regexp
 }
 
 const suggestionExampleMaxLen = 200
@@ -34,14 +34,14 @@ const suggestionExampleMaxLen = 200
 // vendor ids, emails, ARNs, retry delays, long quoted ids). They are RE2 and
 // template-only, so a suggestion can be pasted straight into the rule editor.
 var signatureSuggestionDetectors = []signatureSuggestionDetector{
-	{"long-number", regexp.MustCompile(`\b\d{5,}\b`), "*"},
-	{"org-id", regexp.MustCompile(`\borg-[A-Za-z0-9]{6,}\b`), "org-*"},
-	{"project-id", regexp.MustCompile(`\bproj_[A-Za-z0-9]{6,}\b`), "proj_*"},
-	{"email", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`), "*"},
-	{"aws-arn", regexp.MustCompile(`arn:aws[0-9a-z-]*:[A-Za-z0-9:/_.*-]+`), "*"},
-	{"retry-after", regexp.MustCompile(`(?i)(try again in )[0-9.]+ ?m?s`), "${1}*"},
-	{"duration", regexp.MustCompile(`\b[0-9.]+ms\b`), "*"},
-	{"long-quoted-id", regexp.MustCompile(`'[A-Za-z0-9._-]{10,}'`), "'*'"},
+	{"long-number", regexp.MustCompile(`\b\d{5,}\b`)},
+	{"org-id", regexp.MustCompile(`\borg-[A-Za-z0-9]{6,}\b`)},
+	{"project-id", regexp.MustCompile(`\bproj_[A-Za-z0-9]{6,}\b`)},
+	{"email", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)},
+	{"aws-arn", regexp.MustCompile(`arn:aws[0-9a-z-]*:[A-Za-z0-9:/_.*-]+`)},
+	{"retry-after", regexp.MustCompile(`(?i)(try again in )[0-9.]+ ?m?s`)},
+	{"duration", regexp.MustCompile(`\b[0-9.]+ms\b`)},
+	{"long-quoted-id", regexp.MustCompile(`'[A-Za-z0-9._-]{10,}'`)},
 }
 
 // SuggestErrorSignatureRules scans the given (already-normalized) signatures and
@@ -69,7 +69,8 @@ func SuggestErrorSignatureRules(signatures []string) []SuggestedRule {
 		out = append(out, SuggestedRule{
 			Name:        d.name,
 			Pattern:     d.re.String(),
-			Replacement: d.replacement,
+			Attribution: "",
+			Note:        "Suggested rule; review the pattern and set attribution before enabling.",
 			Enabled:     true,
 			Example:     example,
 			MatchCount:  count,

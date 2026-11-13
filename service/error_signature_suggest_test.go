@@ -28,7 +28,8 @@ func TestSuggestErrorSignatureRules(t *testing.T) {
 	require.True(t, ok, "expected a long-number suggestion")
 	assert.Equal(t, 2, longNum.MatchCount)
 	assert.Equal(t, `\b\d{5,}\b`, longNum.Pattern)
-	assert.Equal(t, "*", longNum.Replacement)
+	assert.Empty(t, longNum.Attribution)
+	assert.NotEmpty(t, longNum.Note)
 	assert.True(t, longNum.Enabled)
 	assert.NotEmpty(t, longNum.Example)
 

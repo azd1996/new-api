@@ -22,10 +22,8 @@ type ErrorStatFilter struct {
 	// logs that carry no decoded customer, mirroring the usage-log filters.
 	CustomerId   string
 	CustomerName string
-	// ShortName / Attribution narrow by the admin-configured category (明细错误类型)
-	// and attribution (错误归因). These are resolved per signature from the alias
-	// cache (not stored in logs), so they are applied in Go after resolution
-	// rather than in the SQL scan. Empty means no narrowing.
+	// ShortName / Attribution narrow by the persisted classification (new logs)
+	// or the alias cache (legacy logs). They are applied in Go after the SQL scan.
 	ShortName   string
 	Attribution string
 }
@@ -45,6 +43,9 @@ const (
 type ErrorSignatureStat struct {
 	SignatureHash string
 	Signature     string
+	ShortName     string
+	Attribution   string
+	Note          string
 	Count         int64
 	FirstSeen     int64
 	LastSeen      int64
@@ -99,14 +100,13 @@ func applyErrorStatFilter(tx *gorm.DB, f ErrorStatFilter) *gorm.DB {
 	return tx
 }
 
-// matchesErrorCategoryFilter reports whether a signature hash passes the
-// short-name (明细错误类型) and attribution (错误归因) filters. Both are resolved
-// from the in-memory alias cache; an empty filter field matches everything.
-func matchesErrorCategoryFilter(f ErrorStatFilter, hash string) bool {
-	if f.ShortName != "" && ResolveErrorShortName(hash) != f.ShortName {
+// matchesErrorCategoryFilter reports whether a row passes the short-name
+// (明细错误类型) and attribution (错误归因) filters.
+func matchesErrorCategoryFilter(f ErrorStatFilter, o errorSignatureOther, hash string) bool {
+	if f.ShortName != "" && o.detailedErrorType(hash) != f.ShortName {
 		return false
 	}
-	if f.Attribution != "" && ResolveErrorAttribution(hash) != f.Attribution {
+	if f.Attribution != "" && o.attribution(hash) != f.Attribution {
 		return false
 	}
 	return true
@@ -129,6 +129,9 @@ type errorSignatureOther struct {
 	AdminInfo struct {
 		ErrorSignature     string `json:"error_signature"`
 		ErrorSignatureHash string `json:"error_signature_hash"`
+		ErrorDetailedType  string `json:"error_detailed_type"`
+		ErrorAttribution   string `json:"error_attribution"`
+		ErrorNote          string `json:"error_note"`
 		CustomerId         string `json:"customer_id"`
 	} `json:"admin_info"`
 	LegacyErrorSignature     string `json:"error_signature"`
@@ -155,6 +158,27 @@ func (o errorSignatureOther) customerId() string {
 		return o.AdminInfo.CustomerId
 	}
 	return o.LegacyCustomerId
+}
+
+func (o errorSignatureOther) detailedErrorType(hash string) string {
+	if o.AdminInfo.ErrorDetailedType != "" {
+		return o.AdminInfo.ErrorDetailedType
+	}
+	return ResolveErrorShortName(hash)
+}
+
+func (o errorSignatureOther) attribution(hash string) string {
+	if o.AdminInfo.ErrorAttribution != "" {
+		return o.AdminInfo.ErrorAttribution
+	}
+	return ResolveErrorAttribution(hash)
+}
+
+func (o errorSignatureOther) note(hash string) string {
+	if o.AdminInfo.ErrorNote != "" {
+		return o.AdminInfo.ErrorNote
+	}
+	return ResolveErrorNote(hash)
 }
 
 // scanErrorStatRows pulls the capped error-log window for the filter, newest
@@ -206,6 +230,9 @@ func GetErrorSignatureStats(f ErrorStatFilter, limit int) ([]*ErrorSignatureStat
 			s = &ErrorSignatureStat{
 				SignatureHash: hash,
 				Signature:     o.signature(),
+				ShortName:     o.detailedErrorType(hash),
+				Attribution:   o.attribution(hash),
+				Note:          o.note(hash),
 				FirstSeen:     r.CreatedAt,
 				LastSeen:      r.CreatedAt,
 				Models:        make(map[string]int64),
@@ -234,7 +261,10 @@ func GetErrorSignatureStats(f ErrorStatFilter, limit int) ([]*ErrorSignatureStat
 
 	out := make([]*ErrorSignatureStat, 0, len(agg))
 	for _, s := range agg {
-		if !matchesErrorCategoryFilter(f, s.SignatureHash) {
+		if f.ShortName != "" && s.ShortName != f.ShortName {
+			continue
+		}
+		if f.Attribution != "" && s.Attribution != f.Attribution {
 			continue
 		}
 		out = append(out, s)
@@ -291,9 +321,9 @@ func GetErrorStatsGrouped(f ErrorStatFilter, groupBy string, limit int) ([]*Erro
 				GroupLabel:    s.Signature,
 				Signature:     s.Signature,
 				SignatureHash: s.SignatureHash,
-				ShortName:     ResolveErrorShortName(s.SignatureHash),
-				Attribution:   ResolveErrorAttribution(s.SignatureHash),
-				Note:          ResolveErrorNote(s.SignatureHash),
+				ShortName:     s.ShortName,
+				Attribution:   s.Attribution,
+				Note:          s.Note,
 				Count:         s.Count,
 				FirstSeen:     s.FirstSeen,
 				LastSeen:      s.LastSeen,
@@ -320,12 +350,12 @@ func GetErrorStatsGrouped(f ErrorStatFilter, groupBy string, limit int) ([]*Erro
 			continue
 		}
 		hash := o.signatureHash()
-		if !matchesErrorCategoryFilter(f, hash) {
+		if !matchesErrorCategoryFilter(f, o, hash) {
 			continue
 		}
-		key := ResolveErrorShortName(hash)
+		key := o.detailedErrorType(hash)
 		if groupBy == ErrorStatGroupByAttribution {
-			key = ResolveErrorAttribution(hash)
+			key = o.attribution(hash)
 		}
 		s := agg[key]
 		if s == nil {

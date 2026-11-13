@@ -48,7 +48,8 @@ function toSignatureRule(suggestion: SuggestedRule): SignatureRule {
   return {
     name: suggestion.name,
     pattern: suggestion.pattern,
-    replacement: suggestion.replacement,
+    attribution: suggestion.attribution,
+    note: suggestion.note,
     enabled: true,
   }
 }
@@ -155,11 +156,11 @@ export function ErrorSignatureRuleSuggestionsDialog(
                 </div>
                 <div className='space-y-1'>
                   <span className='text-muted-foreground text-xs'>
-                    {t('Replacement')}
+                    {t('Rule behavior')}
                   </span>
-                  <pre className='bg-background overflow-x-auto rounded-md border p-2 font-mono text-xs break-all whitespace-pre-wrap'>
-                    {suggestion.replacement}
-                  </pre>
+                  <p className='text-muted-foreground text-xs'>
+                    {t('First match sets the rule name as the detailed error type.')}
+                  </p>
                 </div>
               </div>
 
