@@ -25,6 +25,8 @@ import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
+import type { ComboboxInputOption } from '@/components/ui/combobox-input'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -40,6 +42,7 @@ interface ErrorSignatureRulesDialogProps {
   // the dialog opens, deduping by identical pattern. Used to push suggested
   // rules from the suggestions dialog into the editor.
   initialExtraRules?: SignatureRule[]
+  attributionOptions: string[]
 }
 
 // Local row wrapper: rules have no stable identity from the backend, so we
@@ -89,6 +92,8 @@ export function ErrorSignatureRulesDialog(
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [rules, setRules] = useState<RuleRow[]>([])
+  const attributionOptions: ComboboxInputOption[] =
+    props.attributionOptions.map((value) => ({ value, label: value }))
 
   const rulesQuery = useQuery({
     queryKey: ['error-signature-rules'],
@@ -163,7 +168,7 @@ export function ErrorSignatureRulesDialog(
       onOpenChange={props.onOpenChange}
       title={t('Normalization rules')}
       description={t(
-        'Rules match the complete raw error string from top to bottom. The first match sets the detailed error type, attribution, and normalized error signature.'
+        'Rules match the complete raw error string from top to bottom. The first match sets the detailed error type to the rule name and supplies its attribution and normalized error signature.'
       )}
       contentClassName='sm:max-w-3xl'
       footer={
@@ -309,12 +314,16 @@ export function ErrorSignatureRulesDialog(
                     >
                       {t('Error Attribution')}
                     </Label>
-                    <Input
+                    <Combobox
                       id={`rule-attribution-${index}`}
+                      options={attributionOptions}
                       value={rule.attribution}
-                      onChange={(e) =>
-                        updateRule(index, { attribution: e.target.value })
+                      onValueChange={(value) =>
+                        updateRule(index, { attribution: value ?? '' })
                       }
+                      placeholder={t('Error Attribution')}
+                      searchPlaceholder={t('Error Attribution')}
+                      emptyText={t('No option found.')}
                       className='h-8'
                     />
                   </div>

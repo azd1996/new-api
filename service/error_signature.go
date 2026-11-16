@@ -143,14 +143,7 @@ func ClassifyError(content string) ErrorClassification {
 	signatureRulesMu.RUnlock()
 	for _, rule := range rules {
 		if rule.re.MatchString(content) {
-			signature := rule.signature
-			if strings.TrimSpace(signature) == "" {
-				signature = content
-				for _, fallbackRule := range fallbackSignatureRules {
-					signature = fallbackRule.re.ReplaceAllString(signature, fallbackRule.replacement)
-				}
-			}
-			signature = truncateErrorSignature(signature)
+			signature := truncateErrorSignature(rule.signature)
 			return ErrorClassification{
 				Signature:         signature,
 				SignatureHash:     ErrorSignatureHash(signature),

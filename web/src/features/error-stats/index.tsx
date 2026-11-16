@@ -453,6 +453,7 @@ export function ErrorStats() {
               open={rulesOpen}
               onOpenChange={handleRulesOpenChange}
               initialExtraRules={pendingExtraRules}
+              attributionOptions={attributionOptions}
             />
           </div>
         )}
