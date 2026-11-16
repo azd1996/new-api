@@ -5,6 +5,12 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-11-16]
+
+### 修复 Fixed
+
+- **明细错误规则未使用归一化错误签名**：修复用户规则命中后仍将完整原始错误串作为签名的问题。现在规则可配置稳定的“归一化后的错误签名”，命中后直接使用该签名生成统计 hash；例如 Bedrock thinking signature 错误可统一聚合为 `Invalid \`signature\` in \`thinking\` block`，不再因 RequestID 和 request id 变化产生大量明细错误。
+
 ## [2026-11-13]
 
 ### 变更 Changed

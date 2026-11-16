@@ -137,6 +137,7 @@ export interface UpsertErrorAliasPayload {
 export interface SignatureRule {
   name: string
   pattern: string
+  signature: string
   attribution: string
   note: string
   enabled: boolean
@@ -148,6 +149,7 @@ export interface SignatureRule {
 export interface SuggestedRule {
   name: string
   pattern: string
+  signature: string
   attribution: string
   note: string
   enabled: boolean

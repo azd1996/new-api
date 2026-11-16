@@ -64,6 +64,7 @@ function toRules(rows: RuleRow[]): SignatureRule[] {
   return rows.map((row) => ({
     name: row.name,
     pattern: row.pattern,
+    signature: row.signature,
     attribution: row.attribution,
     note: row.note,
     enabled: row.enabled,
@@ -74,6 +75,7 @@ function emptyRow(): RuleRow {
   return {
     name: '',
     pattern: '',
+    signature: '',
     attribution: '',
     note: '',
     enabled: true,
@@ -161,7 +163,7 @@ export function ErrorSignatureRulesDialog(
       onOpenChange={props.onOpenChange}
       title={t('Normalization rules')}
       description={t(
-        'Rules match the complete raw error string from top to bottom. The first match sets the detailed error type to the rule name and supplies its attribution.'
+        'Rules match the complete raw error string from top to bottom. The first match sets the detailed error type, attribution, and normalized error signature.'
       )}
       contentClassName='sm:max-w-3xl'
       footer={
@@ -251,7 +253,7 @@ export function ErrorSignatureRulesDialog(
                   </div>
                 </div>
 
-                <div className='grid gap-3 sm:grid-cols-3'>
+                <div className='grid gap-3 sm:grid-cols-4'>
                   <div className='space-y-1.5'>
                     <Label
                       htmlFor={`rule-name-${index}`}
@@ -282,6 +284,22 @@ export function ErrorSignatureRulesDialog(
                         updateRule(index, { pattern: e.target.value })
                       }
                       className='h-8 font-mono'
+                    />
+                  </div>
+                  <div className='space-y-1.5'>
+                    <Label
+                      htmlFor={`rule-signature-${index}`}
+                      className='text-muted-foreground text-xs'
+                    >
+                      {t('Normalized error signature')}
+                    </Label>
+                    <Input
+                      id={`rule-signature-${index}`}
+                      value={rule.signature}
+                      onChange={(e) =>
+                        updateRule(index, { signature: e.target.value })
+                      }
+                      className='h-8'
                     />
                   </div>
                   <div className='space-y-1.5'>

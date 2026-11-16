@@ -48,6 +48,7 @@ function toSignatureRule(suggestion: SuggestedRule): SignatureRule {
   return {
     name: suggestion.name,
     pattern: suggestion.pattern,
+    signature: suggestion.signature,
     attribution: suggestion.attribution,
     note: suggestion.note,
     enabled: true,

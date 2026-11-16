@@ -12,6 +12,7 @@ import (
 type SuggestedRule struct {
 	Name        string `json:"name"`
 	Pattern     string `json:"pattern"`
+	Signature   string `json:"signature"`
 	Attribution string `json:"attribution"`
 	Note        string `json:"note"`
 	Enabled     bool   `json:"enabled"`
@@ -69,6 +70,7 @@ func SuggestErrorSignatureRules(signatures []string) []SuggestedRule {
 		out = append(out, SuggestedRule{
 			Name:        d.name,
 			Pattern:     d.re.String(),
+			Signature:   "",
 			Attribution: "",
 			Note:        "Suggested rule; review the pattern and set attribution before enabling.",
 			Enabled:     true,

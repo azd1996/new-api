@@ -23,6 +23,7 @@ const errorSignatureRulesOptionKey = "ErrorSignatureRules"
 type SignatureRule struct {
 	Name        string `json:"name"`
 	Pattern     string `json:"pattern"`
+	Signature   string `json:"signature"`
 	Attribution string `json:"attribution"`
 	Note        string `json:"note"`
 	Enabled     bool   `json:"enabled"`
@@ -34,6 +35,7 @@ const maxSignatureLen = 2000
 
 type compiledSignatureRule struct {
 	name        string
+	signature   string
 	re          *regexp.Regexp
 	attribution string
 	note        string
@@ -92,6 +94,7 @@ func SetErrorSignatureRules(rules []SignatureRule) error {
 		}
 		compiled = append(compiled, compiledSignatureRule{
 			name:        r.Name,
+			signature:   r.Signature,
 			attribution: r.Attribution,
 			note:        r.Note,
 			re:          re,
@@ -140,7 +143,14 @@ func ClassifyError(content string) ErrorClassification {
 	signatureRulesMu.RUnlock()
 	for _, rule := range rules {
 		if rule.re.MatchString(content) {
-			signature := truncateErrorSignature(content)
+			signature := rule.signature
+			if strings.TrimSpace(signature) == "" {
+				signature = content
+				for _, fallbackRule := range fallbackSignatureRules {
+					signature = fallbackRule.re.ReplaceAllString(signature, fallbackRule.replacement)
+				}
+			}
+			signature = truncateErrorSignature(signature)
 			return ErrorClassification{
 				Signature:         signature,
 				SignatureHash:     ErrorSignatureHash(signature),

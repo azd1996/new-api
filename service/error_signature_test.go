@@ -131,11 +131,12 @@ func TestSetErrorSignatureRulesRejectsBadPattern(t *testing.T) {
 func TestApplyErrorSignatureRulesJSON(t *testing.T) {
 	require.NoError(t, SetErrorSignatureRules(nil))
 
-	custom := `[{"name":"foo-error","pattern":"foo[0-9]+","attribution":"upstream","enabled":true}]`
+	custom := `[{"name":"foo-error","pattern":"foo[0-9]+","signature":"normalized foo error","attribution":"upstream","enabled":true}]`
 	require.NoError(t, ApplyErrorSignatureRulesJSON(custom))
 	classification := ClassifyError("bar foo12345 baz")
 	assert.Equal(t, "foo-error", classification.DetailedErrorType)
 	assert.Equal(t, "upstream", classification.Attribution)
+	assert.Equal(t, "normalized foo error", classification.Signature)
 
 	rules := GetEffectiveErrorSignatureRules()
 	require.Len(t, rules, 1)
@@ -162,7 +163,7 @@ func TestApplyPersistedErrorSignatureRules(t *testing.T) {
 	if common.OptionMap == nil {
 		common.OptionMap = make(map[string]string)
 	}
-	common.OptionMap[errorSignatureRulesOptionKey] = `[{"name":"numeric-error","pattern":"[0-9]+","attribution":"validation","enabled":true}]`
+	common.OptionMap[errorSignatureRulesOptionKey] = `[{"name":"numeric-error","pattern":"[0-9]+","signature":"numeric error","attribution":"validation","enabled":true}]`
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {
 		common.OptionMapRWMutex.Lock()
@@ -173,6 +174,7 @@ func TestApplyPersistedErrorSignatureRules(t *testing.T) {
 
 	require.NoError(t, ApplyPersistedErrorSignatureRules())
 	assert.Equal(t, "numeric-error", ClassifyError("code=4096").DetailedErrorType)
+	assert.Equal(t, "numeric error", ClassifyError("code=4096").Signature)
 
 	// Clearing the option removes user classification rules and re-enables
 	// built-in fallback normalization.
@@ -185,8 +187,8 @@ func TestApplyPersistedErrorSignatureRules(t *testing.T) {
 
 func TestClassifyErrorUsesFirstMatchingUserRule(t *testing.T) {
 	require.NoError(t, SetErrorSignatureRules([]SignatureRule{
-		{Name: "generic", Pattern: `requests-\w+`, Attribution: "provider", Enabled: true},
-		{Name: "specific", Pattern: `requests-donot-satisfy-constrains`, Attribution: "request", Enabled: true},
+		{Name: "generic", Pattern: `requests-\w+`, Signature: "generic request error", Attribution: "provider", Enabled: true},
+		{Name: "specific", Pattern: `requests-donot-satisfy-constrains`, Signature: "specific request error", Attribution: "request", Enabled: true},
 	}))
 	t.Cleanup(func() {
 		_ = SetErrorSignatureRules(nil)
@@ -196,7 +198,30 @@ func TestClassifyErrorUsesFirstMatchingUserRule(t *testing.T) {
 	assert.Equal(t, "generic", result.DetailedErrorType)
 	assert.Equal(t, "provider", result.Attribution)
 	assert.True(t, result.UserRuleMatched)
-	assert.Equal(t, "status_code=400: requests-donot-satisfy-constrains", result.Signature)
+	assert.Equal(t, "generic request error", result.Signature)
+}
+
+func TestClassifyErrorUsesConfiguredNormalizedSignature(t *testing.T) {
+	require.NoError(t, SetErrorSignatureRules([]SignatureRule{
+		{
+			Name:        "bedrock-invalid-thinking-signature",
+			Pattern:     `(?s).*Invalid \x60signature\x60 in \x60thinking\x60 block.*`,
+			Signature:   "Invalid `signature` in `thinking` block",
+			Attribution: "upstream",
+			Enabled:     true,
+		},
+	}))
+	t.Cleanup(func() {
+		_ = SetErrorSignatureRules(nil)
+	})
+
+	raw := "InvokeModelWithResponseStream: operation error Bedrock Runtime: InvokeModelWithResponseStream, https response error StatusCode: 400, RequestID: 485cfe96-f32b-4851-91d2-2cced24bf369, ValidationException: ***.***.content.0: Invalid `signature` in `thinking` block (request id: 20261116031153820529162TcNh3HgX) (request id: 202611160311529257004258268d9d6oWTf4zTG) (request id: 2ba722f206fb89fce67c67db78e23809)"
+	result := ClassifyError(raw)
+
+	assert.Equal(t, "bedrock-invalid-thinking-signature", result.DetailedErrorType)
+	assert.Equal(t, "upstream", result.Attribution)
+	assert.Equal(t, "Invalid `signature` in `thinking` block", result.Signature)
+	assert.Equal(t, ErrorSignatureHash(result.Signature), result.SignatureHash)
 }
 
 func TestClassifyErrorUsesFallbackOnlyWhenNoUserRuleMatches(t *testing.T) {
