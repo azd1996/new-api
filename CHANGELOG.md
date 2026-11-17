@@ -7,6 +7,10 @@
 
 ## [2026-11-16]
 
+### 变更 Changed
+
+- **按范围开启调试日志支持模型名前缀匹配**：`debug_scope_setting.rules` 的 `model`（以及 `token_name`）字段末尾加 `*` 即按前缀匹配，例如 `gpt-4o*` 同时命中 `gpt-4o` 与 `gpt-4o-mini`；不带 `*` 仍是精确相等，单独一个 `*` 表示该字段不限制取值。空字段规则依旧永不生效，两字段仍须同时命中。判定逻辑抽到 `debugScopeFieldMatches`（`strings.CutSuffix` + `strings.HasPrefix`），不支持中缀通配或 glob。前端规则行的模型输入框占位符与说明文案改为提示前缀写法（en/zh）。
+
 ### 修复 Fixed
 
 - **明细错误规则未使用归一化错误签名**：修复用户规则命中后仍将完整原始错误串作为签名的问题。现在规则可配置稳定的“归一化后的错误签名”，命中后直接使用该签名生成统计 hash；例如 Bedrock thinking signature 错误可统一聚合为 `Invalid \`signature\` in \`thinking\` block`，不再因 RequestID 和 request id 变化产生大量明细错误。

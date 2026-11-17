@@ -20,7 +20,16 @@ FROM golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d6
 ARG APP_VERSION
 
 ENV GO111MODULE=on CGO_ENABLED=0 GOWORK=off
-ENV GOPROXY=https://goproxy.cn,direct
+# GOPROXY uses '|' (not ',') so a TLS/connection error from one proxy falls
+# through to the next. With ',' a non-404/410 error — such as the goproxy.cn
+# TLS handshake timeouts seen during build — aborts `go mod download` instead of
+# retrying another mirror. The internal mirror (goproxy.baidu-int.com) is listed
+# first so builds on the internal network resolve without reaching the public
+# internet. Override at build time to point at a mirror reachable from the build
+# host:
+#   docker buildx build --build-arg GOPROXY=https://<mirror>,direct ...
+ARG GOPROXY=http://goproxy.baidu-int.com|https://goproxy.cn|https://goproxy.io|direct
+ENV GOPROXY=${GOPROXY}
 
 ARG TARGETOS
 ARG TARGETARCH

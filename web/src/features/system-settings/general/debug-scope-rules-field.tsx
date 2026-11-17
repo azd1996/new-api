@@ -90,7 +90,7 @@ export function DebugScopeRulesField(props: DebugScopeRulesFieldProps) {
               />
               <Input
                 className='min-w-0 flex-1'
-                placeholder={t('Model name (as requested by client)')}
+                placeholder={t('Model name or prefix (e.g. gpt-4o*)')}
                 value={row.model}
                 onChange={(event) =>
                   updateRow(index, { model: event.target.value })
