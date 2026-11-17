@@ -113,20 +113,6 @@ func SuccessContext(relayFormat string, statusCode int, body string) map[string]
 	}
 }
 
-// ShouldTriggerOnBody reports whether any rule's phase1+phase2 conditions match.
-// It is used on the success path to decide whether a 200 response body should be
-// treated as a retryable error.
-func ShouldTriggerOnBody(rules []dto.RetryRule, reqCtx, respCtx map[string]any) bool {
-	reqDoc := marshalContext(reqCtx)
-	respDoc := marshalContext(respCtx)
-	for i := range rules {
-		if rulePhasesPass(rules[i], reqDoc, respDoc) {
-			return true
-		}
-	}
-	return false
-}
-
 // Decision is the outcome of evaluating a channel's retry-override rules against
 // one failed or suspect response. Because rules are priority-ordered, it carries
 // the result of the single first-matching rule.
@@ -140,6 +126,18 @@ type Decision struct {
 	// they reach the caller only if this error is the one returned.
 	ReturnHeaders map[string]string
 	MatchedIndex  int // index into rules of the matched rule, -1 when none
+}
+
+// Applicable reports whether the matched rule's action can still run for this
+// request. Only retry_same_channel is limited: it fires at most once per request
+// (sameChannelRetried, i.e. RelayInfo.RetryFallbackDone). return_error and
+// fallback_next_channel stay applicable after that one retry, so a rule such as
+// "200 rate limit -> 429" still applies on the request a same-channel retry made.
+func (d Decision) Applicable(sameChannelRetried bool) bool {
+	if !d.Matched {
+		return false
+	}
+	return d.Action != ActionRetrySameChannel || !sameChannelRetried
 }
 
 // CollectRewrites evaluates rules in order and returns the Decision for the FIRST

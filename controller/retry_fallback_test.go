@@ -265,6 +265,32 @@ func TestRetryOverrideTemplateMatchesChannelOwn(t *testing.T) {
 				assert.Zero(t, got.Pinned)
 			},
 		},
+		{
+			// A 400 decrypt error used the same-channel retry; that retry's 200
+			// rate-limit body must still be turned into the configured 429.
+			name:    "return_error still applies after the same-channel retry",
+			rules:   `[{"phase2_response_conditions":{"conditions":[{"path":"status_code","mode":"full","value":200},{"path":"response_body","mode":"regex","value":"rate limit"}],"logic":"AND"},"phase4_retry_action":{"action":"return_error","status_code":429}},{"phase2_response_conditions":{"conditions":[{"path":"status_code","mode":"full","value":400}]},"phase4_retry_action":"retry_same_channel"}]`,
+			status:  200,
+			message: `{"type":"response.failed","response":{"error":{"message":"rate limit exceeded"}}}`,
+			done:    true,
+			check: func(t *testing.T, got retryOutcome) {
+				assert.False(t, got.Triggered)
+				require.NotNil(t, got.Terminate)
+				assert.Equal(t, 429, got.Terminate.StatusCode)
+				assert.Equal(t, retryrule.ActionReturnError, got.Action)
+			},
+		},
+		{
+			name:   "next-channel fallback still applies after the same-channel retry",
+			rules:  `[{` + cond429 + `,"phase4_retry_action":"fallback_next_channel"}]`,
+			status: 429,
+			done:   true,
+			check: func(t *testing.T, got retryOutcome) {
+				assert.True(t, got.Triggered)
+				assert.Equal(t, retryrule.ActionFallbackNextChannel, got.Action)
+				assert.Zero(t, got.Pinned)
+			},
+		},
 	}
 
 	for _, tt := range tests {

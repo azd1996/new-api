@@ -105,11 +105,14 @@ func (g *precommitGuard) finish(process func(string)) {
 }
 
 // retryBodyGuardError inspects a successful (2xx) upstream response body against
-// the channel's retry_override rules. When a rule's conditions match the body
-// (e.g. a rate-limit message returned with HTTP 200), it returns a synthesized
-// retryable error carrying the body, so the relay loop enters the retry-override
-// fallback path (which, for a 200 trigger, always falls back to the next
-// channel). Returns nil when there is nothing to do.
+// the channel's retry_override rules. When the first matching rule (e.g. a
+// rate-limit message returned with HTTP 200) can still run, it returns a
+// synthesized retryable error carrying the body, so the relay loop enters the
+// retry-override path, which applies that same rule's phase4 action. A rule that
+// can no longer run (its one-shot same-channel retry is used, or a next-channel
+// fallback has no retry left) is not intercepted: nothing would handle the error,
+// so the body passes through to the client instead of being dropped. Returns nil
+// when there is nothing to do.
 func retryBodyGuardError(info *relaycommon.RelayInfo, statusCode int, body []byte) *types.NewAPIError {
 	if info == nil || info.ChannelMeta == nil {
 		return nil
@@ -131,7 +134,11 @@ func retryBodyGuardError(info *relaycommon.RelayInfo, statusCode int, body []byt
 	if m, ok := reqCtx["model"]; ok {
 		respCtx["model"] = m
 	}
-	if !retryrule.ShouldTriggerOnBody(ops, reqCtx, respCtx) {
+	decision := retryrule.CollectRewrites(ops, reqCtx, respCtx)
+	if !decision.Applicable(info.RetryFallbackDone) {
+		return nil
+	}
+	if decision.Action == retryrule.ActionFallbackNextChannel && info.RetryIndex >= common.RetryTimes {
 		return nil
 	}
 	return types.NewErrorWithStatusCode(errors.New(string(snippet)), types.ErrorCodeBadResponseStatusCode, statusCode)

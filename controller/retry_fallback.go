@@ -32,7 +32,8 @@ type retryOverrideTerminate struct {
 //
 //   - retry_same_channel (default): soft-pin the same channel and grant a
 //     one-shot retry via ResetRetryNextTry (does not consume RetryTimes budget);
-//     guarded one-shot per request via RetryFallbackDone. retryTriggered=true.
+//     guarded one-shot per request via RetryFallbackDone, which blocks only this
+//     action. retryTriggered=true.
 //   - fallback_next_channel: neither pin nor reset, so the loop advances to the
 //     next channel; multi-hop (not one-shot), bounded by RetryTimes and channel
 //     availability. retryTriggered=true.
@@ -41,9 +42,9 @@ type retryOverrideTerminate struct {
 //     log records the original upstream status/message. The caller logs the
 //     attempt, then applies terminate to the response error and breaks.
 func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, channel *model.Channel, apiErr *types.NewAPIError, relayFormat types.RelayFormat, retryParam *service.RetryParam) (bool, *retryOverrideTerminate, map[string]interface{}) {
-	if info == nil || channel == nil || apiErr == nil || info.RetryFallbackDone {
-		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: hook skipped by guard (info=%t channel=%t apiErr=%t fallbackDone=%t)",
-			info != nil, channel != nil, apiErr != nil, info != nil && info.RetryFallbackDone))
+	if info == nil || channel == nil || apiErr == nil {
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: hook skipped by guard (info=%t channel=%t apiErr=%t)",
+			info != nil, channel != nil, apiErr != nil))
 		return false, nil, nil
 	}
 	chSetting := channel.GetSetting()
@@ -75,6 +76,13 @@ func maybeApplyRetryRuleFallback(c *gin.Context, info *relaycommon.RelayInfo, ch
 	decision := retryrule.CollectRewrites(ops, reqCtx, respCtx)
 	if !decision.Matched {
 		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: no rule matched on channel #%d, not retrying", channel.Id))
+		return false, nil, nil
+	}
+	// The first matching rule decides even when it cannot run: a used-up
+	// same-channel retry does not fall through to a later rule.
+	if !decision.Applicable(info.RetryFallbackDone) {
+		logger.LogDebug(c, "%s", fmt.Sprintf("retry-override: rule #%d matched on channel #%d but its one-shot same-channel retry is already used",
+			decision.MatchedIndex, channel.Id))
 		return false, nil, nil
 	}
 	if data, err := common.Marshal(decision.Rewrites); err == nil {
