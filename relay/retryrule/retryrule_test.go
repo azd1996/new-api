@@ -192,18 +192,23 @@ func TestCollectRewritesReturnsFirstMatchedRuleIndex(t *testing.T) {
 	assert.Equal(t, "a", d.Rewrites[0]["path"])
 }
 
-func TestShouldTriggerOnBody(t *testing.T) {
-	rules := []dto.RetryRule{{
-		Phase2ResponseConditions: phase("AND",
-			cond("status_code", "full", float64(200)),
-			cond("response_body", "contains", "rate limit"),
-		),
-	}}
-	hit := SuccessContext("openai", 200, `{"error":{"message":"account rate limit exceeded"}}`)
-	assert.True(t, ShouldTriggerOnBody(rules, map[string]any{}, hit))
-
-	miss := SuccessContext("openai", 200, `{"choices":[{"delta":{"content":"hello"}}]}`)
-	assert.False(t, ShouldTriggerOnBody(rules, map[string]any{}, miss))
+// Only retry_same_channel is one-shot per request: once it was used, a later
+// return_error or fallback_next_channel match must still apply.
+func TestDecisionApplicableAfterSameChannelRetry(t *testing.T) {
+	for _, tc := range []struct {
+		decision                     Decision
+		wantFresh, wantAfterOneRetry bool
+	}{
+		{decision: Decision{Matched: true, Action: ActionRetrySameChannel}, wantFresh: true, wantAfterOneRetry: false},
+		{decision: Decision{Matched: true, Action: ActionReturnError, ReturnStatus: 429}, wantFresh: true, wantAfterOneRetry: true},
+		{decision: Decision{Matched: true, Action: ActionFallbackNextChannel}, wantFresh: true, wantAfterOneRetry: true},
+		{decision: Decision{Action: ActionRetrySameChannel, MatchedIndex: -1}, wantFresh: false, wantAfterOneRetry: false},
+	} {
+		t.Run(tc.decision.Action, func(t *testing.T) {
+			assert.Equal(t, tc.wantFresh, tc.decision.Applicable(false))
+			assert.Equal(t, tc.wantAfterOneRetry, tc.decision.Applicable(true))
+		})
+	}
 }
 
 func TestCollectRewritesInvalidConditionIsGraceful(t *testing.T) {

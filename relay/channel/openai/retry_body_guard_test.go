@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -76,6 +77,50 @@ func TestPrecommitGuardNoRulesPassthrough(t *testing.T) {
 	require.False(t, g.feed(`{"type":"error","message":"boom"}`, false, process))
 	assert.Equal(t, []string{`{"type":"error","message":"boom"}`}, forwarded)
 	assert.Nil(t, g.matched)
+}
+
+// The guard only drops a 200 body when the rule it matched can still run;
+// otherwise nothing would handle the error and the client would get no events.
+func TestRetryBodyGuardOnlyInterceptsApplicableRule(t *testing.T) {
+	previousRetryTimes := common.RetryTimes
+	common.RetryTimes = 1
+	t.Cleanup(func() { common.RetryTimes = previousRetryTimes })
+
+	for _, tc := range []struct {
+		name               string
+		action             string
+		sameChannelRetried bool
+		retryIndex         int
+		wantIntercept      bool
+	}{
+		{name: "return_error after same-channel retry", action: `{"action":"return_error","status_code":429}`, sameChannelRetried: true, wantIntercept: true},
+		{name: "same-channel retry not used yet", action: `"retry_same_channel"`, wantIntercept: true},
+		{name: "same-channel retry already used", action: `"retry_same_channel"`, sameChannelRetried: true},
+		{name: "fallback with a retry left", action: `"fallback_next_channel"`, sameChannelRetried: true, wantIntercept: true},
+		{name: "fallback with no retry left", action: `"fallback_next_channel"`, retryIndex: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			info := guardInfoWithRule()
+			var action dto.RetryAction
+			require.NoError(t, common.UnmarshalJsonStr(tc.action, &action))
+			info.ChannelSetting.RetryOverride[0].Phase4RetryAction = &action
+			info.RetryFallbackDone = tc.sameChannelRetried
+			info.RetryIndex = tc.retryIndex
+
+			g := newPrecommitGuard(info, http.StatusOK)
+			var forwarded []string
+			process := func(d string) { forwarded = append(forwarded, d) }
+			stopped := g.feed(`{"type":"error","message":"boom rate limit"}`, true, process)
+
+			assert.Equal(t, tc.wantIntercept, stopped)
+			assert.Equal(t, tc.wantIntercept, g.matched != nil)
+			if tc.wantIntercept {
+				assert.Empty(t, forwarded)
+			} else {
+				assert.Equal(t, []string{`{"type":"error","message":"boom rate limit"}`}, forwarded, "an unhandled match passes through")
+			}
+		})
+	}
 }
 
 func TestIsResponsesStreamCommit(t *testing.T) {
