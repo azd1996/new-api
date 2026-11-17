@@ -158,3 +158,27 @@ export interface ManageUserQuotaPayload {
 // ============================================================================
 
 export type UsersDialogType = 'create' | 'update' | 'delete'
+
+// ============================================================================
+// Quota Policy Types
+// ============================================================================
+
+export type UserQuotaPolicyMode = 'monthly_refresh' | 'fixed'
+
+export interface UserQuotaPolicy {
+  id: number
+  user_id: number
+  mode: UserQuotaPolicyMode
+  amount: number
+  enabled: boolean
+  last_granted_period: string
+  updated_by: number
+  created_at: number
+  updated_at: number
+}
+
+export interface UserQuotaPolicyPayload {
+  user_id: number
+  mode: UserQuotaPolicyMode | ''
+  amount: number
+}

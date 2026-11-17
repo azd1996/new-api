@@ -5,6 +5,15 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-11-17]
+
+### 新增 Added
+
+- **用户余额策略（每月刷新 / 固定额度）**：余额（钱包）模式下可按用户配置额度策略，无需改用订阅。新增 `user_quota_policies` 表（`user_id` 唯一索引，字段 `mode`/`amount`/`enabled`/`last_granted_period`），两种模式：`monthly_refresh` 按自然月（master 节点本地时区的每月 1 号 00:00）把 `users.quota` 覆盖为 `amount`，未用完额度与已充值余额一并清零；`fixed` 只应用一次、之后不再自动变动。策略存于独立表而非 `user.setting`，因为后者是用户可自行修改的 JSON（`/api/user/self`），且需要按状态查询到期用户。发放幂等由 `last_granted_period`（`YYYY-MM`）保证：钱包写入、幂等标记与策略读取在同一事务内（`lockForUpdate` 锁策略行与用户行），提交后按 delta 同步额度缓存并写一条充值日志（`Monthly quota refresh`，前后值入 `other.admin_info`），因此重启、重试或多 master 都不会重发或漏发。编辑额度或模式不会重开已结算的月份。
+- **月度余额刷新定时任务**：`service.StartQuotaRefreshTask` 仅 master 节点运行，1 分钟 tick、每批 300，`last_granted_period <> 当期` 作为到期条件，因此跨天停机恢复后会自动补发当月；同一批全部失败或跳过时退出本轮，避免重复扫描同一批。已结算/已删除/非本月模式/用户禁用的记录静默跳过，仅真实错误记 warn。
+- **额度策略接口**：`GET/PUT/DELETE /api/user/quota_policy` 与 `POST /api/user/quota_policy/apply`（立即结算本月）。权限沿用 `canManageTargetRole`，不能对角色不低于自己的用户配置；策略变更写管理审计日志（`user.quota_policy_update` / `user.quota_policy_delete`），立即发放写 `user.quota_monthly_refresh`。
+- **用户列表额度策略入口**：用户行菜单新增「额度策略」弹窗，可选关闭 / 每月刷新 / 固定额度，展示当前额度、下次刷新日（次月 1 号）、上次发放周期，并明确提示覆盖会清零未用完额度与充值余额；每月刷新模式下提供「立即发放本月额度」并带二次确认。仅新增 en/zh 文案。
+
 ## [2026-11-16]
 
 ### 变更 Changed

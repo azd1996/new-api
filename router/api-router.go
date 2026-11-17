@@ -168,6 +168,12 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.DELETE("/:id", controller.DeleteUser)
 				adminRoute.DELETE("/:id/reset_passkey", controller.AdminResetPasskey)
 
+				// Per-user balance policy: monthly refresh or one-off fixed amount
+				adminRoute.GET("/quota_policy", middleware.DisableCache(), controller.GetUserQuotaPolicy)
+				adminRoute.PUT("/quota_policy", middleware.DisableCache(), controller.PutUserQuotaPolicy)
+				adminRoute.DELETE("/quota_policy", controller.DeleteUserQuotaPolicy)
+				adminRoute.POST("/quota_policy/apply", controller.ApplyUserQuotaPolicy)
+
 				// Admin 2FA routes
 				adminRoute.GET("/2fa/stats", controller.Admin2FAStats)
 				adminRoute.DELETE("/:id/2fa", controller.AdminDisable2FA)

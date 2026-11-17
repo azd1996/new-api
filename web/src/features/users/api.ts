@@ -33,6 +33,8 @@ import type {
   ManageUserAction,
   ManageUserQuotaPayload,
   ApiResponse,
+  UserQuotaPolicy,
+  UserQuotaPolicyPayload,
 } from './types'
 
 // A step-up proof is single-use, so the request carrying it must never be
@@ -173,6 +175,40 @@ export async function adjustUserQuota(
   payload: ManageUserQuotaPayload
 ): Promise<ApiResponse<Partial<User>>> {
   const res = await api.post('/api/user/manage', payload)
+  return res.data
+}
+
+/**
+ * Get the balance (quota) policy of one user; data.policy is null when unset
+ */
+export async function getUserQuotaPolicy(
+  userId: number
+): Promise<ApiResponse<{ policy: UserQuotaPolicy | null }>> {
+  const res = await api.get('/api/user/quota_policy', {
+    params: { user_id: userId },
+  })
+  return res.data
+}
+
+/**
+ * Create or update the balance policy of one user; an empty mode clears it
+ */
+export async function saveUserQuotaPolicy(
+  payload: UserQuotaPolicyPayload
+): Promise<ApiResponse<{ policy: UserQuotaPolicy }>> {
+  const res = await api.put('/api/user/quota_policy', payload)
+  return res.data
+}
+
+/**
+ * Grant the monthly refresh immediately instead of waiting for the next month
+ */
+export async function applyUserQuotaPolicy(
+  userId: number
+): Promise<ApiResponse<{ from: number; to: number } | null>> {
+  const res = await api.post('/api/user/quota_policy/apply', {
+    user_id: userId,
+  })
   return res.data
 }
 
