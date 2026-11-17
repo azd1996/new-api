@@ -65,6 +65,34 @@ func TestClaudeStreamFinalUsageEstimatesOnlyUncountedUsage(t *testing.T) {
 	}
 }
 
+func TestClaudeStreamKeepsPassedThroughBedrockInvocationMetrics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name               string
+		format             types.RelayFormat
+		stop               string
+		wantSource         string
+		wantFirst, wantAll int64
+	}{
+		{name: "claude client", format: types.RelayFormatClaude, stop: `{"type":"message_stop","amazon-bedrock-invocationMetrics":{"inputTokenCount":2,"outputTokenCount":259,"invocationLatency":9014,"firstByteLatency":7291}}`, wantSource: "aws_bedrock", wantFirst: 7291, wantAll: 9014},
+		{name: "openai client", format: types.RelayFormatOpenAI, stop: `{"type":"message_stop","amazon-bedrock-invocationMetrics":{"invocationLatency":9014,"firstByteLatency":7291}}`, wantSource: "aws_bedrock", wantFirst: 7291, wantAll: 9014},
+		{name: "upstream without bedrock metrics", format: types.RelayFormatClaude, stop: `{"type":"message_stop"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			info := &relaycommon.RelayInfo{RelayFormat: tc.format, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude-opus-4-8"}}
+			state := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+			require.Nil(t, HandleStreamResponseData(c, info, state, `{"type":"message_start","message":{"id":"msg_1","model":"claude-opus-4-8","usage":{"input_tokens":2,"output_tokens":1}}}`))
+			require.Nil(t, HandleStreamResponseData(c, info, state, `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":259}}`))
+			require.Nil(t, HandleStreamResponseData(c, info, state, tc.stop))
+			assert.Equal(t, tc.wantSource, info.UpstreamLatencySource)
+			assert.Equal(t, tc.wantFirst, info.UpstreamFirstByteLatencyMs)
+			assert.Equal(t, tc.wantAll, info.UpstreamInvocationLatencyMs)
+		})
+	}
+}
+
 func TestResponseOpenAI2ClaudeToolUseInputIsObject(t *testing.T) {
 	tests := []struct {
 		name string

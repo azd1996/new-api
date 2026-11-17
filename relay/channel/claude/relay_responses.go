@@ -114,6 +114,7 @@ func ClaudeResponsesStreamHandler(c *gin.Context, resp *http.Response, info *rel
 		}
 		if claudeResponse.Type == "message_stop" {
 			info.StreamStatus.MarkCompleted()
+			observeBedrockInvocationMetrics(info, data)
 		}
 		if claudeResponse.Type == "message_start" && claudeResponse.Message != nil {
 			info.ObserveResponseModel(claudeResponse.Message.Model)

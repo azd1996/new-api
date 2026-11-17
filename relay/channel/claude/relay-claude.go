@@ -54,6 +54,20 @@ func warnClaudeStringMessage(c *gin.Context, message gjson.Result) {
 	logger.LogWarn(c, fmt.Sprintf("claude upstream returned a string \"message\" field instead of an object; tolerated during parsing, parseable_json=%s, value=%s", parseableJSON, raw))
 }
 
+// observeBedrockInvocationMetrics keeps the timing AWS Bedrock appends to the
+// final (message_stop) stream event. Upstreams that serve Claude from Bedrock
+// behind an Anthropic-compatible endpoint often pass that event through as is,
+// so the metrics reach this handler even though the channel type is not AWS.
+func observeBedrockInvocationMetrics(info *relaycommon.RelayInfo, data string) {
+	metrics := gjson.Get(data, "amazon-bedrock-invocationMetrics")
+	if !metrics.IsObject() {
+		return
+	}
+	info.UpstreamFirstByteLatencyMs = metrics.Get("firstByteLatency").Int()
+	info.UpstreamInvocationLatencyMs = metrics.Get("invocationLatency").Int()
+	info.UpstreamLatencySource = "aws_bedrock"
+}
+
 func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCompletionsStreamResponse {
 	return relayconvert.StreamResponseClaude2OpenAI(claudeResponse)
 }
@@ -129,6 +143,7 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 	if claudeResponse.Type == "message_stop" {
 		info.StreamStatus.MarkCompleted()
+		observeBedrockInvocationMetrics(info, data)
 	}
 	if info.RelayFormat == types.RelayFormatClaude {
 		FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
