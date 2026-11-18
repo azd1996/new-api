@@ -304,7 +304,7 @@ export function ErrorSignatureRulesDialog(
                       onChange={(e) =>
                         updateRule(index, { signature: e.target.value })
                       }
-                      className='h-8'
+                      className='h-8 font-mono'
                     />
                   </div>
                   <div className='space-y-1.5'>

@@ -29,6 +29,27 @@ type SignatureRule struct {
 	Enabled     bool   `json:"enabled"`
 }
 
+// UnmarshalJSON accepts the old replacement field as a signature template when
+// signature is absent. Both persisted options and API requests use this path;
+// responses and subsequent saves carry the template in signature.
+func (r *SignatureRule) UnmarshalJSON(data []byte) error {
+	type ruleJSON SignatureRule
+	var wire struct {
+		ruleJSON
+		Signature   *string `json:"signature"`
+		Replacement string  `json:"replacement"`
+	}
+	if err := common.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*r = SignatureRule(wire.ruleJSON)
+	r.Signature = wire.Replacement
+	if wire.Signature != nil {
+		r.Signature = *wire.Signature
+	}
+	return nil
+}
+
 // maxSignatureLen caps the normalized signature so a pathologically long
 // upstream error body cannot bloat the log row or the stats group key.
 const maxSignatureLen = 2000
@@ -142,8 +163,10 @@ func ClassifyError(content string) ErrorClassification {
 	rules := signatureRules
 	signatureRulesMu.RUnlock()
 	for _, rule := range rules {
-		if rule.re.MatchString(content) {
-			signature := truncateErrorSignature(rule.signature)
+		if match := rule.re.FindStringSubmatchIndex(content); match != nil {
+			// Expand only the template for the first match, without retaining
+			// unmatched raw prefixes/suffixes (which may contain dynamic IDs).
+			signature := truncateErrorSignature(string(rule.re.ExpandString(nil, rule.signature, content, match)))
 			return ErrorClassification{
 				Signature:         signature,
 				SignatureHash:     ErrorSignatureHash(signature),

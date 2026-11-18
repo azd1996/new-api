@@ -224,6 +224,65 @@ func TestClassifyErrorUsesConfiguredNormalizedSignature(t *testing.T) {
 	assert.Equal(t, ErrorSignatureHash(result.Signature), result.SignatureHash)
 }
 
+func TestErrorSignatureTemplates(t *testing.T) {
+	t.Cleanup(func() { _ = SetErrorSignatureRules(nil) })
+	for _, tc := range []struct {
+		name, config, input, want string
+	}{
+		{
+			name:   "numbered groups omit unmatched prefix and suffix",
+			config: `[{"name":"validation","pattern":"ValidationException: (\\w+) (\\w+)","signature":"${2}: ${1}","enabled":true}]`,
+			input:  "prefix ValidationException: invalid signature request-id=123",
+			want:   "signature: invalid",
+		},
+		{
+			name:   "named group and literal dollar",
+			config: `[{"name":"validation","pattern":"reason=(?P<reason>\\w+)","signature":"${reason} costs $$5","enabled":true}]`,
+			input:  "reason=invalid",
+			want:   "invalid costs $5",
+		},
+		{
+			name:   "legacy replacement becomes signature template",
+			config: `[{"name":"validation","pattern":"reason=(\\w+)","replacement":"error: ${1}","enabled":true}]`,
+			input:  "prefix reason=invalid suffix",
+			want:   "error: invalid",
+		},
+		{
+			name:   "explicit signature wins over legacy replacement",
+			config: `[{"name":"validation","pattern":"reason=(\\w+)","signature":"fixed","replacement":"${1}","enabled":true}]`,
+			input:  "reason=invalid",
+			want:   "fixed",
+		},
+		{
+			name:   "explicit empty signature wins over legacy replacement",
+			config: `[{"name":"validation","pattern":"reason=(\\w+)","signature":"","replacement":"${1}","enabled":true}]`,
+			input:  "reason=invalid",
+			want:   "",
+		},
+		{
+			name:   "first match supplies captures",
+			config: `[{"name":"validation","pattern":"reason=(\\w+)","signature":"${1}","enabled":true}]`,
+			input:  "reason=first reason=second",
+			want:   "first",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, ApplyErrorSignatureRulesJSON(tc.config))
+			result := ClassifyError(tc.input)
+			assert.True(t, result.UserRuleMatched)
+			assert.Equal(t, tc.want, result.Signature)
+			assert.Equal(t, ErrorSignatureHash(tc.want), result.SignatureHash)
+
+			// The API/editor save round trip must retain the resolved template,
+			// including templates loaded from the legacy replacement field.
+			saved, err := common.Marshal(GetEffectiveErrorSignatureRules())
+			require.NoError(t, err)
+			require.NoError(t, ApplyErrorSignatureRulesJSON(string(saved)))
+			assert.Equal(t, result, ClassifyError(tc.input))
+		})
+	}
+}
+
 func TestClassifyErrorUsesFallbackOnlyWhenNoUserRuleMatches(t *testing.T) {
 	require.NoError(t, SetErrorSignatureRules([]SignatureRule{
 		{Name: "known-error", Pattern: `known-error`, Attribution: "upstream", Enabled: true},
