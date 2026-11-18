@@ -707,6 +707,20 @@ export interface LogSuccessTable {
   channels: LogSuccessCell[]
 }
 
+export interface LogDriftCell {
+  // Consume rows the analysis scanned for this column (the rate denominator).
+  requests: number
+  // Of those, rows whose returned model matches neither requested nor upstream.
+  mismatch: number
+  // mismatch / requests; 0 when nothing was scanned.
+  rate: number
+}
+
+export interface LogDriftTable {
+  total: LogDriftCell
+  channels: LogDriftCell[]
+}
+
 export interface CacheMinTokenRule {
   label: string
   series: string
@@ -724,6 +738,7 @@ export interface LogAnalysisResult {
   }
   cache: LogCacheTable
   success: LogSuccessTable
+  drift: LogDriftTable
   thresholds: CacheMinTokenRule[]
   threshold_default: number
   scanned: number

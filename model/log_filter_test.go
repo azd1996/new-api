@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -687,6 +688,60 @@ func TestLogFilterRequestKeyRenamedDatabaseMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLogAnalysisModelDrift pins the model-drift counter of the analysis scan:
+// the denominator is every scanned consume row (rows whose models agree write no
+// response_model field at all, so they must still count as non-drift),
+// prefix/suffix-compatible names are not drift, and the per-channel cells align
+// with the resolved channel columns.
+func TestLogAnalysisModelDrift(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}, &Channel{}))
+
+	oldDB, oldLogDB := DB, LOG_DB
+	oldMemory := common.MemoryCacheEnabled
+	t.Cleanup(func() {
+		DB, LOG_DB = oldDB, oldLogDB
+		common.MemoryCacheEnabled = oldMemory
+	})
+	DB, LOG_DB = db, db
+	common.MemoryCacheEnabled = false
+
+	require.NoError(t, db.Create(&Channel{Id: 1, Name: "alpha"}).Error)
+	require.NoError(t, db.Create(&Channel{Id: 2, Name: "beta"}).Error)
+
+	now := time.Now().Unix()
+	observation := func(requested, upstream, returned string) string {
+		return `{"response_model":{"requested_model":` + strconv.Quote(requested) +
+			`,"upstream_model":` + strconv.Quote(upstream) +
+			`,"returned_model":` + strconv.Quote(returned) + `}}`
+	}
+	logs := []Log{
+		// alpha: a dated variant (prefix-compatible) and a real drift.
+		{Type: LogTypeConsume, ChannelId: 1, CreatedAt: now, Other: observation("gpt-5", "gpt-5", "gpt-5-2026-01-01")},
+		{Type: LogTypeConsume, ChannelId: 1, CreatedAt: now, Other: observation("claude-3", "claude-3", "gpt-4o")},
+		// beta: provider path (suffix-compatible), plus rows without an observation.
+		{Type: LogTypeConsume, ChannelId: 2, CreatedAt: now, Other: observation("deepseek-v3", "openai/deepseek-v3", "deepseek/deepseek-v3")},
+		{Type: LogTypeConsume, ChannelId: 2, CreatedAt: now, Other: `{}`},
+		{Type: LogTypeConsume, ChannelId: 2, CreatedAt: now, Other: `{"response_model":{"requested_model":"gpt-5","upstream_model":"gpt-5","returned_model":""}}`},
+		// Error logs are outside the consume-only scan.
+		{Type: LogTypeError, ChannelId: 1, CreatedAt: now, Other: observation("claude-3", "claude-3", "gpt-4o")},
+	}
+	require.NoError(t, db.Create(&logs).Error)
+
+	analysis, err := GetLogAnalysis(LogFilter{
+		StartTimestamp: now - 60,
+		EndTimestamp:   now + 60,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 5, analysis.Scanned)
+
+	assert.Equal(t, LogDriftCell{Requests: 5, Mismatch: 1, Rate: 0.2}, analysis.Drift.Total)
+	require.Len(t, analysis.Drift.Channels, 2)
+	assert.Equal(t, LogDriftCell{Requests: 2, Mismatch: 1, Rate: 0.5}, analysis.Drift.Channels[0])
+	assert.Equal(t, LogDriftCell{Requests: 3, Mismatch: 0, Rate: 0}, analysis.Drift.Channels[1])
 }
 
 // TestLogFilterRetryRuleMatchesRuleDescription pins the retry-rule filter on

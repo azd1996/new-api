@@ -538,6 +538,115 @@ func TestApplyParamOverrideSetKeepOrigin(t *testing.T) {
 	assertJSONEqual(t, `{"model":"gpt-4","temperature":0.7}`, string(out))
 }
 
+func TestApplyParamOverrideSetSkipMissing(t *testing.T) {
+	input := []byte(`{
+		"contents": [
+			{"role":"user","parts":[{"text":"hi"}]},
+			{"role":"model","parts":[
+				{"text":"a","thoughtSignature":"sig-a"},
+				{"functionCall":{"name":"f"},"thoughtSignature":"sig-b"},
+				{"functionCall":{"name":"g"}}
+			]},
+			{"role":"user","parts":[{"functionResponse":{"name":"f"}}]}
+		]
+	}`)
+	op := map[string]any{
+		"mode":         "set",
+		"path":         "contents.*.parts.*.thoughtSignature",
+		"value":        "skip_thought_signature_validator",
+		"skip_missing": true,
+	}
+
+	out, err := ApplyParamOverride(input, map[string]any{"operations": []any{op}}, nil)
+	require.NoError(t, err)
+
+	assertJSONEqual(t, `{
+		"contents": [
+			{"role":"user","parts":[{"text":"hi"}]},
+			{"role":"model","parts":[
+				{"text":"a","thoughtSignature":"skip_thought_signature_validator"},
+				{"functionCall":{"name":"f"},"thoughtSignature":"skip_thought_signature_validator"},
+				{"functionCall":{"name":"g"}}
+			]},
+			{"role":"user","parts":[{"functionResponse":{"name":"f"}}]}
+		]
+	}`, string(out))
+}
+
+func TestApplyParamOverrideSetSkipMissingDefaultsToCreate(t *testing.T) {
+	input := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
+
+	withFlagOff, err := ApplyParamOverride(input, map[string]any{"operations": []any{
+		map[string]any{"mode": "set", "path": "contents.*.parts.*.thoughtSignature", "value": "X", "skip_missing": false},
+	}}, nil)
+	require.NoError(t, err)
+	assertJSONEqual(t, `{"contents":[{"role":"user","parts":[{"text":"hi","thoughtSignature":"X"}]}]}`, string(withFlagOff))
+
+	withoutFlag, err := ApplyParamOverride(input, map[string]any{"operations": []any{
+		map[string]any{"mode": "set", "path": "contents.*.parts.*.thoughtSignature", "value": "X"},
+	}}, nil)
+	require.NoError(t, err)
+	assertJSONEqual(t, string(withFlagOff), string(withoutFlag))
+}
+
+func TestApplyParamOverrideSetSkipMissingKeepOrigin(t *testing.T) {
+	// keep_origin updates only parts that already carry the field; skip_missing
+	// writes only parts that already carry it. Together they are a no-op.
+	input := []byte(`{"parts":[{"text":"a","thoughtSignature":"orig"},{"text":"b"}]}`)
+	op := map[string]any{
+		"mode":         "set",
+		"path":         "parts.*.thoughtSignature",
+		"value":        "new",
+		"skip_missing": true,
+		"keep_origin":  true,
+	}
+
+	out, err := ApplyParamOverride(input, map[string]any{"operations": []any{op}}, nil)
+	require.NoError(t, err)
+	assertJSONEqual(t, `{"parts":[{"text":"a","thoughtSignature":"orig"},{"text":"b"}]}`, string(out))
+}
+
+func TestApplyParamOverrideSetSkipMissingWithoutWildcard(t *testing.T) {
+	input := []byte(`{"model":"gpt-4"}`)
+
+	skipped, err := ApplyParamOverride(input, map[string]any{"operations": []any{
+		map[string]any{"mode": "set", "path": "temperature", "value": 0.1, "skip_missing": true},
+	}}, nil)
+	require.NoError(t, err)
+	assertJSONEqual(t, `{"model":"gpt-4"}`, string(skipped))
+
+	updated, err := ApplyParamOverride(input, map[string]any{"operations": []any{
+		map[string]any{"mode": "set", "path": "model", "value": "gpt-5", "skip_missing": true},
+	}}, nil)
+	require.NoError(t, err)
+	assertJSONEqual(t, `{"model":"gpt-5"}`, string(updated))
+}
+
+// A retry-override rewrite travels as PendingRetryRewrite, so skip_missing has to
+// survive that path: only the parts that already carry the field are rewritten.
+func TestApplyPendingRetryRewriteSkipMissing(t *testing.T) {
+	input := []byte(`{"contents":[
+		{"role":"user","parts":[{"text":"hi"}]},
+		{"role":"model","parts":[{"functionCall":{"name":"f"},"thoughtSignature":"sig"}]}
+	]}`)
+	info := &RelayInfo{
+		PendingRetryRewrite: []map[string]any{{
+			"mode":         "set",
+			"path":         "contents.*.parts.*.thoughtSignature",
+			"value":        "skip_thought_signature_validator",
+			"skip_missing": true,
+		}},
+	}
+
+	out, err := ApplyParamOverrideWithRelayInfo(input, info)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"contents":[
+		{"role":"user","parts":[{"text":"hi"}]},
+		{"role":"model","parts":[{"functionCall":{"name":"f"},"thoughtSignature":"skip_thought_signature_validator"}]}
+	]}`, string(out))
+	assert.Empty(t, info.PendingRetryRewrite, "staged rewrites are cleared once applied")
+}
+
 func TestApplyParamOverrideMove(t *testing.T) {
 	input := []byte(`{"model":"gpt-4","meta":{"x":1}}`)
 	override := map[string]any{

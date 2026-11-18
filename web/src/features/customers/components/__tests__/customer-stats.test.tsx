@@ -45,6 +45,10 @@ const data: LogAnalysisResult = {
     total: { total: 4, success: 3, error: 2, retry_override: 1, rate: 0.75 },
     channels: [],
   },
+  drift: {
+    total: { requests: 4, mismatch: 1, rate: 0.25 },
+    channels: [],
+  },
   cache: {
     total: {
       gross_rate: 0.5,
