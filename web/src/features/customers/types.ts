@@ -45,6 +45,73 @@ export type ClaudeCacheOptimization = z.infer<
   typeof claudeCacheOptimizationSchema
 >
 
+// ============================================================================
+// Session Identity Schema & Types
+// ============================================================================
+
+const sessionIdentitySourceSchema = z.object({
+  type: z.enum(['metadata_user_id', 'request_header', 'gjson', 'regex']),
+  key: z
+    .string()
+    .nullish()
+    .transform((value) => value ?? ''),
+  path: z
+    .string()
+    .nullish()
+    .transform((value) => value ?? ''),
+  json_string_field: z
+    .string()
+    .nullish()
+    .transform((value) => value ?? ''),
+  pattern: z
+    .string()
+    .nullish()
+    .transform((value) => value ?? ''),
+  capture_group: z
+    .number()
+    .int()
+    .min(0)
+    .nullish()
+    .transform((value) => value ?? 0),
+})
+
+export const sessionIdentitySchema = z.object({
+  enabled: z.boolean(),
+  model_prefixes: z
+    .array(z.string())
+    .nullable()
+    .transform((value) => value ?? []),
+  sources: z
+    .array(sessionIdentitySourceSchema)
+    .nullable()
+    .transform((value) => value ?? []),
+  transform: z
+    .string()
+    .nullish()
+    .transform((value) => value ?? ''),
+  value_regex: z
+    .string()
+    .nullish()
+    .transform((value) => value ?? ''),
+  on_empty: z
+    .string()
+    .nullish()
+    .transform((value) => value ?? 'legacy'),
+  disable_first_message_fallback: z
+    .boolean()
+    .nullish()
+    .transform((value) => value ?? false),
+  ttl_seconds: z
+    .number()
+    .int()
+    .min(0)
+    .nullish()
+    .transform((value) => value ?? 0),
+})
+
+export type SessionIdentitySource = z.infer<typeof sessionIdentitySourceSchema>
+export type SessionIdentity = z.infer<typeof sessionIdentitySchema>
+
 export const customerSchema = z.object({
   id: z.number(),
   customer_id: z.string(), // unique business id (the downstream api_key_id)
@@ -54,6 +121,7 @@ export const customerSchema = z.object({
   created_time: z.number(),
   updated_time: z.number(),
   claude_cache_optimization: claudeCacheOptimizationSchema.nullish(),
+  session_identity: sessionIdentitySchema.nullish(),
   session_routing_model_prefixes: z.record(z.string(), z.boolean()).nullish(),
 })
 
@@ -98,6 +166,7 @@ export interface CustomerFormData {
   remark: string
   prefix_discounts: Record<string, number>
   claude_cache_optimization?: ClaudeCacheOptimization
+  session_identity?: SessionIdentity
   session_routing_model_prefixes?: Record<string, boolean>
 }
 

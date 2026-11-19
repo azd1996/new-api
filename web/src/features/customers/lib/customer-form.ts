@@ -22,6 +22,7 @@ import { z } from 'zod'
 import { CUSTOMER_VALIDATION, getCustomerFormErrorMessages } from '../constants'
 import {
   claudeCacheOptimizationSchema,
+  sessionIdentitySchema,
   type Customer,
   type CustomerFormData,
 } from '../types'
@@ -44,6 +45,24 @@ export function getCustomerFormSchema(t: TFunction) {
   const rule = z.object({
     enabled: z.boolean(),
     model_prefixes: z.array(z.string()),
+  })
+  const sessionIdentitySource = z.object({
+    type: z.enum(['metadata_user_id', 'request_header', 'gjson', 'regex']),
+    key: z.string(),
+    path: z.string(),
+    json_string_field: z.string(),
+    pattern: z.string(),
+    capture_group: z.number().int().min(0),
+  })
+  const sessionIdentity = z.object({
+    enabled: z.boolean(),
+    model_prefixes: z.array(z.string()),
+    sources: z.array(sessionIdentitySource),
+    transform: z.string(),
+    value_regex: z.string(),
+    on_empty: z.string(),
+    disable_first_message_fallback: z.boolean(),
+    ttl_seconds: z.number().int().min(0),
   })
   return z.object({
     customer_id: z
@@ -70,6 +89,7 @@ export function getCustomerFormSchema(t: TFunction) {
         fallback_cache_breakpoint: rule,
       })
       .nullable(),
+    session_identity: sessionIdentity.nullable(),
     session_routing_model_prefixes: z.record(z.string(), z.boolean()),
   })
 }
@@ -88,6 +108,7 @@ export const CUSTOMER_FORM_DEFAULT_VALUES: CustomerFormValues = {
   prefix_discounts: [],
   remark: '',
   claude_cache_optimization: null,
+  session_identity: null,
   session_routing_model_prefixes: {},
 }
 
@@ -118,6 +139,9 @@ export function transformFormDataToPayload(
     ...(data.claude_cache_optimization
       ? { claude_cache_optimization: data.claude_cache_optimization }
       : {}),
+    ...(data.session_identity
+      ? { session_identity: data.session_identity }
+      : {}),
     session_routing_model_prefixes: data.session_routing_model_prefixes,
   }
 }
@@ -140,6 +164,9 @@ export function transformCustomerToFormDefaults(
     remark: customer.remark,
     claude_cache_optimization: customer.claude_cache_optimization
       ? claudeCacheOptimizationSchema.parse(customer.claude_cache_optimization)
+      : null,
+    session_identity: customer.session_identity
+      ? sessionIdentitySchema.parse(customer.session_identity)
       : null,
     session_routing_model_prefixes:
       customer.session_routing_model_prefixes ?? {},

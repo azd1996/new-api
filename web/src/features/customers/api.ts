@@ -33,7 +33,68 @@ import type {
   GetCustomersParams,
   GetCustomersResponse,
   SearchCustomersParams,
+  SessionIdentity,
 } from './types'
+
+// ============================================================================
+// Session Identity Dry-Run
+// ============================================================================
+
+export interface SessionIdentityTestItem {
+  body: string
+  headers?: Record<string, string>
+  api_key?: string
+  client_ip?: string
+  user_agent?: string
+}
+
+export interface SessionIdentityTestResult {
+  index: number
+  ok: boolean
+  session_id: string
+  raw_value?: string
+  source: string
+  error?: string
+}
+
+export interface SessionIdentityTestSummary {
+  count: number
+  ok_count: number
+  distinct_session_ids: number
+  session_ids: string[]
+  stable: boolean
+  expect_same_met: boolean
+  sources_used: Record<string, number>
+}
+
+export interface SessionIdentityTestResponse {
+  results: SessionIdentityTestResult[]
+  summary: SessionIdentityTestSummary
+}
+
+export interface SessionIdentityTestParams {
+  customer_id?: string
+  config?: SessionIdentity
+  items: SessionIdentityTestItem[]
+  expect_same?: boolean
+}
+
+export async function testCustomerSessionIdentity(
+  params: SessionIdentityTestParams
+): Promise<SessionIdentityTestResponse> {
+  const response = await api.post<ApiResponse<SessionIdentityTestResponse>>(
+    '/api/customer/session_identity/test',
+    params
+  )
+  const result = requireServerSuccess(response.data)
+  if (!result.data) {
+    throw createServerError(
+      result,
+      'Failed to test session identity extraction'
+    )
+  }
+  return result.data
+}
 
 // ============================================================================
 // Customer Management

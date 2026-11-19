@@ -64,6 +64,7 @@ import {
 } from '../lib'
 import type { Customer } from '../types'
 import { CustomerCachePolicy } from './customer-cache-policy'
+import { CustomerSessionIdentity } from './customer-session-identity'
 import { CustomerSessionRoutingPolicy } from './customer-session-routing-policy'
 import { useCustomers } from './customers-provider'
 
@@ -311,6 +312,9 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
               </SideDrawerSection>
               <CustomerCachePolicy />
               <CustomerSessionRoutingPolicy />
+              <CustomerSessionIdentity
+                customerId={props.currentRow?.customer_id}
+              />
             </fieldset>
           </form>
         </Form>
