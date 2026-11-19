@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
+	commonRelay "github.com/QuantumNous/new-api/relay/common"
 )
 
 // logAnalysisScanLimit caps how many consume-log rows a single analysis request
@@ -111,9 +112,33 @@ type LogSuccessTable struct {
 	Channels []LogSuccessCell `json:"channels"`
 }
 
+// LogDriftCell is one model-drift cell. Requests counts every consume row the
+// analysis scanned for that channel — the same rows the latency/cache tables use,
+// so the rate is never computed over a capped numerator and a full denominator.
+// Mismatch counts the rows whose recorded response_model returned a name matching
+// neither the requested nor the upstream model (see
+// relay/common.ResponseModel.Mismatch). Rate = Mismatch / Requests.
+//
+// The denominator is the scanned request count rather than the number of rows
+// carrying a response_model observation: service.AppendResponseModelLogInfo only
+// writes that field when the returned model differs or a mapping happened, so
+// rows that agree are absent by design and must still count as non-drift.
+type LogDriftCell struct {
+	Requests int64   `json:"requests"`
+	Mismatch int64   `json:"mismatch"`
+	Rate     float64 `json:"rate"`
+}
+
+// LogDriftTable is the model-drift breakdown: summary plus per-channel cells.
+type LogDriftTable struct {
+	Total    LogDriftCell   `json:"total"`
+	Channels []LogDriftCell `json:"channels"`
+}
+
 // LogAnalysisResult is the full payload for the log-analysis popup: the sorted
 // channel columns, the prompt-size bucket labels, four latency/FRT tables (one
-// per statistic) and the cache-hit table.
+// per statistic), the cache-hit table, the success-rate table and the
+// model-drift table.
 type LogAnalysisResult struct {
 	Channels []LogAnalysisChannel `json:"channels"`
 	Buckets  []string             `json:"bucket_labels"`
@@ -125,6 +150,7 @@ type LogAnalysisResult struct {
 	} `json:"latency"`
 	Cache            LogCacheTable           `json:"cache"`
 	Success          LogSuccessTable         `json:"success"`
+	Drift            LogDriftTable           `json:"drift"`
 	Thresholds       []CacheMinTokenRuleView `json:"thresholds"`
 	ThresholdDefault int                     `json:"threshold_default"`
 	Scanned          int                     `json:"scanned"`
@@ -170,6 +196,10 @@ type logAnalysisOther struct {
 	CacheTokens         float64 `json:"cache_tokens"`
 	CacheCreationTokens float64 `json:"cache_creation_tokens"`
 	Claude              bool    `json:"claude"`
+	// ResponseModel is the upstream model declaration recorded for the attempt
+	// (service.AppendResponseModelLogInfo). It is absent when the upstream
+	// answered with the requested model and no mapping was involved.
+	ResponseModel *commonRelay.ResponseModel `json:"response_model"`
 }
 
 // logStatSummary is the set of statistics computed for one latency/FRT sample.
@@ -221,6 +251,16 @@ func logCacheHitRate(cacheRead, prompt int64) float64 {
 		return 0
 	}
 	return float64(cacheRead) / float64(prompt)
+}
+
+// logModelDriftRate is the share of scanned consume rows whose upstream response
+// model matches neither the requested nor the upstream model. It returns 0 when
+// nothing was scanned, so an empty window renders as 0% rather than NaN.
+func logModelDriftRate(mismatch, requests int64) float64 {
+	if requests <= 0 {
+		return 0
+	}
+	return float64(mismatch) / float64(requests)
 }
 
 // classifyCacheRow folds one request into a channel's cache counters. The
@@ -276,14 +316,15 @@ func cacheCellFromAgg(agg *cacheChannelAgg) LogCacheCell {
 }
 
 // GetLogAnalysis streams the consume logs matching the same admin filter set as
-// GetAllLogs and aggregates them into the prompt-size latency/FRT tables and the
-// cache-hit table. It is admin-only because the per-channel breakdown relies on
-// resolving channel names, which user log queries never expose.
+// GetAllLogs and aggregates them into the prompt-size latency/FRT tables, the
+// cache-hit table, the success-rate table and the model-drift table. It is
+// admin-only because the per-channel breakdown relies on resolving channel
+// names, which user log queries never expose.
 //
-// The latency/cache tables come from a capped streaming scan of consume logs
-// using the full admin filter. The success-rate counts come from cheap grouped
-// COUNTs over consume + error logs using only the type-agnostic core filters
-// (see coreFilterForSuccess), so they stay accurate regardless of the scan cap
+// The latency/cache/drift tables come from a capped streaming scan of consume
+// logs using the full admin filter. The success-rate counts come from cheap
+// grouped COUNTs over consume + error logs using only the type-agnostic core
+// filters (see coreFilterForSuccess), so they stay accurate regardless of the scan cap
 // and are not zeroed out by error-only drill filters.
 func GetLogAnalysis(filter LogFilter) (*LogAnalysisResult, error) {
 	scanFilter := filter
@@ -303,6 +344,8 @@ func GetLogAnalysis(filter LogFilter) (*LogAnalysisResult, error) {
 	perChannel := make(map[int]*[logAnalysisBucketCount]logAnalysisSamples)
 	// cacheAgg[channelId] -> cache classification counters.
 	cacheAgg := make(map[int]*cacheChannelAgg)
+	// driftAgg[channelId] -> model-drift counters over every scanned consume row.
+	driftAgg := make(map[int]*LogDriftCell)
 	scanned := 0
 	truncated := false
 	for rows.Next() {
@@ -335,6 +378,16 @@ func GetLogAnalysis(filter LogFilter) (*LogAnalysisResult, error) {
 			cacheAgg[r.ChannelId] = agg
 		}
 		classifyCacheRow(agg, r.PromptTokens, int64(o.CacheTokens), int64(o.CacheCreationTokens), int64(cacheMinTokensFor(r.ModelName)), o.Claude)
+
+		drift := driftAgg[r.ChannelId]
+		if drift == nil {
+			drift = &LogDriftCell{}
+			driftAgg[r.ChannelId] = drift
+		}
+		drift.Requests++
+		if o.ResponseModel.Mismatch() {
+			drift.Mismatch++
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -416,6 +469,24 @@ func GetLogAnalysis(filter LogFilter) (*LogAnalysisResult, error) {
 	}
 	result.Cache.Total = cacheCellFromAgg(&totalAgg)
 	result.Success.Total = successCellFrom(consumeSum, errorSum, retryOverrideSum)
+
+	result.Drift.Channels = make([]LogDriftCell, len(channels))
+	var driftRequests, driftMismatch int64
+	for ci, ch := range channels {
+		drift := driftAgg[ch.Id]
+		if drift == nil {
+			drift = &LogDriftCell{}
+		}
+		drift.Rate = logModelDriftRate(drift.Mismatch, drift.Requests)
+		result.Drift.Channels[ci] = *drift
+		driftRequests += drift.Requests
+		driftMismatch += drift.Mismatch
+	}
+	result.Drift.Total = LogDriftCell{
+		Requests: driftRequests,
+		Mismatch: driftMismatch,
+		Rate:     logModelDriftRate(driftMismatch, driftRequests),
+	}
 
 	// The summary ("汇总") column pools every channel's samples per bucket, so it
 	// needs the merged distribution rather than an average of per-channel stats.

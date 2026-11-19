@@ -70,14 +70,23 @@ type ConditionOperation struct {
 }
 
 type ParamOperation struct {
-	Path       string               `json:"path"`
-	Mode       string               `json:"mode"` // delete, set, move, copy, prepend, append, trim_prefix, trim_suffix, ensure_prefix, ensure_suffix, trim_space, to_lower, to_upper, replace, regex_replace, return_error, prune_objects, set_header, delete_header, copy_header, move_header, pass_headers, sync_fields
-	Value      any                  `json:"value"`
-	KeepOrigin bool                 `json:"keep_origin"`
-	From       string               `json:"from,omitempty"`
-	To         string               `json:"to,omitempty"`
-	Conditions []ConditionOperation `json:"conditions,omitempty"` // 条件列表
-	Logic      string               `json:"logic,omitempty"`      // AND, OR (默认OR)
+	Path  string `json:"path"`
+	Mode  string `json:"mode"` // delete, set, move, copy, prepend, append, trim_prefix, trim_suffix, ensure_prefix, ensure_suffix, trim_space, to_lower, to_upper, replace, regex_replace, return_error, prune_objects, set_header, delete_header, copy_header, move_header, pass_headers, sync_fields
+	Value any    `json:"value"`
+	// KeepOrigin skips a set whose target already exists. It is the inverse of
+	// SkipMissing: keep_origin updates only what is there, skip_missing writes
+	// only what is there.
+	KeepOrigin bool `json:"keep_origin"`
+	// SkipMissing makes set skip a resolved path that does not exist in the body
+	// instead of creating it. Wildcard paths resolve to every member of the
+	// objects they traverse, so without it a path like
+	// "contents.*.parts.*.thoughtSignature" also creates the field on parts that
+	// never carried one.
+	SkipMissing bool                 `json:"skip_missing"`
+	From        string               `json:"from,omitempty"`
+	To          string               `json:"to,omitempty"`
+	Conditions  []ConditionOperation `json:"conditions,omitempty"` // 条件列表
+	Logic       string               `json:"logic,omitempty"`      // AND, OR (默认OR)
 }
 
 type ParamOverrideReturnError struct {
@@ -632,6 +641,9 @@ func tryParseOperations(paramOverride map[string]any) ([]ParamOperation, bool) {
 		if keepOrigin, ok := opMap["keep_origin"].(bool); ok {
 			operation.KeepOrigin = keepOrigin
 		}
+		if skipMissing, ok := opMap["skip_missing"].(bool); ok {
+			operation.SkipMissing = skipMissing
+		}
 		if from, ok := opMap["from"].(string); ok {
 			operation.From = from
 		}
@@ -957,7 +969,11 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 			}
 		case "set":
 			for _, path := range opPaths {
-				if op.KeepOrigin && gjson.GetBytes(result, path).Exists() {
+				exists := gjson.GetBytes(result, path).Exists()
+				if op.KeepOrigin && exists {
+					continue
+				}
+				if op.SkipMissing && !exists {
 					continue
 				}
 				result, err = sjson.SetBytes(result, path, op.Value)

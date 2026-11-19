@@ -44,10 +44,10 @@ import type {
   LogAnalysisResult,
   LogCacheCell,
   LogCacheTable,
+  LogDriftCell,
   LogLatencyCell,
   LogLatencyTable,
   LogSuccessCell,
-  LogSuccessTable,
 } from '../types'
 import { useLogsViewScope } from './usage-logs-provider'
 
@@ -128,6 +128,14 @@ function buildAnalysisSections(
     accessor(result.cache.total),
     ...result.cache.channels.map(accessor),
   ]
+  const driftRow = (
+    label: string,
+    accessor: (cell: LogDriftCell) => string
+  ): string[] => [
+    label,
+    accessor(result.drift.total),
+    ...result.drift.channels.map(accessor),
+  ]
 
   return [
     latencySection(t('Mean'), result.latency.mean),
@@ -143,6 +151,15 @@ function buildAnalysisSections(
         successRow(t('Success (consume)'), (c) => String(c.success)),
         successRow(t('Error'), (c) => String(c.error)),
         successRow(t('Retry override'), (c) => String(c.retry_override)),
+      ],
+    },
+    {
+      title: t('Model Drift'),
+      headers: metricHeaders,
+      rows: [
+        driftRow(t('Drift rate'), (c) => formatPercent(c.rate, c.requests)),
+        driftRow(t('Requests (consume)'), (c) => String(c.requests)),
+        driftRow(t('Mismatch'), (c) => String(c.mismatch)),
       ],
     },
     {
@@ -413,16 +430,18 @@ function ThresholdsTable(props: {
   )
 }
 
-function SuccessStatTable(props: {
+// MetricStatTable renders a summary-plus-per-channel metric table (success rate,
+// model drift). Each row reads one cell through the caller's accessor.
+function MetricStatTable<T>(props: {
   title: string
-  table: LogSuccessTable
+  table: { total: T; channels: T[] }
   channels: LogAnalysisChannel[]
   summaryLabel: string
   metricLabel: string
   rows: {
     key: string
     label: string
-    value: (cell: LogSuccessCell) => string
+    value: (cell: T) => string
   }[]
 }) {
   return (
@@ -639,7 +658,7 @@ export function LogAnalysisDialog() {
               summaryLabel={summaryLabel}
               bucketLabel={t('Prompt Size')}
             />
-            <SuccessStatTable
+            <MetricStatTable
               title={t('Success Rate')}
               table={result.success}
               channels={result.channels}
@@ -676,6 +695,35 @@ export function LogAnalysisDialog() {
             <p className='text-muted-foreground text-xs'>
               {t(
                 'Total requests ≈ consume + error - retry-override (retried intermediate attempts); success = consume count. Success rate = success / total.'
+              )}
+            </p>
+            <MetricStatTable
+              title={t('Model Drift')}
+              table={result.drift}
+              channels={result.channels}
+              summaryLabel={summaryLabel}
+              metricLabel={t('Metric')}
+              rows={[
+                {
+                  key: 'rate',
+                  label: t('Drift rate'),
+                  value: (cell) => formatPercent(cell.rate, cell.requests),
+                },
+                {
+                  key: 'requests',
+                  label: t('Requests (consume)'),
+                  value: (cell) => String(cell.requests),
+                },
+                {
+                  key: 'mismatch',
+                  label: t('Mismatch'),
+                  value: (cell) => String(cell.mismatch),
+                },
+              ]}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Drift rate = mismatch / consume requests in the scanned window. A row counts as drift when the model the upstream returned matches neither the requested nor the upstream model; prefix/suffix variants (dated versions, provider paths) match and are not drift.'
               )}
             </p>
             <CacheStatTable
