@@ -177,6 +177,8 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 					c.GetHeader("x-claude-code-session-id"),
 					c.ClientIP(),
 					c.GetHeader("User-Agent"),
+					c.Request.Header,
+					model.GetCustomerSessionIdentity(cacheCustomerID),
 				)
 			}
 			if err != nil {
@@ -423,8 +425,8 @@ type claudeMetadataUserID struct {
 // schema only allows user_id and upstream rejects extra metadata keys. The body
 // is returned unchanged when a non-empty user_id is already present (e.g. real
 // Claude Code, which carries its own session) or when no key suffix is available.
-func fillClaudeMetadataUserID(jsonData []byte, apiKey, headerSessionID, clientIP, userAgent string) ([]byte, error) {
-	out, _, err := common.PrepareClaudeMetadataUserID(jsonData, apiKey, headerSessionID, clientIP, userAgent)
+func fillClaudeMetadataUserID(jsonData []byte, apiKey, headerSessionID, clientIP, userAgent string, headers http.Header, sessionIdentity *common.SessionIdentityConfig) ([]byte, error) {
+	out, _, err := common.PrepareClaudeMetadataUserIDWithConfig(jsonData, apiKey, headerSessionID, clientIP, userAgent, headers, sessionIdentity)
 	return out, err
 }
 

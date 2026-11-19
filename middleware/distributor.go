@@ -150,6 +150,9 @@ func prepareClaudeMetadataUserIDForRouting(c *gin.Context, modelName string) err
 		!strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {
 		return nil
 	}
+	// Resolve the customer's custom session identity before affinity is
+	// frozen so channel affinity can key on the same value.
+	prepareExtractedSessionIdentity(c, modelName)
 	if err := service.PrepareOriginalRequestChannelAffinity(c, modelName); err != nil {
 		return err
 	}
@@ -164,12 +167,15 @@ func prepareClaudeMetadataUserIDForRouting(c *gin.Context, modelName string) err
 	if err != nil {
 		return err
 	}
-	out, synthesized, err := common.PrepareClaudeMetadataUserID(
+	_, _, customerID, _ := common.TraceTagFromContext(c)
+	out, synthesized, err := common.PrepareClaudeMetadataUserIDWithConfig(
 		raw,
 		common.GetContextKeyString(c, constant.ContextKeyTokenKey),
 		c.GetHeader("x-claude-code-session-id"),
 		c.ClientIP(),
 		c.GetHeader("User-Agent"),
+		c.Request.Header,
+		model.GetCustomerSessionIdentity(customerID),
 	)
 	if err != nil {
 		return err
@@ -181,6 +187,45 @@ func prepareClaudeMetadataUserIDForRouting(c *gin.Context, modelName string) err
 	// applies this candidate only when the actual group/outbound model allows it.
 	common.SetContextKey(c, constant.ContextKeyClaudeMetadataUserID, gjson.GetBytes(out, "metadata.user_id").String())
 	return nil
+}
+
+// prepareExtractedSessionIdentity resolves the customer's custom session
+// identity before affinity is frozen, so channel affinity can bind and reuse
+// channels using the same value. It is best-effort: extraction failures leave
+// the request on the legacy path.
+func prepareExtractedSessionIdentity(c *gin.Context, modelName string) {
+	_, _, customerID, _ := common.TraceTagFromContext(c)
+	cfg := model.GetCustomerSessionIdentity(customerID)
+	if !cfg.Matches(modelName) {
+		return
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return
+	}
+	raw, err := storage.Bytes()
+	if err != nil || len(raw) == 0 {
+		return
+	}
+	resolution := common.ResolveSessionIdentity(
+		raw,
+		c.GetHeader("x-claude-code-session-id"),
+		c.ClientIP(),
+		c.GetHeader("User-Agent"),
+		common.GetContextKeyString(c, constant.ContextKeyTokenKey),
+		c.Request.Header,
+		cfg,
+	)
+	if resolution.SessionID == "" {
+		return
+	}
+	// Only identities that are stable for this customer (an explicit header or
+	// its own extraction) may drive affinity. Legacy fallbacks can rotate per
+	// request for single-message clients and would thrash the bindings.
+	if resolution.Source == "header" || strings.HasPrefix(resolution.Source, "custom:") {
+		common.SetContextKey(c, constant.ContextKeyExtractedSessionID, resolution.SessionID)
+		common.SetContextKey(c, constant.ContextKeyExtractedSessionIDSource, resolution.Source)
+	}
 }
 
 // noAvailableChannelMessage explains a 503 for a task-plugin-claimed model.

@@ -10,6 +10,12 @@ const (
 	ContextKeyOriginalModel        ContextKey = "original_model"
 	ContextKeyRequestStartTime     ContextKey = "request_start_time"
 	ContextKeyClaudeMetadataUserID ContextKey = "claude_metadata_user_id"
+	// ContextKeyExtractedSessionID holds a custom-extracted session identity
+	// computed before affinity matching; channel affinity uses it as a key.
+	ContextKeyExtractedSessionID ContextKey = "extracted_session_id"
+	// ContextKeyExtractedSessionIDSource labels where the extracted identity
+	// came from (custom:<source> or header).
+	ContextKeyExtractedSessionIDSource ContextKey = "extracted_session_id_source"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

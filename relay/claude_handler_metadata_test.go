@@ -159,7 +159,7 @@ func TestFillClaudeMetadataUserID(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := fillClaudeMetadataUserID([]byte(tc.body), tc.apiKey, "", testClientIP, testUserAgent)
+			out, err := fillClaudeMetadataUserID([]byte(tc.body), tc.apiKey, "", testClientIP, testUserAgent, nil, nil)
 			require.NoError(t, err)
 
 			userID := gjson.GetBytes(out, "metadata.user_id")
@@ -187,7 +187,7 @@ func TestFillClaudeMetadataUserID(t *testing.T) {
 // generated metadata.user_id blob.
 func innerSessionID(t *testing.T, body, header string) string {
 	t.Helper()
-	out, err := fillClaudeMetadataUserID([]byte(body), testAPIKey, header, testClientIP, testUserAgent)
+	out, err := fillClaudeMetadataUserID([]byte(body), testAPIKey, header, testClientIP, testUserAgent, nil, nil)
 	require.NoError(t, err)
 	return gjson.Parse(gjson.GetBytes(out, "metadata.user_id").String()).Get("session_id").String()
 }

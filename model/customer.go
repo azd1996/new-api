@@ -29,6 +29,8 @@ type Customer struct {
 	UpdatedTime                     int64                            `json:"updated_time" gorm:"bigint"`
 	ClaudeCacheOptimizationJSON     string                           `json:"-" gorm:"column:claude_cache_optimization_json;type:text"`
 	ClaudeCacheOptimization         *CustomerClaudeCacheOptimization `json:"claude_cache_optimization" gorm:"-"`
+	SessionIdentityJSON             string                           `json:"-" gorm:"column:session_identity_json;type:text"`
+	SessionIdentity                 *common.SessionIdentityConfig    `json:"session_identity" gorm:"-"`
 	SessionRoutingModelPrefixesJSON string                           `json:"-" gorm:"column:session_routing_model_prefixes_json;type:text"`
 	SessionRoutingModelPrefixes     map[string]bool                  `json:"session_routing_model_prefixes" gorm:"-"`
 }
@@ -114,6 +116,16 @@ func (c *Customer) hydrate() {
 		}
 		c.ClaudeCacheOptimization = config.clone()
 	}
+	c.SessionIdentity = nil
+	if strings.TrimSpace(c.SessionIdentityJSON) != "" {
+		var config *common.SessionIdentityConfig
+		if err := common.UnmarshalJsonStr(c.SessionIdentityJSON, &config); err != nil {
+			common.SysError("failed to parse customer session identity: " + err.Error())
+			// Corrupt explicit configuration must not silently run extraction.
+			config = &common.SessionIdentityConfig{}
+		}
+		c.SessionIdentity = config.Clone()
+	}
 	c.SessionRoutingModelPrefixes = map[string]bool{}
 	if strings.TrimSpace(c.SessionRoutingModelPrefixesJSON) != "" {
 		var raw map[string]bool
@@ -156,6 +168,15 @@ func (c *Customer) serialize() error {
 			return err
 		}
 		c.ClaudeCacheOptimizationJSON = string(b)
+	}
+	c.SessionIdentityJSON = ""
+	if c.SessionIdentity != nil {
+		c.SessionIdentity = c.SessionIdentity.Clone()
+		b, err := common.Marshal(c.SessionIdentity)
+		if err != nil {
+			return err
+		}
+		c.SessionIdentityJSON = string(b)
 	}
 	clean := map[string]float64{}
 	for prefix, d := range c.PrefixDiscountMap {
@@ -275,6 +296,9 @@ func (c *Customer) Update() error {
 	// persisted override; an empty object explicitly disables every rule.
 	if c.ClaudeCacheOptimization != nil {
 		columns = append(columns, "claude_cache_optimization_json")
+	}
+	if c.SessionIdentity != nil {
+		columns = append(columns, "session_identity_json")
 	}
 	if c.SessionRoutingModelPrefixes != nil {
 		columns = append(columns, "session_routing_model_prefixes_json")

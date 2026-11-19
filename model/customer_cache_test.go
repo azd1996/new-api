@@ -101,13 +101,19 @@ func TestCustomerClaudeCacheOptimizationMigration(t *testing.T) {
 					columns, err := db.Migrator().ColumnTypes(&Customer{})
 					require.NoError(t, err)
 					found := false
+					sessionIdentityColumnFound := false
 					for _, column := range columns {
-						if column.Name() == "claude_cache_optimization_json" {
+						switch column.Name() {
+						case "claude_cache_optimization_json", "session_identity_json":
 							found = true
 							assert.Equal(t, "text", strings.ToLower(column.DatabaseTypeName()))
+							if column.Name() == "session_identity_json" {
+								sessionIdentityColumnFound = true
+							}
 						}
 					}
 					require.True(t, found, "policy must be stored in a real TEXT column")
+					require.True(t, sessionIdentityColumnFound, "session identity must be stored in a real TEXT column")
 					configured := &Customer{
 						CustomerId: "configured-customer", Name: "Configured",
 						PrefixDiscountMap: map[string]float64{"claude": 0.9},
@@ -118,6 +124,20 @@ func TestCustomerClaudeCacheOptimizationMigration(t *testing.T) {
 							FallbackCacheBreakpoint: CustomerClaudeCacheOptimizationRule{
 								Enabled: true, ModelPrefixes: []string{"claude-opus"},
 							},
+						},
+						SessionIdentity: &common.SessionIdentityConfig{
+							Enabled:       true,
+							ModelPrefixes: []string{"claude-"},
+							Sources: []common.SessionIdentitySource{{
+								Type:         common.SessionIdentitySourceRegex,
+								Path:         "system.0.text",
+								Pattern:      `^\[([^\]]+)-fixed-\d+\]`,
+								CaptureGroup: 1,
+							}},
+							Transform:                   common.SessionIdentityTransformXXHash,
+							ValueRegex:                  `^[A-Za-z0-9_-]{4,64}$`,
+							OnEmpty:                     common.SessionIdentityOnEmptyLegacy,
+							DisableFirstMessageFallback: true,
 						},
 					}
 					require.NoError(t, configured.Insert())
@@ -130,10 +150,19 @@ func TestCustomerClaudeCacheOptimizationMigration(t *testing.T) {
 					old, err := GetCustomerById(legacy.Id)
 					require.NoError(t, err)
 					assert.Nil(t, old.ClaudeCacheOptimization)
+					assert.Nil(t, old.SessionIdentity)
 					assert.Equal(t, map[string]float64{"claude": 0.8, "gpt": 1}, old.PrefixDiscountMap)
 					stored, err := GetCustomerById(configured.Id)
 					require.NoError(t, err)
 					assert.Equal(t, configured.ClaudeCacheOptimization, stored.ClaudeCacheOptimization)
+					assert.Equal(t, configured.SessionIdentity, stored.SessionIdentity)
+					assert.Equal(t, configured.SessionIdentity, GetCustomerSessionIdentity(configured.CustomerId))
+					assert.Nil(t, GetCustomerSessionIdentity("missing-session-identity-customer"))
+					// The cached configuration must be a private copy.
+					cachedIdentity := GetCustomerSessionIdentity(configured.CustomerId)
+					cachedIdentity.ModelPrefixes[0] = "changed"
+					cachedIdentity.Sources[0].Pattern = "changed"
+					assert.Equal(t, configured.SessionIdentity, GetCustomerSessionIdentity(configured.CustomerId))
 					assert.Equal(t, configured.PrefixDiscountMap, stored.PrefixDiscountMap)
 					assert.Greater(t, configured.Id, legacy.Id, "generated primary keys must remain usable")
 					assert.Error(t, db.Create(&Customer{CustomerId: legacy.CustomerId}).Error, "customer ID must stay unique")
@@ -229,6 +258,31 @@ func TestCustomerClaudeCacheOptimizationPersistence(t *testing.T) {
 	assert.Equal(t, legacy.ClaudeCacheOptimization, disabledCustomer.ClaudeCacheOptimization)
 	assert.False(t, GetCustomerClaudeCacheOptimization(customer.CustomerId).ForceExtendedTTL.Matches("claude-sonnet"))
 	assert.False(t, GetCustomerClaudeCacheOptimization(customer.CustomerId).FallbackCacheBreakpoint.Matches("claude-opus"))
+
+	// Session identity configuration persists, is returned by the cache, and a
+	// legacy update that omits the field preserves it.
+	legacy.SessionIdentity = &common.SessionIdentityConfig{
+		Enabled: true,
+		Sources: []common.SessionIdentitySource{{
+			Type:    common.SessionIdentitySourceRegex,
+			Path:    "system.0.text",
+			Pattern: `^\[([^\]]+)-fixed-\d+\]`,
+		}},
+		Transform: common.SessionIdentityTransformXXHash,
+	}
+	require.NoError(t, legacy.Update())
+	storedIdentity, err := GetCustomerById(customer.Id)
+	require.NoError(t, err)
+	require.NotNil(t, storedIdentity.SessionIdentity)
+	assert.Equal(t, legacy.SessionIdentity, storedIdentity.SessionIdentity)
+	assert.Equal(t, legacy.SessionIdentity, GetCustomerSessionIdentity(customer.CustomerId))
+	omitIdentity := &Customer{Id: customer.Id, CustomerId: customer.CustomerId, Name: "omit session identity"}
+	require.NoError(t, omitIdentity.Update())
+	preservedIdentity, err := GetCustomerById(customer.Id)
+	require.NoError(t, err)
+	assert.Equal(t, legacy.SessionIdentity, preservedIdentity.SessionIdentity)
+	assert.Equal(t, "omit session identity", preservedIdentity.Name)
+	assert.Nil(t, GetCustomerSessionIdentity("no-such-session-identity-customer"))
 
 	// Stored four-rule configurations keep their behavior with the fifth absent.
 	require.NoError(t, DB.Model(&Customer{}).Where("id = ?", customer.Id).

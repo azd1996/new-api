@@ -86,6 +86,15 @@ func GetCustomerClaudeCacheOptimization(customerID string) *CustomerClaudeCacheO
 	return nil
 }
 
+// GetCustomerSessionIdentity returns a private copy of the customer's session
+// identity extraction configuration, or nil when it has none.
+func GetCustomerSessionIdentity(customerID string) *common.SessionIdentityConfig {
+	if c, ok := getCachedCustomer(customerID); ok {
+		return c.SessionIdentity.Clone()
+	}
+	return nil
+}
+
 // CustomerConfigured reports whether a customer id has an admin-managed mapping
 // (name + discounts). The customer-statistics dashboard uses this to decide
 // whether the per-customer discounted amount is meaningful or should fall back

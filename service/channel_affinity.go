@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -576,6 +577,9 @@ type originalChannelAffinity struct {
 	Values    map[operation_setting.ChannelAffinityKeySource]channelAffinitySourceValue
 	ModelName string
 	Match     *channelAffinityMatch
+	// ExtractedSessionID is the customer-scoped session identity resolved
+	// before affinity matching (custom extraction or an explicit header).
+	ExtractedSessionID string
 }
 
 // PrepareOriginalRequestChannelAffinity freezes configured key sources before
@@ -621,7 +625,20 @@ func matchOriginalChannelAffinity(original *originalChannelAffinity) *channelAff
 		}
 		var affinityValue string
 		var usedSource operation_setting.ChannelAffinityKeySource
+		if original.ExtractedSessionID != "" {
+			// A customer-scoped session identity was resolved before matching.
+			// It wins over the rule's own sources so a custom extraction cannot
+			// be overridden by an unrelated field in the same request.
+			affinityValue = original.ExtractedSessionID
+			usedSource = operation_setting.ChannelAffinityKeySource{
+				Type: "context_string",
+				Key:  string(constant.ContextKeyExtractedSessionID),
+			}
+		}
 		for _, src := range rule.KeySources {
+			if affinityValue != "" {
+				break
+			}
 			value := original.Values[src]
 			var err error
 			affinityValue, err = value.Value, value.Err
@@ -656,6 +673,9 @@ func prepareOriginalChannelAffinityInputs(c *gin.Context, modelName string) *ori
 		ModelName: modelName,
 		Values:    make(map[operation_setting.ChannelAffinityKeySource]channelAffinitySourceValue),
 	}
+	// The pre-resolved session identity is the highest-priority key source for
+	// any rule it matches, regardless of how the persisted rules are ordered.
+	original.ExtractedSessionID = common.GetContextKeyString(c, constant.ContextKeyExtractedSessionID)
 	if c != nil && c.Request != nil {
 		original.UserAgent = c.Request.UserAgent()
 		if c.Request.URL != nil {
