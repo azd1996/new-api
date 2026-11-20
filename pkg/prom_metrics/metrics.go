@@ -38,6 +38,20 @@ var (
 	errorHighCardLabels = true
 )
 
+// Gateway-minus-upstream timing deltas, recorded only when the upstream
+// reports its own invocation metrics (e.g. AWS Bedrock).
+var (
+	relayTtftUpstreamDelta     *prometheus.HistogramVec
+	relayDurationUpstreamDelta *prometheus.HistogramVec
+
+	// upstreamDeltaBuckets covers gateway-minus-upstream timing deltas. The
+	// mass is expected near zero; negative bounds distinguish upstream-reported
+	// time from gateway-observed time. Values above the largest explicit bucket
+	// fall into the automatic +Inf bucket (count/sum stay exact, only quantile
+	// resolution saturates), so the tail is sized for slow-gateway outliers.
+	upstreamDeltaBuckets = []float64{-30, -10, -5, -2, -1, -0.5, -0.2, -0.1, -0.05, 0, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600}
+)
+
 // Init registers all collectors into a dedicated registry. It is safe to call
 // multiple times; only the first call takes effect. Init is only invoked when
 // metrics export is enabled, so an unset registry means "disabled".
@@ -74,6 +88,16 @@ func Init() {
 			Name:    "newapi_relay_ttft_seconds",
 			Help:    "Upstream relay time-to-first-token in seconds (streaming responses only).",
 			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60},
+		}, []string{"model", "group", "channel"})
+		relayTtftUpstreamDelta = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "newapi_relay_ttft_upstream_delta_seconds",
+			Help:    "Gateway-observed streaming TTFT minus upstream-reported first-byte latency (AWS Bedrock invocation metrics), in seconds; positive means the gateway added time.",
+			Buckets: upstreamDeltaBuckets,
+		}, []string{"model", "group", "channel"})
+		relayDurationUpstreamDelta = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "newapi_relay_duration_upstream_delta_seconds",
+			Help:    "Gateway-observed total duration minus upstream-reported invocation latency (AWS Bedrock invocation metrics), in seconds; positive means the gateway added time.",
+			Buckets: upstreamDeltaBuckets,
 		}, []string{"model", "group", "channel"})
 		proxyTtft = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "newapi_proxy_ttft_seconds",
@@ -115,7 +139,8 @@ func Init() {
 			Help: "Reporting-only cumulative profit in quota units (customer-discounted minus channel-discounted) over customer-bearing requests; may decrease and resets on restart.",
 		}, []string{"model", "group", "channel"})
 		registry.MustRegister(httpRequests, httpDuration, relayRequests,
-			promptTokens, completionTokens, relayDuration, relayTtft, proxyTtft, proxyTokenSpeed, proxyConnect, quotaUsed, quotaPerUnit, errorsTotal,
+			promptTokens, completionTokens, relayDuration, relayTtft, relayTtftUpstreamDelta, relayDurationUpstreamDelta,
+			proxyTtft, proxyTokenSpeed, proxyConnect, quotaUsed, quotaPerUnit, errorsTotal,
 			channelStatQuota, customerStatQuota, profitQuota)
 	})
 }
@@ -192,6 +217,25 @@ func RecordRelay(model, group, channel, result string,
 	}
 	if quota > 0 {
 		quotaUsed.WithLabelValues(model, group, channel).Add(float64(quota))
+	}
+}
+
+// RecordRelayUpstreamDelta records the gateway-minus-upstream timing deltas for
+// one relay whose upstream reports its own invocation metrics (AWS Bedrock).
+// ttftSeconds is the gateway-observed streaming time-to-first-token (0 when
+// unavailable), durationSeconds is the gateway-observed total request duration,
+// and upstreamFirstByteMs / upstreamInvocationMs are the upstream-reported
+// values. Each delta is skipped when either side of the comparison is missing
+// (<= 0). No-op when metrics are disabled.
+func RecordRelayUpstreamDelta(model, group, channel string, ttftSeconds, durationSeconds float64, upstreamFirstByteMs, upstreamInvocationMs int64) {
+	if registry == nil {
+		return
+	}
+	if ttftSeconds > 0 && upstreamFirstByteMs > 0 {
+		relayTtftUpstreamDelta.WithLabelValues(model, group, channel).Observe(ttftSeconds - float64(upstreamFirstByteMs)/1000)
+	}
+	if durationSeconds > 0 && upstreamInvocationMs > 0 {
+		relayDurationUpstreamDelta.WithLabelValues(model, group, channel).Observe(durationSeconds - float64(upstreamInvocationMs)/1000)
 	}
 }
 
