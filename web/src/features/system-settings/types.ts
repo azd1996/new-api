@@ -484,6 +484,12 @@ export type OperationsSettings = {
   'debug_scope_setting.rules': DebugScopeRule[]
   'error_alert_setting.enabled': boolean
   'error_alert_setting.rules': ErrorAlertRule[]
+  'ai_assistant_setting.enabled': boolean
+  'ai_assistant_setting.group': string
+  'ai_assistant_setting.default_model': string
+  'ai_assistant_setting.timeout_seconds': number
+  'ai_assistant_setting.max_tokens': number
+  'ai_assistant_setting.temperature': number
   'balance_alert_setting.enabled': boolean
   'balance_alert_setting.rules': BalanceAlertRule[]
   QuotaRemindEnabled: boolean

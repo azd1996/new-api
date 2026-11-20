@@ -559,9 +559,10 @@ func generateDefaultSidebarConfig(userRole int) string {
 
 	// 聊天区域 - 所有用户都可以访问
 	defaultConfig["chat"] = map[string]any{
-		"enabled":    true,
-		"playground": true,
-		"chat":       true,
+		"enabled":      true,
+		"playground":   true,
+		"chat":         true,
+		"ai_assistant": true,
 	}
 
 	// 控制台区域 - 所有用户都可以访问
@@ -638,7 +639,7 @@ func GetUserModels(c *gin.Context) {
 			groupsToQuery = service.GetUserAutoGroup(user.Group)
 		}
 	default:
-		if _, ok := groups[group]; ok {
+		if _, ok := groups[group]; ok || operation_setting.AIAssistantGroupEnabled(group) {
 			groupsToQuery = []string{group}
 		}
 	}

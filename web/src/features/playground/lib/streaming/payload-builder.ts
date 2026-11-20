@@ -30,17 +30,27 @@ import { formatMessageForAPI, isValidMessage } from '../message/message-utils'
 export function buildChatCompletionPayload(
   messages: Message[],
   config: PlaygroundConfig,
-  parameterEnabled: ParameterEnabled
+  parameterEnabled: ParameterEnabled,
+  systemPrompt?: string
 ): ChatCompletionRequest {
   // Filter and format valid messages
   const processedMessages = messages
     .filter(isValidMessage)
     .map(formatMessageForAPI)
 
+  // An optional system prompt (used by the AI assistant) is prepended to the
+  // conversation without being stored in the visible message list.
+  const apiMessages = systemPrompt?.trim()
+    ? [
+        { role: 'system' as const, content: systemPrompt.trim() },
+        ...processedMessages,
+      ]
+    : processedMessages
+
   const payload: ChatCompletionRequest = {
     model: config.model,
     group: config.group,
-    messages: processedMessages,
+    messages: apiMessages,
     stream: config.stream,
   }
 

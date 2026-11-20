@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useEffect } from 'react'
+
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
 import {
@@ -25,7 +27,23 @@ import {
   usePlaygroundState,
 } from './hooks'
 
-export function Playground() {
+export type PlaygroundProps = {
+  /** Pins the group selector to one assistant group. */
+  fixedGroup?: string
+  /** Preferred model when the page loads. */
+  defaultModel?: string
+  /** Optional system prompt prepended to every request. */
+  systemPrompt?: string
+  /** Isolates persisted config/messages from the regular playground. */
+  storageNamespace?: string
+}
+
+export function Playground({
+  fixedGroup,
+  defaultModel,
+  systemPrompt,
+  storageNamespace,
+}: PlaygroundProps) {
   const {
     config,
     parameterEnabled,
@@ -39,11 +57,18 @@ export function Playground() {
     updateConfig,
     updateParameterEnabled,
     clearMessages,
-  } = usePlaygroundState()
+  } = usePlaygroundState({
+    initialConfig: {
+      ...(fixedGroup ? { group: fixedGroup } : {}),
+      ...(defaultModel ? { model: defaultModel } : {}),
+    },
+    storageNamespace,
+  })
 
   const { sendChat, stopGeneration, isGenerating } = useChatHandler({
     config,
     parameterEnabled,
+    systemPrompt,
     onMessageUpdate: updateMessages,
   })
 
@@ -69,10 +94,28 @@ export function Playground() {
   const { isLoadingModels } = usePlaygroundOptions({
     currentGroup: config.group,
     currentModel: config.model,
+    fixedGroup,
     setGroups,
     setModels,
     updateConfig,
   })
+
+  // The assistant group is fixed, so any stored/legacy group is overridden.
+  useEffect(() => {
+    if (fixedGroup && config.group !== fixedGroup) {
+      updateConfig('group', fixedGroup)
+    }
+  }, [fixedGroup, config.group, updateConfig])
+
+  // Prefer the configured default model once the group's models are loaded.
+  useEffect(() => {
+    if (!defaultModel || models.length === 0) return
+    const hasCurrentModel = models.some((model) => model.value === config.model)
+    const hasDefaultModel = models.some((model) => model.value === defaultModel)
+    if (!hasCurrentModel && hasDefaultModel) {
+      updateConfig('model', defaultModel)
+    }
+  }, [defaultModel, models, config.model, updateConfig])
 
   return (
     <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>

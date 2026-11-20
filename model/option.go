@@ -277,6 +277,9 @@ func validateOptionValue(key string, value string) error {
 	if key == "balance_alert_setting.rules" {
 		return operation_setting.ValidateBalanceAlertRulesJSON(value)
 	}
+	if strings.HasPrefix(key, operation_setting.AIAssistantOptionPrefix) {
+		return operation_setting.ValidateAIAssistantOption(key, value)
+	}
 	if key == operation_setting.LogMaxRangeDaysOptionKey {
 		return operation_setting.ValidateLogMaxRangeDays(value)
 	}

@@ -107,3 +107,31 @@ test('storage calls without a signed-in user do not persist shared data', () => 
   expect(loadParameterEnabled()).toEqual({})
   expect(localStorage.length).toBe(0)
 })
+
+test('namespaced storage isolates assistant data from playground data', () => {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'A', role: 1 })
+  saveConfig({ model: 'playground-model' })
+  saveMessages(messages)
+  saveParameterEnabled({ temperature: true })
+
+  const namespace = 'ai-assistant'
+  saveConfig({ model: 'assistant-model' }, namespace)
+  saveMessages([], namespace)
+  saveParameterEnabled({ temperature: false }, namespace)
+
+  expect(loadConfig()).toEqual({ model: 'playground-model' })
+  expect(loadMessages()).toEqual(messages)
+  expect(loadParameterEnabled()).toEqual({ temperature: true })
+
+  expect(loadConfig(namespace)).toEqual({ model: 'assistant-model' })
+  expect(loadMessages(namespace)).toEqual([])
+  expect(loadParameterEnabled(namespace)).toEqual({ temperature: false })
+
+  clearPlaygroundData(namespace)
+  expect(loadConfig(namespace)).toEqual({})
+  expect(loadMessages(namespace)).toBeNull()
+  expect(loadParameterEnabled(namespace)).toEqual({})
+  expect(loadConfig()).toEqual({ model: 'playground-model' })
+  expect(loadMessages()).toEqual(messages)
+  expect(loadParameterEnabled()).toEqual({ temperature: true })
+})

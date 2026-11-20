@@ -9,6 +9,7 @@
 
 ### 新增 Added
 
+- **AI 助手（固定分组复用渠道）**：新增 `ai_assistant_setting` 配置（`enabled` / `group` / `default_model` / `timeout_seconds` / `max_tokens` / `temperature`），在「系统设置 → 运维 → AI Assistant」卡片配置并校验。管理员将助手渠道归入固定分组后，`/pg/chat/completions` 与 `/api/user/models` 对该分组放行，无需把分组分配给用户。侧边栏「聊天」新增 **AI 助手** 页面（`/ai-assistant`，所有登录用户可用），完整复用 Playground：流式输出、编辑/重新生成、独立 localStorage 命名空间（`ai-assistant`）、固定分组与默认模型选择、按用户保存的可编辑系统提示词；个人资料中的侧边栏模块开关可控制入口显隐。同时新增 `controller.LLMChat(ctx, userID, req)` 非流式内部客户端：以临时 Token（分组 = 助手分组）直接调用 `controller.Relay`，复用渠道选择、模型映射、重试与日志，供后续错误自动处理等业务任务调用。无数据库 schema 变更，仅新增 en/zh 文案。
 - **API 密钥客户绑定**：`tokens` 新增 `customer_id`（varchar(64)，默认空 = 未绑定），用于网关部署在统一网关之前、请求没有 `x-bce-aigw-trace-tag` 时的客户归属兜底。令牌创建/编辑接口接受 `customer_id` 字段，仅管理员（role ≥ 10）可绑定/解绑/清除，绑定前校验客户存在；更新时未传该字段则保留原绑定，空字符串清除绑定，普通用户显式提交空值不会影响已有绑定。绑定变更写入令牌管理审计日志 changed_fields，Redis 令牌缓存同步缓存 `CustomerId`（含 TTL 刷新路径）。前端 API Key 创建/编辑抽屉对管理员显示「客户」下拉（选项来自客户列表，含「未绑定客户」），仅新增 en/zh 文案。
 - **日志客户来源标记**：消耗日志与错误日志的 `other` JSON 新增 `customer_source`（`trace_tag` 或 `token`），标识客户归属来自加密请求头还是令牌绑定；客户统计看板（quota_data）与任务结算日志同样按统一口径落客户维度。
 

@@ -20,6 +20,7 @@ import {
   Activity,
   AlertTriangle,
   Box,
+  Bot,
   ClipboardList,
   Contact,
   CreditCard,
@@ -63,6 +64,11 @@ export function useSidebarData(): SidebarData {
             title: t('Playground'),
             url: '/playground',
             icon: FlaskConical,
+          },
+          {
+            title: t('AI Assistant'),
+            url: '/ai-assistant',
+            icon: Bot,
           },
           {
             title: t('Chat'),

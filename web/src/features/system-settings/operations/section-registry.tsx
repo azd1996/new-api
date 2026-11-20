@@ -20,6 +20,7 @@ import { SystemBehaviorSection } from '../general/system-behavior-section'
 import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
+import { AIAssistantSettingsSection } from '../maintenance/ai-assistant-settings-section'
 import { BalanceAlertSettingsSection } from '../maintenance/balance-alert-settings-section'
 import { ErrorAlertSettingsSection } from '../maintenance/error-alert-settings-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
@@ -59,6 +60,28 @@ const OPERATIONS_SECTIONS = [
           'client_disconnect_setting.rules':
             settings['client_disconnect_setting.rules'],
           'debug_scope_setting.rules': settings['debug_scope_setting.rules'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'ai-assistant',
+    titleKey: 'AI Assistant',
+    build: (settings: OperationsSettings) => (
+      <AIAssistantSettingsSection
+        defaultValues={{
+          'ai_assistant_setting.enabled':
+            settings['ai_assistant_setting.enabled'] ?? false,
+          'ai_assistant_setting.group':
+            settings['ai_assistant_setting.group'] ?? '',
+          'ai_assistant_setting.default_model':
+            settings['ai_assistant_setting.default_model'] ?? '',
+          'ai_assistant_setting.timeout_seconds':
+            settings['ai_assistant_setting.timeout_seconds'] ?? 60,
+          'ai_assistant_setting.max_tokens':
+            settings['ai_assistant_setting.max_tokens'] ?? 2048,
+          'ai_assistant_setting.temperature':
+            settings['ai_assistant_setting.temperature'] ?? 0.7,
         }}
       />
     ),

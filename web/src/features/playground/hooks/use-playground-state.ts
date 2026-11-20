@@ -42,14 +42,23 @@ const MESSAGE_SAVE_DEBOUNCE_MS = 500
 /**
  * Main state management hook for playground
  */
-export function usePlaygroundState() {
+export type UsePlaygroundStateOptions = {
+  initialConfig?: Partial<PlaygroundConfig>
+  storageNamespace?: string
+}
+
+export function usePlaygroundState({
+  initialConfig,
+  storageNamespace,
+}: UsePlaygroundStateOptions = {}) {
   // Load initial state from localStorage
-  const [config, setConfig] = useState<PlaygroundConfig>(
-    getInitialPlaygroundConfig
-  )
+  const [config, setConfig] = useState<PlaygroundConfig>(() => ({
+    ...getInitialPlaygroundConfig(storageNamespace),
+    ...initialConfig,
+  }))
 
   const [parameterEnabled, setParameterEnabled] = useState<ParameterEnabled>(
-    getInitialParameterEnabled
+    () => getInitialParameterEnabled(storageNamespace)
   )
 
   const [messages, setMessages] = useState<Message[]>([])
@@ -61,28 +70,31 @@ export function usePlaygroundState() {
   const [models, setModels] = useState<ModelOption[]>([])
   const [groups, setGroups] = useState<GroupOption[]>([])
 
-  const persistMessages = useCallback((messagesToSave: Message[]) => {
-    latestMessagesRef.current = messagesToSave
+  const persistMessages = useCallback(
+    (messagesToSave: Message[]) => {
+      latestMessagesRef.current = messagesToSave
 
-    if (!hasLoadedMessagesRef.current) {
-      return
-    }
+      if (!hasLoadedMessagesRef.current) {
+        return
+      }
 
-    if (messagesSaveTimerRef.current !== null) {
-      window.clearTimeout(messagesSaveTimerRef.current)
-    }
+      if (messagesSaveTimerRef.current !== null) {
+        window.clearTimeout(messagesSaveTimerRef.current)
+      }
 
-    messagesSaveTimerRef.current = window.setTimeout(() => {
-      messagesSaveTimerRef.current = null
-      saveMessages(latestMessagesRef.current)
-    }, MESSAGE_SAVE_DEBOUNCE_MS)
-  }, [])
+      messagesSaveTimerRef.current = window.setTimeout(() => {
+        messagesSaveTimerRef.current = null
+        saveMessages(latestMessagesRef.current, storageNamespace)
+      }, MESSAGE_SAVE_DEBOUNCE_MS)
+    },
+    [storageNamespace]
+  )
 
   useEffect(() => {
     let cancelled = false
 
     window.setTimeout(() => {
-      const loadedMessages = loadMessages() ?? []
+      const loadedMessages = loadMessages(storageNamespace) ?? []
       if (cancelled) {
         return
       }
@@ -96,7 +108,7 @@ export function usePlaygroundState() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [storageNamespace])
 
   useEffect(
     () => () => {
@@ -113,11 +125,11 @@ export function usePlaygroundState() {
     <K extends keyof PlaygroundConfig>(key: K, value: PlaygroundConfig[K]) => {
       setConfig((prev) => {
         const updated = { ...prev, [key]: value }
-        saveConfig(updated)
+        saveConfig(updated, storageNamespace)
         return updated
       })
     },
-    []
+    [storageNamespace]
   )
 
   // Update parameter enabled with automatic save
@@ -125,11 +137,11 @@ export function usePlaygroundState() {
     (key: keyof ParameterEnabled, value: boolean) => {
       setParameterEnabled((prev) => {
         const updated = { ...prev, [key]: value }
-        saveParameterEnabled(updated)
+        saveParameterEnabled(updated, storageNamespace)
         return updated
       })
     },
-    []
+    [storageNamespace]
   )
 
   // Update messages with automatic save
@@ -153,9 +165,9 @@ export function usePlaygroundState() {
   const resetConfig = useCallback(() => {
     setConfig(DEFAULT_CONFIG)
     setParameterEnabled(DEFAULT_PARAMETER_ENABLED)
-    saveConfig(DEFAULT_CONFIG)
-    saveParameterEnabled(DEFAULT_PARAMETER_ENABLED)
-  }, [])
+    saveConfig(DEFAULT_CONFIG, storageNamespace)
+    saveParameterEnabled(DEFAULT_PARAMETER_ENABLED, storageNamespace)
+  }, [storageNamespace])
 
   return {
     // State

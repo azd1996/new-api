@@ -53,6 +53,7 @@ import type { GroupOption, ModelOption, PlaygroundConfig } from '../types'
 type UsePlaygroundOptionsParams = {
   currentGroup: string
   currentModel: string
+  fixedGroup?: string
   setGroups: (groups: GroupOption[]) => void
   setModels: (models: ModelOption[]) => void
   updateConfig: <K extends keyof PlaygroundConfig>(
@@ -64,6 +65,7 @@ type UsePlaygroundOptionsParams = {
 export function usePlaygroundOptions({
   currentGroup,
   currentModel,
+  fixedGroup,
   setGroups,
   setModels,
   updateConfig,
@@ -89,7 +91,15 @@ export function usePlaygroundOptions({
   } = useQuery({
     queryKey: ['playground-groups'],
     queryFn: async () => requireServerSuccess(await getUserGroups()),
+    enabled: !fixedGroup,
   })
+
+  useEffect(() => {
+    if (!fixedGroup) return
+    // A fixed group (AI assistant) is not necessarily assigned to the user,
+    // so it is supplied directly instead of being loaded from their groups.
+    setGroups([{ label: fixedGroup, value: fixedGroup, ratio: 0, desc: '' }])
+  }, [fixedGroup, setGroups])
 
   useEffect(() => {
     if (!isModelsError) return
@@ -132,7 +142,7 @@ export function usePlaygroundOptions({
   }, [modelsData, currentModel, setModels, updateConfig])
 
   useEffect(() => {
-    if (!groupsData) return
+    if (!groupsData || fixedGroup) return
 
     setGroups(groupsData)
     const fallback = getGroupFallback(groupsData, currentGroup)
@@ -140,7 +150,7 @@ export function usePlaygroundOptions({
     if (fallback) {
       updateConfig('group', fallback)
     }
-  }, [groupsData, currentGroup, setGroups, updateConfig])
+  }, [groupsData, currentGroup, setGroups, updateConfig, fixedGroup])
 
   return {
     isLoadingModels,
