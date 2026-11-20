@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/gin-gonic/gin"
 )
 
@@ -163,4 +164,29 @@ func TraceTagFromContext(c *gin.Context) (raw, downstreamRequestID, customerID s
 	}
 	c.Set(traceTagCtxKey, res)
 	return res.raw, res.requestID, res.customerID, res.decoded
+}
+
+// Customer resolution sources. A trace tag is cryptographically authenticated
+// by the downstream gateway; a token binding is an administrator assertion.
+const (
+	CustomerSourceTraceTag = "trace_tag"
+	CustomerSourceToken    = "token"
+)
+
+// CustomerFromContext resolves the customer id for a request. A non-empty
+// customer decoded from the trace-tag header always wins; otherwise the
+// customer bound to the API token by an administrator is used. The second
+// return value is the source (CustomerSourceTraceTag, CustomerSourceToken, or
+// "" when no customer is identified).
+func CustomerFromContext(c *gin.Context) (string, string) {
+	if c == nil || c.Request == nil {
+		return "", ""
+	}
+	if _, _, customerID, decoded := TraceTagFromContext(c); decoded && customerID != "" {
+		return customerID, CustomerSourceTraceTag
+	}
+	if customerID := strings.TrimSpace(GetContextKeyString(c, constant.ContextKeyTokenCustomerID)); customerID != "" {
+		return customerID, CustomerSourceToken
+	}
+	return "", ""
 }

@@ -690,6 +690,9 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	}
 	common.SetContextKey(c, constant.ContextKeyTokenGroup, token.Group)
 	common.SetContextKey(c, constant.ContextKeyTokenCrossGroupRetry, token.CrossGroupRetry)
+	// The token's customer binding is the fallback identity when no trace-tag
+	// customer can be decoded (gateway positioned before the unified gateway).
+	common.SetContextKey(c, constant.ContextKeyTokenCustomerID, token.CustomerId)
 	if token.AutoGroups != "" {
 		autoGroups, err := token.GetAutoGroups()
 		if err != nil {

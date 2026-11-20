@@ -642,13 +642,22 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		other.SetPublic("session_id", sessionID)
 	}
 	downstreamRequestID, customerID, customerName := "", "", ""
-	if raw, reqID, custID, decoded := common.TraceTagFromContext(c); raw != "" && other != nil {
+	if raw, reqID, _, decoded := common.TraceTagFromContext(c); raw != "" && other != nil {
 		other.SetAdmin("downstream_trace_tag", raw)
 		if decoded {
-			downstreamRequestID, customerID = reqID, custID
+			downstreamRequestID = reqID
 			other.SetAdmin("downstream_request_id", reqID)
-			other.SetAdmin("customer_id", custID)
-			if name := CustomerName(custID); name != "" {
+		}
+	}
+	// Customer identity falls back to the admin-configured token binding when
+	// the trace tag is absent or does not carry a customer (gateway positioned
+	// in front of the unified gateway). customer_source records which one won.
+	if resolvedID, source := common.CustomerFromContext(c); resolvedID != "" {
+		customerID = resolvedID
+		if other != nil {
+			other.SetAdmin("customer_id", resolvedID)
+			other.SetAdmin("customer_source", source)
+			if name := CustomerName(resolvedID); name != "" {
 				customerName = name
 				other.SetAdmin("customer_name", name)
 			}
@@ -745,13 +754,22 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		other.SetPublic("session_id", sessionID)
 	}
 	downstreamRequestID, customerID, customerName := "", "", ""
-	if raw, reqID, custID, decoded := common.TraceTagFromContext(c); raw != "" && other != nil {
+	if raw, reqID, _, decoded := common.TraceTagFromContext(c); raw != "" && other != nil {
 		other.SetAdmin("downstream_trace_tag", raw)
 		if decoded {
-			downstreamRequestID, customerID = reqID, custID
+			downstreamRequestID = reqID
 			other.SetAdmin("downstream_request_id", reqID)
-			other.SetAdmin("customer_id", custID)
-			if name := CustomerName(custID); name != "" {
+		}
+	}
+	// Customer identity falls back to the admin-configured token binding when
+	// the trace tag is absent or does not carry a customer (gateway positioned
+	// in front of the unified gateway). customer_source records which one won.
+	if resolvedID, source := common.CustomerFromContext(c); resolvedID != "" {
+		customerID = resolvedID
+		if other != nil {
+			other.SetAdmin("customer_id", resolvedID)
+			other.SetAdmin("customer_source", source)
+			if name := CustomerName(resolvedID); name != "" {
 				customerName = name
 				other.SetAdmin("customer_name", name)
 			}
@@ -763,7 +781,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	// Dual-write the reporting-only raw/discounted amounts (set via SetAdmin in
 	// PostTextConsumeQuota) into their own columns while keeping the Other JSON
 	// copy. nil/absent reads yield zero values; customer_* are only present when
-	// the request carried a decoded customer id.
+	// the request identified a customer via trace tag or API-token binding.
 	var rawQuota, statQuota, customerStatQuota int
 	var statGroupRatio, customerDiscount float64
 	if other != nil {
@@ -867,9 +885,11 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 	username, _ := GetUsernameById(params.UserId, false)
 	tokenName := ""
+	customerID := ""
 	if params.TokenId > 0 {
 		if token, err := GetTokenById(params.TokenId); err == nil {
 			tokenName = token.Name
+			customerID = token.CustomerId
 		}
 	}
 	createdAt := common.GetTimestamp()
@@ -879,19 +899,20 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		nodeName = common.NodeName
 	}
 	log := &Log{
-		UserId:    params.UserId,
-		Username:  username,
-		CreatedAt: createdAt,
-		Type:      params.LogType,
-		Content:   other.setContent(params.Content),
-		TokenName: tokenName,
-		ModelName: params.ModelName,
-		Quota:     params.Quota,
-		ChannelId: params.ChannelId,
-		TokenId:   params.TokenId,
-		Group:     params.Group,
-		NodeName:  nodeName,
-		Other:     other.JSONString(),
+		UserId:     params.UserId,
+		Username:   username,
+		CreatedAt:  createdAt,
+		Type:       params.LogType,
+		Content:    other.setContent(params.Content),
+		TokenName:  tokenName,
+		CustomerId: customerID,
+		ModelName:  params.ModelName,
+		Quota:      params.Quota,
+		ChannelId:  params.ChannelId,
+		TokenId:    params.TokenId,
+		Group:      params.Group,
+		NodeName:   nodeName,
+		Other:      other.JSONString(),
 	}
 	err := createLog(log)
 	if err != nil {
@@ -899,15 +920,16 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 	if params.LogType == LogTypeConsume && common.DataExportEnabled {
 		LogQuotaData(QuotaDataLogParams{
-			UserID:    params.UserId,
-			Username:  username,
-			ModelName: params.ModelName,
-			Quota:     params.Quota,
-			CreatedAt: createdAt,
-			UseGroup:  params.Group,
-			TokenID:   params.TokenId,
-			ChannelID: params.ChannelId,
-			NodeName:  nodeName,
+			UserID:     params.UserId,
+			Username:   username,
+			ModelName:  params.ModelName,
+			Quota:      params.Quota,
+			CreatedAt:  createdAt,
+			UseGroup:   params.Group,
+			TokenID:    params.TokenId,
+			ChannelID:  params.ChannelId,
+			NodeName:   nodeName,
+			CustomerId: customerID,
 		})
 	}
 }

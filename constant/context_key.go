@@ -28,6 +28,10 @@ const (
 	ContextKeyTokenModelLimit        ContextKey = "token_model_limit"
 	ContextKeyTokenCrossGroupRetry   ContextKey = "token_cross_group_retry"
 	ContextKeyTokenAutoGroups        ContextKey = "token_auto_groups"
+	// ContextKeyTokenCustomerID holds the customer id bound to the API token
+	// by an administrator. It is the fallback when no trace-tag customer can
+	// be resolved (e.g. this gateway runs in front of the unified gateway).
+	ContextKeyTokenCustomerID ContextKey = "token_customer_id"
 
 	/* channel related keys */
 	ContextKeyChannelId                ContextKey = "channel_id"

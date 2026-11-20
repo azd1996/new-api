@@ -96,10 +96,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	var baselineCoverage *model.CacheSkeleton
 	var cacheSkeletonUsage *dto.Usage
 	var retainPreviousBreakpoint bool
-	_, _, cacheCustomerID, customerDecoded := common.TraceTagFromContext(c)
-	if !customerDecoded {
-		cacheCustomerID = ""
-	}
+	cacheCustomerID, _ := common.CustomerFromContext(c)
 	defer func() {
 		if cacheSkeleton != nil {
 			finishCacheSkeleton(c, info, cacheSkeleton, cacheSkeletonUsage, newAPIError)

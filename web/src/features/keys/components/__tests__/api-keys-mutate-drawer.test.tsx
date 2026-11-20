@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import type { ApiKey } from '../../types'
@@ -28,6 +29,8 @@ const { QueryClient, QueryClientProvider } =
 const { api } = await import('@/lib/api')
 const { ApiKeysProvider } = await import('../api-keys-provider')
 const { ApiKeysMutateDrawer } = await import('../api-keys-mutate-drawer')
+const { useAuthStore } = await import('@/stores/auth-store')
+const { ROLE } = await import('@/lib/roles')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -72,6 +75,18 @@ function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
           data: {
             success: true,
             data: { groups: ['vip', 'default'], max_count: 3 },
+          },
+        }
+      case '/api/customer/?p=1&page_size=1000':
+        return {
+          data: {
+            success: true,
+            data: {
+              items: [
+                { customer_id: 'customer-a', name: 'Customer A' },
+                { customer_id: 'customer-b', name: '' },
+              ],
+            },
           },
         }
       default:
@@ -153,8 +168,11 @@ function findButton(text: string, required = true): HTMLButtonElement | null {
   return button ?? null
 }
 
-function getControlByLabel(labelText: 'Name' | 'Quantity'): HTMLInputElement
+function getControlByLabel(
+  labelText: 'Name' | 'Quantity'
+): HTMLInputElement
 function getControlByLabel(labelText: 'Group'): HTMLButtonElement
+function getControlByLabel(labelText: 'Customer'): HTMLElement
 function getControlByLabel(labelText: 'Auto group order'): HTMLElement
 function getControlByLabel(labelText: string): HTMLElement {
   const label = [...document.querySelectorAll<HTMLLabelElement>('label')].find(
@@ -199,6 +217,7 @@ afterEach(() => {
   apiClient.get = originalGet
   apiClient.post = originalPost
   localStorage.clear()
+  useAuthStore.setState({ auth: useAuthStore.getInitialState().auth })
   if (renderedDrawer) {
     renderedDrawer.queryClient.clear()
     renderedDrawer = null
@@ -237,6 +256,34 @@ describe('API keys mutate drawer Auto group integration', () => {
       expect(payload.auto_groups).toEqual([])
       expect(payload.cross_group_retry).toBe(true)
     }
+  })
+
+  test('admins can bind a customer when creating a key', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    useAuthStore.setState((state) => ({
+      auth: {
+        ...state.auth,
+        user: { id: 1, username: 'root', role: ROLE.ADMIN },
+      },
+    }))
+    await renderCreateDrawer()
+
+    const customerTrigger = getControlByLabel('Customer') as HTMLButtonElement
+    const user = userEvent.setup()
+    await user.click(customerTrigger)
+    const option = await screen.findByRole('option', {
+      name: 'customer-a (Customer A)',
+    })
+    await user.click(option)
+    await waitFor(() =>
+      expect(customerTrigger.textContent).toContain('customer-a')
+    )
+
+    changeInput(getControlByLabel('Name'), 'bound')
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(createdPayloads).toHaveLength(1))
+    expect(createdPayloads[0]?.customer_id).toBe('customer-a')
   })
 
   test('preserves an unsaved custom order and mode after Auto to ordinary to Auto changes', async () => {
@@ -304,6 +351,7 @@ describe('API key expiry across editing sessions', () => {
         model_limits: '',
         allow_ips: '',
         allow_user_quota_query: true,
+        customer_id: '',
       }
       const second = { ...first, id: 2, name: 'non-expiring', expired_time: -1 }
       let resolveDetail!: (value: { data: unknown }) => void

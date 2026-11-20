@@ -21,10 +21,11 @@ type QuotaData struct {
 	TokenID   int    `json:"token_id" gorm:"index;default:0"`
 	ChannelID int    `json:"channel_id" gorm:"index;default:0"`
 	NodeName  string `json:"node_name" gorm:"index;size:64;default:''"`
-	// CustomerId is the downstream customer id decoded from the trace-tag header
-	// (empty for traffic without a customer). It is a grouping dimension so the
-	// customer-statistics dashboard can rank/trend by customer. Rows written
-	// before this column exists carry the empty-string default.
+	// CustomerId is the downstream customer id resolved for the request
+	// (trace-tag decoded or API-token binding; empty for traffic without a
+	// customer). It is a grouping dimension so the customer-statistics
+	// dashboard can rank/trend by customer. Rows written before this column
+	// exists carry the empty-string default.
 	CustomerId          string `json:"customer_id" gorm:"index;size:64;default:''"`
 	TokenUsed           int    `json:"token_used" gorm:"default:0"`
 	Count               int    `json:"count" gorm:"default:0"`

@@ -78,8 +78,8 @@ func sessionRoutingFilters(c *gin.Context, modelName, group string, retry bool) 
 		enabled = maps.Clone(operation_setting.GetSessionRoutingSetting().GroupEnabled)
 		c.Set(settingsKey, enabled)
 	}
-	_, _, customerID, decoded := common.TraceTagFromContext(c)
-	if decoded && !model.CustomerSessionRoutingEnabledForModel(customerID, modelName) {
+	customerID, _ := common.CustomerFromContext(c)
+	if customerID != "" && !model.CustomerSessionRoutingEnabledForModel(customerID, modelName) {
 		RequestPolicy(c).AddEvent(PolicyEvent{
 			Group: group,
 			Decision: PolicyDecision{

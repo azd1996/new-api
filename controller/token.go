@@ -37,11 +37,15 @@ type tokenRequest struct {
 	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
 	// 指针区分“未传”和显式 false：新建时未传即开启，更新时未传则保留原值。
 	AllowUserQuotaQuery *bool `json:"allow_user_quota_query"`
+	// CustomerID binds the token to a customer. Admin-only; nil keeps the
+	// existing binding on update, an explicit empty string clears it.
+	CustomerID *string `json:"customer_id"`
 }
 
 type tokenResponse struct {
 	*model.Token
 	AutoGroups []string `json:"auto_groups"`
+	CustomerID string   `json:"customer_id,omitempty"`
 }
 
 func maxTokenQuota() int {
@@ -68,7 +72,33 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	if len(autoGroups) == 0 {
 		autoGroups = nil
 	}
-	return &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups}
+	return &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups, CustomerID: maskedToken.CustomerId}
+}
+
+// applyTokenCustomerBinding validates and applies the admin-only customer
+// binding of a token. A nil request value leaves the token unchanged; an
+// explicit empty string clears the binding. It reports false after writing an
+// error response when the requester is not an admin or the customer is unknown.
+// An explicit empty value on an already-unbound token is a no-op so that
+// clients which always send the field (e.g. older UIs) keep working.
+func applyTokenCustomerBinding(c *gin.Context, token *model.Token, customerID *string) bool {
+	if customerID == nil {
+		return true
+	}
+	trimmed := strings.TrimSpace(*customerID)
+	if trimmed == "" && token.CustomerId == "" {
+		return true
+	}
+	if c.GetInt("role") < common.RoleAdminUser {
+		common.ApiErrorT(c, "Only admins can bind a customer to an API key")
+		return false
+	}
+	if trimmed != "" && !model.CustomerConfigured(trimmed) {
+		common.ApiErrorT(c, "Customer {{id}} does not exist", map[string]any{"id": trimmed})
+		return false
+	}
+	token.CustomerId = trimmed
+	return true
 }
 
 func buildMaskedTokenResponses(tokens []*model.Token) []*tokenResponse {
@@ -364,6 +394,9 @@ func AddToken(c *gin.Context) {
 		AutoGroups:         token.AutoGroups,
 	}
 	cleanToken.AllowUserQuotaQuery = request.AllowUserQuotaQuery == nil || *request.AllowUserQuotaQuery
+	if !applyTokenCustomerBinding(c, &cleanToken, request.CustomerID) {
+		return
+	}
 	err = cleanToken.Insert()
 	if err != nil {
 		common.ApiError(c, err)
@@ -461,6 +494,9 @@ func UpdateToken(c *gin.Context) {
 		}
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		if !applyTokenCustomerBinding(c, cleanToken, request.CustomerID) {
+			return
+		}
 		if token.Group != "auto" {
 			cleanToken.CrossGroupRetry = false
 			_ = cleanToken.SetAutoGroups(nil)
@@ -496,6 +532,7 @@ func UpdateToken(c *gin.Context) {
 			{"group", previous.Group != cleanToken.Group},
 			{"cross_group_retry", previous.CrossGroupRetry != cleanToken.CrossGroupRetry},
 			{"auto_groups", previous.AutoGroups != cleanToken.AutoGroups},
+			{"customer_id", previous.CustomerId != cleanToken.CustomerId},
 		} {
 			if field.changed {
 				changedFields = append(changedFields, field.name)

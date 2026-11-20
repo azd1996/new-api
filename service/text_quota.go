@@ -76,9 +76,10 @@ type textQuotaSummary struct {
 	StatQuota      int
 	StatGroupRatio float64
 	// CustomerDiscount is the per-(customer, model) statistics discount resolved
-	// from the decoded trace-tag customer id; CustomerStatQuota is the amount
-	// scaled by it. HasCustomer is true only when a customer id was decoded, so
-	// the amount is recorded only for identified downstream customers.
+	// from the request's customer id (trace-tag decoded or API-token bound);
+	// CustomerStatQuota is the amount scaled by it. HasCustomer is true only when
+	// a customer id was identified, so the amount is recorded only for
+	// identified downstream customers.
 	// CustomerDiscountFallback / CustomerMatchedPrefix carry resolution
 	// provenance. All reporting-only (never billed).
 	CustomerDiscount         float64
@@ -318,11 +319,12 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	}
 
 	// CustomerDiscount is the per-(customer, model) statistics discount resolved
-	// from the decoded trace-tag customer id (longest series prefix, else 1).
-	// Reporting-only; recorded only when a customer id was actually decoded from
-	// the inbound trace-tag header.
+	// from the request's customer id (trace-tag decoded or API-token bound);
+	// CustomerStatQuota is the amount scaled by it. HasCustomer is true only
+	// when a customer id was identified, so the amount is recorded only for
+	// identified downstream customers.
 	summary.CustomerDiscount = 1
-	if _, _, customerID, decoded := common.TraceTagFromContext(ctx); decoded && customerID != "" {
+	if customerID, _ := common.CustomerFromContext(ctx); customerID != "" {
 		summary.HasCustomer = true
 		resolution := model.ResolveCustomerModelDiscount(customerID, summary.ModelName)
 		summary.CustomerDiscount = resolution.Discount
@@ -599,8 +601,8 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	other.SetAdmin("stat_quota", summary.StatQuota)
 	other.SetAdmin("stat_group_ratio", summary.StatGroupRatio)
 	// Customer discounted amount: the raw amount scaled by the per-customer stat
-	// discount, recorded only for requests whose trace-tag decoded a customer id
-	// (customer_id itself is written by RecordConsumeLog's trace-tag path).
+	// discount, recorded only for requests that identified a customer (trace tag
+	// or API-token binding; customer_id itself is written by RecordConsumeLog).
 	if summary.HasCustomer {
 		other.SetAdmin("customer_stat_quota", summary.CustomerStatQuota)
 		other.SetAdmin("customer_discount", summary.CustomerDiscount)

@@ -127,10 +127,11 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			if relayInfo != nil {
 				protocol = string(relayInfo.RelayFormat)
 			}
-			// Prefer the decoded downstream customer id (also recorded on the
-			// log); fall back to the gateway username when none is identified.
+			// Prefer the resolved downstream customer id (trace tag or token
+			// binding, also recorded on the log); fall back to the gateway
+			// username when none is identified.
 			customerLabel := c.GetString("username")
-			if _, _, customerID, decoded := common.TraceTagFromContext(c); decoded && customerID != "" {
+			if customerID, _ := common.CustomerFromContext(c); customerID != "" {
 				customerLabel = customerID
 			}
 			prommetrics.RecordError(classification.DetailedErrorType, classification.Attribution,

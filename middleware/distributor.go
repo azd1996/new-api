@@ -167,7 +167,7 @@ func prepareClaudeMetadataUserIDForRouting(c *gin.Context, modelName string) err
 	if err != nil {
 		return err
 	}
-	_, _, customerID, _ := common.TraceTagFromContext(c)
+	customerID, _ := common.CustomerFromContext(c)
 	out, synthesized, err := common.PrepareClaudeMetadataUserIDWithConfig(
 		raw,
 		common.GetContextKeyString(c, constant.ContextKeyTokenKey),
@@ -194,7 +194,7 @@ func prepareClaudeMetadataUserIDForRouting(c *gin.Context, modelName string) err
 // channels using the same value. It is best-effort: extraction failures leave
 // the request on the legacy path.
 func prepareExtractedSessionIdentity(c *gin.Context, modelName string) {
-	_, _, customerID, _ := common.TraceTagFromContext(c)
+	customerID, _ := common.CustomerFromContext(c)
 	cfg := model.GetCustomerSessionIdentity(customerID)
 	if !cfg.Matches(modelName) {
 		return

@@ -641,6 +641,117 @@ func TestTokenAllowUserQuotaQueryOnCreateAndUpdate(t *testing.T) {
 	}
 }
 
+func TestTokenCustomerBinding(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Customer{}))
+	// Insert() rebuilds the in-memory customer cache, which validates bindings.
+	require.NoError(t, (&model.Customer{CustomerId: "customer-a", Name: "Customer A"}).Insert())
+
+	requestBody := func(customerID any) map[string]any {
+		body := map[string]any{
+			"name": "bound-token", "expired_time": -1, "unlimited_quota": true,
+			"status": common.TokenStatusEnabled, "group": "default",
+		}
+		if customerID != nil {
+			body["customer_id"] = customerID
+		}
+		return body
+	}
+
+	create := func(t *testing.T, role int, customerID any, name string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := requestBody(customerID)
+		body["name"] = name
+		ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+		ctx.Set("role", role)
+		AddToken(ctx)
+		return recorder
+	}
+
+	t.Run("admin can bind a customer on create", func(t *testing.T) {
+		response := decodeAPIResponse(t, create(t, common.RoleAdminUser, "customer-a", "bound-token"))
+		require.True(t, response.Success, response.Message)
+
+		var saved model.Token
+		require.NoError(t, db.Where("name = ?", "bound-token").First(&saved).Error)
+		assert.Equal(t, "customer-a", saved.CustomerId)
+	})
+
+	t.Run("non-admin cannot bind a customer on create", func(t *testing.T) {
+		response := decodeAPIResponse(t, create(t, common.RoleCommonUser, "customer-a", "forbidden-token"))
+		assert.False(t, response.Success)
+		var count int64
+		require.NoError(t, db.Model(&model.Token{}).Where("name = ?", "forbidden-token").Count(&count).Error)
+		assert.Equal(t, int64(0), count)
+	})
+
+	t.Run("non-admin can create with an explicit empty customer id", func(t *testing.T) {
+		response := decodeAPIResponse(t, create(t, common.RoleCommonUser, "", "unbound-token"))
+		require.True(t, response.Success, response.Message)
+		var saved model.Token
+		require.NoError(t, db.Where("name = ?", "unbound-token").First(&saved).Error)
+		assert.Empty(t, saved.CustomerId)
+	})
+
+	t.Run("admin cannot bind an unknown customer", func(t *testing.T) {
+		response := decodeAPIResponse(t, create(t, common.RoleAdminUser, "missing-customer", "unknown-customer-token"))
+		assert.False(t, response.Success)
+	})
+
+	token := seedToken(t, db, 1, "update-bound", "update-bound-key")
+
+	update := func(t *testing.T, role int, customerID any) *httptest.ResponseRecorder {
+		t.Helper()
+		body := requestBody(customerID)
+		body["name"] = "update-bound"
+		body["id"] = token.Id
+		ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/", body, 1)
+		ctx.Set("role", role)
+		UpdateToken(ctx)
+		return recorder
+	}
+
+	reload := func(t *testing.T) *model.Token {
+		t.Helper()
+		var saved model.Token
+		require.NoError(t, db.First(&saved, "id = ?", token.Id).Error)
+		return &saved
+	}
+
+	t.Run("admin can change, preserve, and clear the binding", func(t *testing.T) {
+		require.True(t, decodeAPIResponse(t, update(t, common.RoleAdminUser, "customer-a")).Success)
+		assert.Equal(t, "customer-a", reload(t).CustomerId)
+
+		// Omitting customer_id preserves the existing binding.
+		require.True(t, decodeAPIResponse(t, update(t, common.RoleAdminUser, nil)).Success)
+		assert.Equal(t, "customer-a", reload(t).CustomerId)
+
+		// An explicit empty string clears it.
+		require.True(t, decodeAPIResponse(t, update(t, common.RoleAdminUser, "")).Success)
+		assert.Empty(t, reload(t).CustomerId)
+	})
+
+	t.Run("non-admin cannot change the binding", func(t *testing.T) {
+		require.True(t, decodeAPIResponse(t, update(t, common.RoleAdminUser, "customer-a")).Success)
+		assert.Equal(t, "customer-a", reload(t).CustomerId)
+
+		response := decodeAPIResponse(t, update(t, common.RoleCommonUser, "other-customer"))
+		assert.False(t, response.Success)
+		assert.Equal(t, "customer-a", reload(t).CustomerId)
+
+		// A non-admin cannot clear an existing binding either.
+		response = decodeAPIResponse(t, update(t, common.RoleCommonUser, ""))
+		assert.False(t, response.Success)
+		assert.Equal(t, "customer-a", reload(t).CustomerId)
+	})
+
+	t.Run("non-admin update without the field preserves the binding", func(t *testing.T) {
+		require.True(t, decodeAPIResponse(t, update(t, common.RoleAdminUser, "customer-a")).Success)
+		require.True(t, decodeAPIResponse(t, update(t, common.RoleCommonUser, nil)).Success)
+		assert.Equal(t, "customer-a", reload(t).CustomerId)
+	})
+}
+
 func TestGetTokenUsageFollowsTheUserQuotaSwitchAndIPWhitelist(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

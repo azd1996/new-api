@@ -60,10 +60,18 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { RelatedPolicyLink } from '@/features/system-settings/request-policies/related-policy-link'
 import { useStatus } from '@/hooks/use-status'
+import { useIsAdmin } from '@/hooks/use-admin'
 import { getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -79,6 +87,7 @@ import {
   getApiKey,
   getTokenAutoGroups,
 } from '../api'
+import { getCustomers } from '@/features/customers/api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
   getApiKeyFormSchema,
@@ -101,6 +110,10 @@ type ApiKeyMutateDrawerProps = {
   currentRow?: ApiKey
 }
 
+// Radix Select does not allow an empty item value; this sentinel represents an
+// unbound API key and is translated back to "" before submission.
+const UNBOUND_CUSTOMER_VALUE = '__unbound__'
+
 export function ApiKeysMutateDrawer({
   open,
   onOpenChange,
@@ -117,6 +130,7 @@ export function ApiKeysMutateDrawer({
     null
   )
   const defaultUseAutoGroup = status?.default_use_auto_group === true
+  const isAdmin = useIsAdmin()
 
   // Fetch models
   const { data: modelsData } = useQuery({
@@ -124,6 +138,15 @@ export function ApiKeysMutateDrawer({
     queryFn: async () => requireServerSuccess(await getUserModels()),
     enabled: open,
     staleTime: 0,
+  })
+
+  // Customer bindings are admin-only; fetch the options only for admins.
+  const { data: customersData } = useQuery({
+    queryKey: ['token-customers'],
+    queryFn: async () =>
+      requireServerSuccess(await getCustomers({ p: 1, page_size: 1000 })),
+    enabled: open && isAdmin,
+    staleTime: 5 * 60 * 1000,
   })
 
   // Fetch groups
@@ -162,6 +185,7 @@ export function ApiKeysMutateDrawer({
   })
 
   const models = modelsData?.data || []
+  const customers = customersData?.data?.items || []
   const groups = useMemo<ApiKeyGroupOption[]>(
     () =>
       Object.entries(groupsData?.data || {}).map(([key, info]) => ({
@@ -291,6 +315,11 @@ export function ApiKeysMutateDrawer({
     setIsSubmitting(true)
     try {
       const basePayload = transformFormDataToPayload(data)
+      // Only admins may submit a customer binding; omitting it preserves any
+      // existing binding on update.
+      if (!isAdmin) {
+        delete basePayload.customer_id
+      }
 
       if (isUpdate && currentRow) {
         const result = await updateApiKey({
@@ -508,6 +537,53 @@ export function ApiKeysMutateDrawer({
                           onCheckedChange={field.onChange}
                         />
                       </FormControl>
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {isAdmin && (
+                <FormField
+                  control={form.control}
+                  name='customer_id'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Customer')}</FormLabel>
+                      <FormControl>
+                        <Select
+                          value={field.value || UNBOUND_CUSTOMER_VALUE}
+                          onValueChange={(value) =>
+                            field.onChange(
+                              value === UNBOUND_CUSTOMER_VALUE ? '' : value
+                            )
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder={t('No customer')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={UNBOUND_CUSTOMER_VALUE}>
+                              {t('No customer')}
+                            </SelectItem>
+                            {customers.map((customer) => (
+                              <SelectItem
+                                key={customer.customer_id}
+                                value={customer.customer_id}
+                              >
+                                {customer.name
+                                  ? `${customer.customer_id} (${customer.name})`
+                                  : customer.customer_id}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Bind this API key to a customer so requests without a trace-tag header are still attributed to them.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
                     </FormItem>
                   )}
                 />

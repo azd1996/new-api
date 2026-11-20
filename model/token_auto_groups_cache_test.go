@@ -30,7 +30,7 @@ func TestTokenAutoGroupsRoundTripThroughRedisHashCache(t *testing.T) {
 
 func TestTokenAllowUserQuotaQueryRoundTripsThroughRedisHashCache(t *testing.T) {
 	server := useUserCacheMiniRedis(t)
-	token := Token{Id: 43, UserId: 7, Key: "token-user-quota-cache-key", Name: "user-quota-cache", AllowUserQuotaQuery: true}
+	token := Token{Id: 43, UserId: 7, Key: "token-user-quota-cache-key", Name: "user-quota-cache", AllowUserQuotaQuery: true, CustomerId: "customer-a"}
 
 	initialized, err := cacheInitToken(token)
 	require.NoError(t, err)
@@ -38,6 +38,14 @@ func TestTokenAllowUserQuotaQueryRoundTripsThroughRedisHashCache(t *testing.T) {
 	cached, err := cacheGetTokenByKey(token.Key)
 	require.NoError(t, err)
 	assert.True(t, cached.AllowUserQuotaQuery)
+	assert.Equal(t, token.CustomerId, cached.CustomerId)
+	assert.Positive(t, server.TTL(getTokenCacheKey(token.Key)))
+
+	// Re-initializing an existing hash takes the TTL-refresh path; it must
+	// keep working now that CustomerId is an additional HSET argument.
+	refreshed, err := cacheInitToken(token)
+	require.NoError(t, err)
+	require.Equal(t, 2, refreshed)
 	assert.Positive(t, server.TTL(getTokenCacheKey(token.Key)))
 }
 

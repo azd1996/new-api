@@ -1,8 +1,13 @@
 package common
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,4 +61,59 @@ func TestNewTraceTagKeysRejectsBadKey(t *testing.T) {
 
 	_, err = newTraceTagKeys("00010203") // valid hex, wrong length
 	assert.Error(t, err)
+}
+
+func TestCustomerFromContext(t *testing.T) {
+	// Install a known key set so the known tag below decodes to customer
+	// "api-key-004", and consume the once so GetTraceTagKeys keeps it.
+	keys, err := newTraceTagKeys(masterKeyHex)
+	require.NoError(t, err)
+	previousKeys, previousOnce := traceTagKeys, traceTagOnce
+	traceTagKeys, traceTagOnce = keys, sync.Once{}
+	traceTagOnce.Do(func() {}) // consume it so GetTraceTagKeys keeps the installed keys
+	t.Cleanup(func() { traceTagKeys, traceTagOnce = previousKeys, previousOnce })
+
+	const knownTag = "C7J42H35CV56G2VKWLMPH72GEKF24S72RCDZOG6KAXXIJ5Q5D2K7LNKIH3R7D5KGLDOMTOX3XGH7HBRLCWQMCZKGHY7EXQBCLVWUATI"
+
+	newContext := func(t *testing.T, headerValue, tokenCustomer string) *gin.Context {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+		if headerValue != "" {
+			ctx.Request.Header.Set(TraceTagHeader, headerValue)
+		}
+		SetContextKey(ctx, constant.ContextKeyTokenCustomerID, tokenCustomer)
+		return ctx
+	}
+
+	t.Run("no trace tag and no token binding", func(t *testing.T) {
+		customerID, source := CustomerFromContext(newContext(t, "", ""))
+		assert.Empty(t, customerID)
+		assert.Empty(t, source)
+	})
+
+	t.Run("token binding is used when no trace tag exists", func(t *testing.T) {
+		customerID, source := CustomerFromContext(newContext(t, "", "customer-a"))
+		assert.Equal(t, "customer-a", customerID)
+		assert.Equal(t, CustomerSourceToken, source)
+	})
+
+	t.Run("decoded trace tag wins over a different token binding", func(t *testing.T) {
+		customerID, source := CustomerFromContext(newContext(t, knownTag, "customer-a"))
+		assert.Equal(t, "api-key-004", customerID)
+		assert.Equal(t, CustomerSourceTraceTag, source)
+	})
+
+	t.Run("token binding is used when the trace tag fails authentication", func(t *testing.T) {
+		customerID, source := CustomerFromContext(newContext(t, "TAMPERED", "customer-a"))
+		assert.Equal(t, "customer-a", customerID)
+		assert.Equal(t, CustomerSourceToken, source)
+	})
+
+	t.Run("an empty decoded trace-tag customer falls back to the token binding", func(t *testing.T) {
+		customerID, source := CustomerFromContext(newContext(t, "", "customer-a"))
+		assert.Equal(t, "customer-a", customerID)
+		assert.Equal(t, CustomerSourceToken, source)
+	})
 }
