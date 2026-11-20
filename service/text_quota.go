@@ -680,6 +680,15 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
 		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota,
 		relayInfo.FirstResponseSeconds())
+	// Compare the gateway-observed timings with the upstream-reported ones
+	// (AWS Bedrock invocation metrics) to attribute latency to the gateway vs.
+	// the upstream. No-op when metrics are disabled or the upstream reports no
+	// timings.
+	if relayInfo.UpstreamLatencySource != "" {
+		prommetrics.RecordRelayUpstreamDelta(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId),
+			relayInfo.FirstResponseSeconds(), time.Since(relayInfo.StartTime).Seconds(),
+			relayInfo.UpstreamFirstByteLatencyMs, relayInfo.UpstreamInvocationLatencyMs)
+	}
 	// Feed per-proxy TTFT (keyed by the upstream model used for selection) into
 	// the TTFT-aware proxy router and the per-proxy histogram. No-op for direct
 	// requests and non-streaming/no-first-token responses.
