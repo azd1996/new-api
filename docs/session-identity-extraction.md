@@ -86,6 +86,14 @@ type SessionIdentitySource struct {
 
 ### 3.3 配置示例（单消息 + system 承载上下文的客户）
 
+UI 表单与 Go 结构体中的正则填**正则原始写法**（单反斜杠）：
+
+```
+^\[([^\]]+)-fixed-\d+\]
+```
+
+仅在写 JSON 配置文件时才需要 JSON 字符串转义（`\` 写成 `\\`）：
+
 ```json
 {
   "enabled": true,
@@ -97,12 +105,71 @@ type SessionIdentitySource struct {
   ],
   "transform": "xxhash64",
   "value_regex": "^[A-Za-z0-9_-]{4,64}$",
-  "on_empty": "legacy",
+  "on_empty": "stable",
   "disable_first_message_fallback": true
 }
 ```
 
 对该客户 6 轮请求，两个来源依次短路（均未命中）后由 regex 提取出 `v54qx6`，transform 后 6 轮一致。
+
+注意两点常见误配：
+
+- **正则双重转义**：UI 输入框里填 `^\\[...`（JSON 转义形式）会去匹配字面的 `\`，永远命中不了。表单里只写单反斜杠。
+- **跳过首条消息兜底**建议与自定义来源一起开启：关闭时提取失败会退回到逐轮变化的首条消息，对单消息客户端等于没有兜底。
+
+## 3.4 实际处理顺序（一次 /v1/messages 请求的完整链路）
+
+以 3.3 的配置为例：
+
+```
+第 0 步：鉴权与客户识别（distributor）
+  鉴权 → 解析路由模型 claude-opus-4-6
+    → 解码 x-bce-aigw-trace-tag 得到 customer_id（整请求只解码一次，缓存到 gin context）
+
+第 1 步：会话身份提取（prepareExtractedSessionIdentity，亲和冻结之前）
+  1.1 查内存客户缓存；未配置/损坏/enabled=false → 直接跳到第 2 步（零成本）
+  1.2 model_prefixes 不匹配模型 → 跳到第 2 步
+  1.3 优先级短路：
+      ① body.metadata.user_id 非空  → 用它，Source=client，结束
+      ② x-claude-code-session-id 头 → 用它，Source=header，结束
+      ③ 依次执行配置的 sources：
+         regex 源：gjson 取 system.0.text（第一个 system 块文本）
+           → 执行 ^\[([^\]]+)-fixed-\d+\]（编译结果全局缓存）
+           → 捕获组 1 = "v54qx6"
+           → 长度 ≤256 ✓，value_regex ✓ → 命中，结束
+  1.4 写入 context：
+      ContextKeyExtractedSessionID       = xxhash64("v54qx6")
+      ContextKeyExtractedSessionIDSource = custom:regex(system.0.text)
+
+第 2 步：渠道亲和匹配（PrepareOriginalRequestChannelAffinity，冻结快照）
+  冻结原始亲和输入（重试/覆盖不改判）
+    → 亲和规则匹配时，第 1 步的提取值优先于规则自身的 key_sources
+    → 缓存 key = <ruleName>:<usingGroup>:<session id>
+    → 命中绑定：复用同一渠道；未命中：按优先级/权重选路
+    → 请求成功后回写绑定（TTL 默认 3600s，成功刷新）
+
+第 3 步：relay 阶段 metadata 合成（ClaudeHelper）
+  客户端已带 metadata.user_id → 原样透传，结束
+  否则合成 Claude Code 形状 blob：
+    metadata.user_id = {"device_id":"<apiKey后6位>","account_uuid":"","session_id":"<第1步的session id>"}
+    → session_id 多轮一致 → 上游会话粘滞路由稳定
+
+第 4 步：后续链路与此前一致
+  参数覆盖/重试改写 → 缓存断点策略 → 发送上游
+    → 消耗日志记录 other.session_id（指纹）与来源
+```
+
+同一个提取值同时决定"走哪个渠道"（亲和）与"上游把请求粘到哪个会话"（metadata.session_id），这是命中率提升的机制。
+
+关键分支行为：
+
+| 情况 | 结果 |
+|---|---|
+| regex 命中 | session id = transform(原值)，多轮一致 |
+| 来源都不命中 | `on_empty` 决定：`legacy` 退回首条消息（单消息客户端会逐轮轮转）；`stable` 退到 IP+UA+apiKey 指纹（稳定但不区分会话）；`none` 不合成、不建立亲和 |
+| 客户开始自带 metadata.user_id | ① 短路，自定义提取不参与 |
+| 无有效 trace tag / 客户未配置 | 第 1.1 步跳过，完全走旧逻辑 |
+| 试运行可测草稿 | 生产路径读**已保存**配置，改完需保存；且线上命中要求 trace tag 能解出对应客户 |
 
 ## 4. 提取流水线与廉价短路
 
