@@ -397,6 +397,7 @@ func migrateDB() error {
 		&XScheduleRule{},
 		&ErrorSignatureAlias{},
 		&UserQuotaPolicy{},
+		&BalanceAlertState{},
 	)
 	if err != nil {
 		return err

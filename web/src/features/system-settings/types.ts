@@ -454,6 +454,18 @@ export type ErrorAlertRule = {
   at_user_ids?: string[]
 }
 
+export type BalanceAlertRule = {
+  id: string
+  enabled: boolean
+  group: string
+  threshold_amount: number
+  max_users: number
+  alert_toid: number[]
+  alert_url: string
+  link?: string
+  at_user_ids?: string[]
+}
+
 export type OperationsSettings = {
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
@@ -472,6 +484,8 @@ export type OperationsSettings = {
   'debug_scope_setting.rules': DebugScopeRule[]
   'error_alert_setting.enabled': boolean
   'error_alert_setting.rules': ErrorAlertRule[]
+  'balance_alert_setting.enabled': boolean
+  'balance_alert_setting.rules': BalanceAlertRule[]
   QuotaRemindEnabled: boolean
   QuotaRemindThreshold: string
   EmailProvider: 'smtp' | 'resend'

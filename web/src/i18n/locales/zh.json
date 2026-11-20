@@ -3094,7 +3094,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "相关项目",
     "footer.defaultCopyright": "版权所有。",
-    "footer.new\u0061pi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
+    "footer.newapi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
     "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "高级自定义渠道仅对 /v1/responses 且不做协议转换的路由生效。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "对于 2025 年 5 月 10 日之后添加的渠道，在部署时无需从模型名称中移除 \".\"",
     "For private deployments, format: https://fastgpt.run/api/openapi": "对于私有部署，格式为：https://fastgpt.run/api/openapi",
@@ -8057,6 +8057,23 @@
     "{{resolved}} of {{total}} requests resolved": "已解析 {{resolved}} / {{total}} 个请求",
     "(client-managed)": "（客户端管理）",
     "Failed to test session identity extraction": "测试会话身份提取失败",
-    "Paste at least one valid JSON request body": "请至少粘贴一个合法的 JSON 请求体"
+    "Paste at least one valid JSON request body": "请至少粘贴一个合法的 JSON 请求体",
+    "Low balance alerts": "余额不足提醒",
+    "Save balance alert settings": "保存余额提醒设置",
+    "Enable low balance alerts": "开启余额不足提醒",
+    "Check enabled users once an hour and send the users below a rule threshold to Ruliu, at most once per user per day.": "每小时检查一次启用用户，把低于规则阈值的用户发送到如流，同一用户每天最多提醒一次。",
+    "No balance alert rules configured.": "尚未配置余额提醒规则。",
+    "Balance alert rule": "余额提醒规则",
+    "Remove balance alert rule": "删除余额提醒规则",
+    "Enable this rule": "启用该规则",
+    "Leave empty for every group": "留空表示所有分组",
+    "Balance threshold": "余额阈值",
+    "Max users per message": "单条消息最多用户数",
+    "Comma-separated recipient IDs.": "多个接收方 ID 用英文逗号分隔。",
+    "Alert URL": "告警地址",
+    "Link": "跳转链接",
+    "Mention user IDs": "@ 用户 ID",
+    "Add balance alert rule": "添加余额提醒规则",
+    "Enter a threshold above zero": "请输入大于 0 的阈值"
   }
 }

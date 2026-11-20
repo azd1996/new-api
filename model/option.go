@@ -274,6 +274,9 @@ func validateOptionValue(key string, value string) error {
 	if key == "error_alert_setting.rules" {
 		return operation_setting.ValidateErrorAlertRulesJSON(value)
 	}
+	if key == "balance_alert_setting.rules" {
+		return operation_setting.ValidateBalanceAlertRulesJSON(value)
+	}
 	if key == operation_setting.LogMaxRangeDaysOptionKey {
 		return operation_setting.ValidateLogMaxRangeDays(value)
 	}

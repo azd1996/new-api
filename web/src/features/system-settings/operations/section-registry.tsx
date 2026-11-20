@@ -20,6 +20,7 @@ import { SystemBehaviorSection } from '../general/system-behavior-section'
 import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
+import { BalanceAlertSettingsSection } from '../maintenance/balance-alert-settings-section'
 import { ErrorAlertSettingsSection } from '../maintenance/error-alert-settings-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
 import { PerformanceSection } from '../maintenance/performance-section'
@@ -144,6 +145,20 @@ const OPERATIONS_SECTIONS = [
             settings['error_alert_setting.enabled'] ?? false,
           'error_alert_setting.rules':
             settings['error_alert_setting.rules'] ?? [],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'balance-alerts',
+    titleKey: 'Low balance alerts',
+    build: (settings: OperationsSettings) => (
+      <BalanceAlertSettingsSection
+        defaultValues={{
+          'balance_alert_setting.enabled':
+            settings['balance_alert_setting.enabled'] ?? false,
+          'balance_alert_setting.rules':
+            settings['balance_alert_setting.rules'] ?? [],
         }}
       />
     ),

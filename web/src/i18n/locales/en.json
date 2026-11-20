@@ -3094,7 +3094,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Related Projects",
     "footer.defaultCopyright": "All rights reserved.",
-    "footer.new\u0061pi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
+    "footer.newapi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
     "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment",
     "For private deployments, format: https://fastgpt.run/api/openapi": "For private deployments, format: https://fastgpt.run/api/openapi",
@@ -8057,6 +8057,23 @@
     "{{resolved}} of {{total}} requests resolved": "{{resolved}} of {{total}} requests resolved",
     "(client-managed)": "(client-managed)",
     "Failed to test session identity extraction": "Failed to test session identity extraction",
-    "Paste at least one valid JSON request body": "Paste at least one valid JSON request body"
+    "Paste at least one valid JSON request body": "Paste at least one valid JSON request body",
+    "Low balance alerts": "Low balance alerts",
+    "Save balance alert settings": "Save balance alert settings",
+    "Enable low balance alerts": "Enable low balance alerts",
+    "Check enabled users once an hour and send the users below a rule threshold to Ruliu, at most once per user per day.": "Check enabled users once an hour and send the users below a rule threshold to Ruliu, at most once per user per day.",
+    "No balance alert rules configured.": "No balance alert rules configured.",
+    "Balance alert rule": "Balance alert rule",
+    "Remove balance alert rule": "Remove balance alert rule",
+    "Enable this rule": "Enable this rule",
+    "Leave empty for every group": "Leave empty for every group",
+    "Balance threshold": "Balance threshold",
+    "Max users per message": "Max users per message",
+    "Comma-separated recipient IDs.": "Comma-separated recipient IDs.",
+    "Alert URL": "Alert URL",
+    "Link": "Link",
+    "Mention user IDs": "Mention user IDs",
+    "Add balance alert rule": "Add balance alert rule",
+    "Enter a threshold above zero": "Enter a threshold above zero"
   }
 }

@@ -44,6 +44,8 @@ const defaultOperationsSettings: OperationsSettings = {
   'debug_scope_setting.rules': [],
   'error_alert_setting.enabled': false,
   'error_alert_setting.rules': [],
+  'balance_alert_setting.enabled': false,
+  'balance_alert_setting.rules': [],
   QuotaRemindEnabled: true,
   QuotaRemindThreshold: '',
   EmailProvider: 'smtp',

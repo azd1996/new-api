@@ -20,6 +20,7 @@
 
 ### 新增 Added
 
+- **余额不足如流告警**：新增按自然小时槽运行的 `balance_alert` 系统任务。按「系统设置 → 运维 → 余额不足提醒」的规则逐条统计余额低于阈值的启用用户，聚合为一条如流消息（群 ID / webhook / 跳转链接 / @ 用户均可配，单条消息最多列 20 人、上限 100），可选按用户分组过滤，阈值以站点货币单位配置并按 `common.QuotaPerUnit` 换算。去重状态落 `balance_alert_states`（`user_id + rule_id` 唯一），同一用户 24 小时内最多提醒一次；`ListUsersBelowBalance` 用一次 LEFT JOIN 同时完成余额、分组与静默窗口筛选并按余额升序取，仅 master 节点经 DB lease 执行，无启用规则时不调度。**只在如流发送成功后标记已提醒**，发送失败下一轮重试而不会被静默窗口吞掉。规则保存前校验阈值 > 0、启用规则必须有接收方与合法 http(s) 地址、规则 ID 唯一。
 - **用户余额策略（每月刷新 / 固定额度）**：余额（钱包）模式下可按用户配置额度策略，无需改用订阅。新增 `user_quota_policies` 表（`user_id` 唯一索引，字段 `mode`/`amount`/`enabled`/`last_granted_period`），两种模式：`monthly_refresh` 按自然月（master 节点本地时区的每月 1 号 00:00）把 `users.quota` 覆盖为 `amount`，未用完额度与已充值余额一并清零；`fixed` 只应用一次、之后不再自动变动。策略存于独立表而非 `user.setting`，因为后者是用户可自行修改的 JSON（`/api/user/self`），且需要按状态查询到期用户。发放幂等由 `last_granted_period`（`YYYY-MM`）保证：钱包写入、幂等标记与策略读取在同一事务内（`lockForUpdate` 锁策略行与用户行），提交后按 delta 同步额度缓存并写一条充值日志（`Monthly quota refresh`，前后值入 `other.admin_info`），因此重启、重试或多 master 都不会重发或漏发。编辑额度或模式不会重开已结算的月份。
 - **月度余额刷新定时任务**：`service.StartQuotaRefreshTask` 仅 master 节点运行，1 分钟 tick、每批 300，`last_granted_period <> 当期` 作为到期条件，因此跨天停机恢复后会自动补发当月；同一批全部失败或跳过时退出本轮，避免重复扫描同一批。已结算/已删除/非本月模式/用户禁用的记录静默跳过，仅真实错误记 warn。
 - **额度策略接口**：`GET/PUT/DELETE /api/user/quota_policy` 与 `POST /api/user/quota_policy/apply`（立即结算本月）。权限沿用 `canManageTargetRole`，不能对角色不低于自己的用户配置；策略变更写管理审计日志（`user.quota_policy_update` / `user.quota_policy_delete`），立即发放写 `user.quota_monthly_refresh`。

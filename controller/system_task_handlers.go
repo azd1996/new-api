@@ -22,6 +22,44 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 	service.RegisterSystemTaskHandler(errorAlertHandler{})
+	service.RegisterSystemTaskHandler(balanceAlertHandler{})
+}
+
+type balanceAlertHandler struct{}
+
+func (balanceAlertHandler) Type() string { return model.SystemTaskTypeBalanceAlert }
+
+func (balanceAlertHandler) Enabled() bool {
+	return operation_setting.BalanceAlertEnabled()
+}
+
+// Interval keeps one balance check per wall-clock hour; the quiet window in the
+// settings decides how often a given user may be reported.
+func (balanceAlertHandler) Interval() time.Duration { return time.Hour }
+
+func (balanceAlertHandler) NewPayload() any { return nil }
+
+func (balanceAlertHandler) ScheduleSlot(now time.Time) (string, any, bool) {
+	slotStart, _ := service.NaturalHourSlot(now)
+	payload := service.BalanceAlertTaskPayload{
+		SlotStart: slotStart.Unix(),
+		SlotEnd:   slotStart.Add(time.Hour).Unix(),
+	}
+	return service.BalanceAlertScheduleKey(slotStart), payload, true
+}
+
+func (balanceAlertHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := service.BalanceAlertTaskPayload{}
+	if err := task.DecodePayload(&payload); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	result, err := service.RunBalanceAlertTask(ctx, payload)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, result, nil)
 }
 
 type errorAlertHandler struct{}

@@ -289,10 +289,11 @@ type Log struct {
 	// LIKE scan over the unindexed Other blob. Rows predating the column, and
 	// non-error logs, read as 0; statusCodeOtherCondition still covers those.
 	StatusCode int `json:"status_code,omitempty" gorm:"default:0;index:idx_logs_status_code"`
-	// DownstreamRequestId / CustomerId / CustomerName are decoded from the
-	// downstream gateway trace-tag header and duplicated into real indexed
-	// columns for fast search. CustomerName is the write-time snapshot of the
-	// customer's configured display name for the decoded customer id.
+	// DownstreamRequestId / CustomerId / CustomerName come from the inbound
+	// trace-tag header or the API token's customer binding, and are duplicated
+	// into real indexed columns for fast search. CustomerName is the write-time
+	// snapshot of the customer's configured display name for the customer id.
+	// DownstreamRequestId only exists for trace-tag traffic.
 	DownstreamRequestId string `json:"downstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_downstream_request_id;default:''"`
 	CustomerId          string `json:"customer_id,omitempty" gorm:"type:varchar(128);index:idx_logs_customer_id;default:''"`
 	CustomerName        string `json:"customer_name,omitempty" gorm:"type:varchar(128);index:idx_logs_customer_name;default:''"`
@@ -892,6 +893,10 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 			customerID = token.CustomerId
 		}
 	}
+	customerName := ""
+	if customerID != "" {
+		customerName = CustomerName(customerID)
+	}
 	createdAt := common.GetTimestamp()
 	other := params.Other
 	nodeName := params.NodeName
@@ -899,20 +904,21 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		nodeName = common.NodeName
 	}
 	log := &Log{
-		UserId:     params.UserId,
-		Username:   username,
-		CreatedAt:  createdAt,
-		Type:       params.LogType,
-		Content:    other.setContent(params.Content),
-		TokenName:  tokenName,
-		CustomerId: customerID,
-		ModelName:  params.ModelName,
-		Quota:      params.Quota,
-		ChannelId:  params.ChannelId,
-		TokenId:    params.TokenId,
-		Group:      params.Group,
-		NodeName:   nodeName,
-		Other:      other.JSONString(),
+		UserId:       params.UserId,
+		Username:     username,
+		CreatedAt:    createdAt,
+		Type:         params.LogType,
+		Content:      other.setContent(params.Content),
+		TokenName:    tokenName,
+		CustomerId:   customerID,
+		CustomerName: customerName,
+		ModelName:    params.ModelName,
+		Quota:        params.Quota,
+		ChannelId:    params.ChannelId,
+		TokenId:      params.TokenId,
+		Group:        params.Group,
+		NodeName:     nodeName,
+		Other:        other.JSONString(),
 	}
 	err := createLog(log)
 	if err != nil {
