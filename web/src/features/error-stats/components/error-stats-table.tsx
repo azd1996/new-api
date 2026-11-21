@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ExternalLink, Pencil } from 'lucide-react'
+import { ExternalLink, Loader2, Pencil, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -394,8 +394,10 @@ interface ErrorStatsTableProps {
   savingHash: string | null
   shortNameOptions: string[]
   attributionOptions: string[]
+  aiGeneratingHash: string | null
   onSaveAlias: (item: ErrorStatItem, next: AliasSaveInput) => void
   onDrillDown: (item: ErrorStatItem) => void
+  onGenerateRule: (item: ErrorStatItem) => void
 }
 
 export function ErrorStatsTable(props: ErrorStatsTableProps) {
@@ -444,7 +446,7 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
             <TableHead className='min-w-[450px]'>{t('Channels')}</TableHead>
             <TableHead className='min-w-[200px]'>{t('Customers')}</TableHead>
             {isSignatureMode && (
-              <TableHead className='min-w-[120px] text-right'>
+              <TableHead className='min-w-[170px] text-right'>
                 {t('Actions')}
               </TableHead>
             )}
@@ -535,15 +537,44 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
                   <CustomersCell item={item} />
                 </TableCell>
                 <TableCell className='text-right'>
-                  <Button
-                    type='button'
-                    variant='outline'
-                    size='sm'
-                    onClick={() => props.onDrillDown(item)}
-                  >
-                    <ExternalLink className='size-3.5' aria-hidden='true' />
-                    {t('View logs')}
-                  </Button>
+                  <div className='flex items-center justify-end gap-1.5'>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='icon-xs'
+                            aria-label={t(
+                              'Generate normalization rule with AI'
+                            )}
+                            disabled={
+                              props.aiGeneratingHash === item.signature_hash
+                            }
+                            onClick={() => props.onGenerateRule(item)}
+                          />
+                        }
+                      >
+                        {props.aiGeneratingHash === item.signature_hash ? (
+                          <Loader2 className='size-3 animate-spin' />
+                        ) : (
+                          <Sparkles className='size-3' aria-hidden='true' />
+                        )}
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {t('Generate normalization rule with AI')}
+                      </TooltipContent>
+                    </Tooltip>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() => props.onDrillDown(item)}
+                    >
+                      <ExternalLink className='size-3.5' aria-hidden='true' />
+                      {t('View logs')}
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -591,4 +622,3 @@ export function ErrorStatsTable(props: ErrorStatsTableProps) {
     </div>
   )
 }
-

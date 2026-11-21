@@ -51,6 +51,34 @@ func TestErrorSignatureOtherLegacyTopLevel(t *testing.T) {
 	assert.Equal(t, "cust-9", o.customerId())
 }
 
+// TestGetErrorSignatureExamples pins the raw-error sampling used by AI rule
+// generation: newest first, error logs only, blank contents filtered, and the
+// signature hash matched exactly.
+func TestGetErrorSignatureExamples(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	oldLogDB := LOG_DB
+	LOG_DB = db
+	t.Cleanup(func() { LOG_DB = oldLogDB })
+
+	require.NoError(t, db.Create([]Log{
+		{Id: 1, Type: LogTypeError, ErrorSignatureHash: "hash-a", Content: "raw two", CreatedAt: 200},
+		{Id: 2, Type: LogTypeError, ErrorSignatureHash: "hash-a", Content: "raw one", CreatedAt: 300},
+		{Id: 3, Type: LogTypeError, ErrorSignatureHash: "hash-b", Content: "other", CreatedAt: 400},
+		{Id: 4, Type: LogTypeConsume, ErrorSignatureHash: "hash-a", Content: "consume", CreatedAt: 500},
+		{Id: 5, Type: LogTypeError, ErrorSignatureHash: "hash-a", Content: "   ", CreatedAt: 600},
+	}).Error)
+
+	contents, err := GetErrorSignatureExamples("hash-a", 3)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"raw one", "raw two"}, contents)
+
+	contents, err = GetErrorSignatureExamples("", 3)
+	require.NoError(t, err)
+	assert.Empty(t, contents)
+}
+
 // TestErrorStatFilterStatusCodeFallsBackToOtherJSON pins
 // applyErrorStatFilter's status_code narrowing to match the dedicated indexed
 // column for rows written since the column was added, while still finding

@@ -2,6 +2,7 @@ package model
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -191,6 +192,35 @@ func scanErrorStatRows(f ErrorStatFilter) ([]errorStatScanRow, error) {
 		Limit(maxErrorStatScanRows).
 		Scan(&rows).Error
 	return rows, err
+}
+
+// GetErrorSignatureExamples returns up to limit raw (un-normalized) error
+// contents recorded for the given signature hash, newest first. AI rule
+// generation uses them to derive a regex that matches what production actually
+// logs, rather than the already-normalized signature.
+func GetErrorSignatureExamples(signatureHash string, limit int) ([]string, error) {
+	if signatureHash == "" || limit <= 0 {
+		return nil, nil
+	}
+	var rows []struct {
+		Content string `gorm:"column:content"`
+	}
+	err := LOG_DB.Table("logs").
+		Select("content").
+		Where("type = ? AND error_signature_hash = ?", LogTypeError, signatureHash).
+		Order("created_at desc").
+		Limit(limit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	contents := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row.Content) != "" {
+			contents = append(contents, row.Content)
+		}
+	}
+	return contents, nil
 }
 
 // CountErrorLogs returns the total number of error logs matching the filter.

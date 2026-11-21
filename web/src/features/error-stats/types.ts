@@ -158,3 +158,12 @@ export interface SuggestedRule {
   // How many distinct signatures the pattern matched.
   match_count: number
 }
+
+// A normalization rule proposed by the AI assistant for one detailed-error
+// signature. `samples` are the raw (un-normalized) error contents the model
+// was shown; `matched_sample` reports whether its pattern matched one.
+export interface AIGeneratedRule {
+  rule: SignatureRule
+  samples: string[]
+  matched_sample: boolean
+}

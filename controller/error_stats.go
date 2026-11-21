@@ -1,12 +1,15 @@
 package controller
 
 import (
+	"errors"
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 
@@ -299,4 +302,168 @@ func GetErrorSignatureRuleSuggestions(c *gin.Context) {
 		}
 	}
 	common.ApiSuccess(c, service.SuggestErrorSignatureRules(signatures))
+}
+
+// aiGeneratedRuleRequest identifies the signature to generate a rule for and
+// carries the attribution options offered by the frontend, so the model picks
+// from the same values the admin can choose in the rules editor.
+type aiGeneratedRuleRequest struct {
+	SignatureHash      string   `json:"signature_hash"`
+	Signature          string   `json:"signature"`
+	AttributionOptions []string `json:"attribution_options"`
+}
+
+// aiGeneratedRule is the advisory result returned to the frontend. The rule is
+// not persisted until the admin confirms it in the rules editor.
+type aiGeneratedRule struct {
+	Rule          service.SignatureRule `json:"rule"`
+	Samples       []string              `json:"samples"`
+	MatchedSample bool                  `json:"matched_sample"`
+}
+
+// aiRuleAttributionOptions is the fallback attribution vocabulary when the
+// frontend does not send one. It mirrors the standard set seeded in the UI.
+var aiRuleAttributionOptions = []string{
+	"客户端问题-不可解决",
+	"客户端问题-可解决",
+	"源站问题",
+	"上游网关问题",
+}
+
+const aiRuleSystemPrompt = "You are a reliability engineer writing classification rules for an AI API gateway's detailed error statistics. You output only a JSON object, with no markdown fences and no explanations."
+
+// buildAIRulePrompt describes the rule contract and the observed errors to the
+// assistant. Names use kebab-case because the rule name doubles as the stable
+// detailed-error type key; attribution values are the admin's configured set.
+func buildAIRulePrompt(req aiGeneratedRuleRequest, samples, existingRuleNames []string) string {
+	attributions := req.AttributionOptions
+	if len(attributions) == 0 {
+		attributions = aiRuleAttributionOptions
+	}
+
+	var b strings.Builder
+	b.WriteString("The gateway classifies every upstream error with ordered rules; the first matching enabled rule wins. Generate ONE rule that matches the error class below.\n\n")
+	b.WriteString("Rule fields:\n")
+	b.WriteString("- name: a short, stable kebab-case class name (also the displayed detailed error type), e.g. bedrock-invalid-thinking-signature.\n")
+	b.WriteString("- pattern: a Go RE2 regular expression matched UNANCHORED against the complete raw error string.\n")
+	b.WriteString("- signature: the stable normalized display signature. Use fixed text, or a template referencing capture groups like ${1}. It must not retain dynamic IDs, numbers, or timestamps.\n")
+	b.WriteString("- attribution: the single best option from this list: ")
+	b.WriteString(strings.Join(attributions, ", "))
+	b.WriteString(". Use an empty string only if the choice is genuinely ambiguous.\n")
+	b.WriteString("- note: a concise English explanation of why this error class exists, or an empty string.\n")
+	b.WriteString("- enabled: true.\n\n")
+	b.WriteString("Pattern requirements: RE2 only (no lookahead, lookbehind, or backreferences); do not anchor with ^ or $; escape regex metacharacters; match a distinctive stable fragment rather than the whole message; ignore dynamic prefixes such as status_code=..., request ids, timestamps, and account or model names.\n\n")
+	b.WriteString("Currently normalized signature:\n")
+	b.WriteString(req.Signature)
+	b.WriteString("\n\nRaw error samples (newest first):\n")
+	for i, sample := range samples {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, sample)
+	}
+	if len(existingRuleNames) > 0 {
+		b.WriteString("\nExisting rule names (do not duplicate them):\n")
+		b.WriteString(strings.Join(existingRuleNames, ", "))
+		b.WriteString("\n")
+	}
+	b.WriteString("\nReturn exactly this JSON shape and nothing else: {\"name\":\"...\",\"pattern\":\"...\",\"signature\":\"...\",\"attribution\":\"...\",\"note\":\"...\",\"enabled\":true}")
+	return b.String()
+}
+
+// parseLLMRuleJSON extracts the rule JSON object from an assistant response.
+// Models often wrap JSON in markdown fences or prose despite the instructions,
+// so locate the first '{' through the last '}' before unmarshalling. The
+// pattern is compiled here so an uncompilable suggestion is rejected before it
+// can reach the rules editor.
+func parseLLMRuleJSON(content string) (service.SignatureRule, error) {
+	text := strings.TrimSpace(content)
+	if start := strings.Index(text, "{"); start >= 0 {
+		if end := strings.LastIndex(text, "}"); end > start {
+			text = text[start : end+1]
+		}
+	}
+	var rule service.SignatureRule
+	if err := common.Unmarshal([]byte(text), &rule); err != nil {
+		return rule, fmt.Errorf("AI assistant returned an unreadable rule: %w", err)
+	}
+	if strings.TrimSpace(rule.Name) == "" || strings.TrimSpace(rule.Pattern) == "" {
+		return rule, errors.New("AI assistant returned a rule without a name or pattern")
+	}
+	if strings.TrimSpace(rule.Signature) == "" {
+		return rule, errors.New("AI assistant returned a rule without a normalized signature")
+	}
+	if _, err := regexp.Compile(rule.Pattern); err != nil {
+		return rule, fmt.Errorf("AI assistant returned an invalid pattern: %w", err)
+	}
+	rule.Enabled = true
+	return rule, nil
+}
+
+// GenerateErrorSignatureRule uses the AI assistant to propose one
+// normalization rule for a detailed-error signature. It samples the raw error
+// contents stored under the signature hash (falling back to the normalized
+// signature for logs predating the hash column), then validates the returned
+// rule and reports whether its pattern matches one of the samples. Admin only;
+// the rule is not saved — the admin reviews it and adds it via the rules
+// editor.
+func GenerateErrorSignatureRule(c *gin.Context) {
+	var req aiGeneratedRuleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "invalid request body")
+		return
+	}
+	req.SignatureHash = strings.TrimSpace(req.SignatureHash)
+	if req.SignatureHash == "" {
+		common.ApiErrorMsg(c, "signature_hash is required")
+		return
+	}
+	req.Signature = strings.TrimSpace(req.Signature)
+
+	samples, err := model.GetErrorSignatureExamples(req.SignatureHash, 3)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if len(samples) == 0 {
+		if req.Signature == "" {
+			common.ApiErrorMsg(c, "no error samples found for this signature")
+			return
+		}
+		// Logs written before the signature-hash column existed carry the
+		// normalized signature only; it is still a usable starting point.
+		samples = []string{req.Signature}
+	}
+
+	existingRules := service.GetEffectiveErrorSignatureRules()
+	existingNames := make([]string, 0, len(existingRules))
+	for _, rule := range existingRules {
+		if name := strings.TrimSpace(rule.Name); name != "" {
+			existingNames = append(existingNames, name)
+		}
+	}
+
+	response, err := LLMChat(c.Request.Context(), common.GetContextKeyInt(c, constant.ContextKeyUserId), LLMChatRequest{
+		Messages: []LLMChatMessage{
+			{Role: "system", Content: aiRuleSystemPrompt},
+			{Role: "user", Content: buildAIRulePrompt(req, samples, existingNames)},
+		},
+	})
+	if err != nil {
+		common.ApiErrorMsg(c, "AI assistant failed: "+err.Error())
+		return
+	}
+	rule, err := parseLLMRuleJSON(response.Content)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	matched := false
+	if re, compileErr := regexp.Compile(rule.Pattern); compileErr == nil {
+		for _, sample := range samples {
+			if re.MatchString(sample) {
+				matched = true
+				break
+			}
+		}
+	}
+	common.ApiSuccess(c, aiGeneratedRule{Rule: rule, Samples: samples, MatchedSample: matched})
 }

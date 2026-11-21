@@ -20,6 +20,7 @@ import { buildQueryParams } from '@/features/usage-logs/lib/utils'
 import { api } from '@/lib/api'
 
 import type {
+  AIGeneratedRule,
   ApiEnvelope,
   ErrorAlias,
   ErrorStatItem,
@@ -98,6 +99,22 @@ export async function getErrorSignatureRuleSuggestions(
   const query = buildQueryParams(params as unknown as Record<string, unknown>)
   const res = await api.get(
     `/api/log/error-signature-rules/suggestions?${query}`
+  )
+  return res.data
+}
+
+// Ask the AI assistant to propose one normalization rule for a detailed-error
+// signature. The backend samples the raw error contents recorded under the
+// signature hash, validates the returned pattern, and reports whether it
+// matched a sample. The rule is advisory; nothing is persisted.
+export async function generateErrorSignatureRule(payload: {
+  signature_hash: string
+  signature: string
+  attribution_options: string[]
+}): Promise<ApiEnvelope<AIGeneratedRule>> {
+  const res = await api.post(
+    '/api/log/error-signature-rules/ai-generate',
+    payload
   )
   return res.data
 }

@@ -382,6 +382,7 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/error-signature-rules", middleware.AdminAuth(), controller.GetErrorSignatureRules)
 		logRoute.PUT("/error-signature-rules", middleware.AdminAuth(), controller.UpdateErrorSignatureRules)
 		logRoute.GET("/error-signature-rules/suggestions", middleware.AdminAuth(), controller.GetErrorSignatureRuleSuggestions)
+		logRoute.POST("/error-signature-rules/ai-generate", middleware.AdminAuth(), controller.GenerateErrorSignatureRule)
 		logRoute.GET("/error-signature-aliases", middleware.AdminAuth(), controller.GetErrorSignatureAliases)
 		logRoute.POST("/error-signature-aliases", middleware.AdminAuth(), controller.UpsertErrorSignatureAlias)
 		logRoute.DELETE("/error-signature-aliases/:hash", middleware.AdminAuth(), controller.DeleteErrorSignatureAlias)

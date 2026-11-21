@@ -30,10 +30,12 @@ import { useIsAdmin } from '@/hooks/use-admin'
 
 import {
   deleteErrorAlias,
+  generateErrorSignatureRule,
   getErrorAliases,
   getErrorStats,
   upsertErrorAlias,
 } from './api'
+import { ErrorSignatureAIRuleDialog } from './components/error-signature-ai-rule-dialog'
 import { ErrorSignatureRuleSuggestionsDialog } from './components/error-signature-rule-suggestions-dialog'
 import { ErrorSignatureRulesDialog } from './components/error-signature-rules-dialog'
 import {
@@ -46,6 +48,7 @@ import {
 } from './components/error-stats-table'
 import { downloadErrorStatsCsv } from './lib/export'
 import type {
+  AIGeneratedRule,
   ErrorStatItem,
   ErrorStatsGroupBy,
   ErrorStatsParams,
@@ -233,6 +236,55 @@ export function ErrorStats() {
   const [pendingExtraRules, setPendingExtraRules] = useState<SignatureRule[]>(
     []
   )
+  const [aiRuleItem, setAiRuleItem] = useState<ErrorStatItem | null>(null)
+  const [aiRuleResult, setAiRuleResult] = useState<AIGeneratedRule | null>(null)
+  const [aiRuleError, setAiRuleError] = useState<string | null>(null)
+
+  const generateRuleMutation = useMutation({
+    mutationFn: generateErrorSignatureRule,
+    onSuccess: (res) => {
+      if (res.success && res.data) {
+        setAiRuleResult(res.data)
+        setAiRuleError(null)
+        return
+      }
+      setAiRuleResult(null)
+      setAiRuleError(res.message || t('Failed to generate rule'))
+    },
+    onError: (error: Error) => {
+      setAiRuleResult(null)
+      setAiRuleError(error.message || t('Failed to generate rule'))
+    },
+  })
+
+  const handleGenerateRule = (item: ErrorStatItem) => {
+    setAiRuleItem(item)
+    setAiRuleResult(null)
+    setAiRuleError(null)
+    generateRuleMutation.mutate({
+      signature_hash: item.signature_hash,
+      signature: item.signature,
+      attribution_options: attributionOptions,
+    })
+  }
+
+  const handleRegenerateAIRule = () => {
+    if (aiRuleItem) handleGenerateRule(aiRuleItem)
+  }
+
+  const handleAIRuleOpenChange = (open: boolean) => {
+    if (open) return
+    setAiRuleItem(null)
+    setAiRuleResult(null)
+    setAiRuleError(null)
+    generateRuleMutation.reset()
+  }
+
+  const handleAddAIRule = (rule: SignatureRule) => {
+    setPendingExtraRules([rule])
+    handleAIRuleOpenChange(false)
+    setRulesOpen(true)
+  }
 
   const handleAddSuggestions = (rules: SignatureRule[]) => {
     setPendingExtraRules(rules)
@@ -423,7 +475,10 @@ export function ErrorStats() {
                       className='h-8'
                       onClick={() => setRulesOpen(true)}
                     >
-                      <SlidersHorizontal className='size-4' aria-hidden='true' />
+                      <SlidersHorizontal
+                        className='size-4'
+                        aria-hidden='true'
+                      />
                       {t('Edit normalization rules')}
                     </Button>
                   </div>
@@ -437,8 +492,14 @@ export function ErrorStats() {
                     savingHash={savingHash}
                     shortNameOptions={shortNameOptions}
                     attributionOptions={attributionOptions}
+                    aiGeneratingHash={
+                      generateRuleMutation.isPending
+                        ? (aiRuleItem?.signature_hash ?? null)
+                        : null
+                    }
                     onSaveAlias={handleSaveAlias}
                     onDrillDown={handleDrillDown}
+                    onGenerateRule={handleGenerateRule}
                   />
                 </div>
               </Tabs>
@@ -454,6 +515,17 @@ export function ErrorStats() {
               onOpenChange={handleRulesOpenChange}
               initialExtraRules={pendingExtraRules}
               attributionOptions={attributionOptions}
+            />
+            <ErrorSignatureAIRuleDialog
+              open={aiRuleItem !== null}
+              onOpenChange={handleAIRuleOpenChange}
+              item={aiRuleItem}
+              generating={generateRuleMutation.isPending}
+              result={aiRuleResult}
+              error={aiRuleError}
+              attributionOptions={attributionOptions}
+              onRegenerate={handleRegenerateAIRule}
+              onAddRule={handleAddAIRule}
             />
           </div>
         )}
