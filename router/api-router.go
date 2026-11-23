@@ -375,6 +375,7 @@ func SetApiRouter(router *gin.Engine) {
 			customerRoute.PUT("/", controller.UpdateCustomer)
 			customerRoute.DELETE("/:id", controller.DeleteCustomer)
 			customerRoute.POST("/session_identity/test", controller.TestCustomerSessionIdentity)
+			customerRoute.POST("/cache_optimization/test", controller.TestCustomerCacheOptimization)
 		}
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)

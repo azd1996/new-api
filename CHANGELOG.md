@@ -5,6 +5,19 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-11-23]
+
+### 新增 Added
+
+- **客户级 Claude 缓存优化测试（不回源）**：客户编辑抽屉的「Claude cache optimization」配置块上方新增测试区域，支持两种模式（均不真实请求上游）：
+  - **仅缓存优化**（`cache_optimization`，默认）：对粘贴的请求体直接套用生产缓存优化管道（fallback breakpoint / fix volatile breakpoint / stable base breakpoint / clear_at 清理 / 强制 1h TTL），返回处理后的请求体、命中的规则与实际改写步骤。
+  - **全链路**（`full_relay`）：复用生产转发链路——请求解析校验、按分组选择渠道（与生产同一套渠道缓存/DB）、模型映射、参数与请求头覆盖、系统提示词、`metadata.user_id` 注入、协议转换、禁用字段移除、缓存优化——并在出站 HTTP 请求完全构建后捕获 URL/方法/请求头/请求体（敏感头如 `authorization`、`x-api-key` 及 URL 敏感参数一律脱敏），不建立连接、不执行 `DoResponse`。结果额外展示渠道、分组、原始模型→上游模型映射、是否透传；「保留上一断点」因依赖上游缓存状态标记为 skipped。不产生计费/消耗日志/重试/渠道状态变更；生产转发热路径功能无损（详见设计文档中的影响分析；多 Key 轮询渠道的轮询索引推进副作用经评估后接受）。
+  - 接口 `POST /api/customer/cache_optimization/test`（仅管理员），每次最多 20 个请求体、单个 ≤2MB，支持 `customer_id`/`config`/`group`/`mode`/`items[].headers`；两种模式均使用表单中未保存的缓存配置（未自定义时回退已保存配置或全局配置）。设计文档：`docs/claude-cache-optimization-preview.md`。无数据库 schema 变更，仅新增 en/zh 文案。
+
+### 变更 Changed
+
+- **Claude 参数规则：新模型保留 mid-conversation system**：`my-param-rules-claude.json` 中「删除 messages 里的 system 角色」规则改为按模型条件执行：仅老模型（claude-3、sonnet-4、haiku-4、opus-4-1~4-7 等）不支持 mid-conversation system 时删除；新模型（fable/mythos-5、opus-5、sonnet-5、haiku-5、opus-4-8）已支持，保留其 `cache_control` 断点不再删除。
+
 ## [2026-11-21]
 
 ### 新增 Added

@@ -98,7 +98,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	var retainPreviousBreakpoint bool
 	cacheCustomerID, _ := common.CustomerFromContext(c)
 	defer func() {
-		if cacheSkeleton != nil {
+		if cacheSkeleton != nil && info.DryRunCapture == nil {
 			finishCacheSkeleton(c, info, cacheSkeleton, cacheSkeletonUsage, newAPIError)
 			if retainPreviousBreakpoint {
 				key := claudeCacheBreakpointStateKey(info, cacheSkeleton)
@@ -124,7 +124,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 				// this customer's Fixed column against their configured
 				// rules does not read silence as "nothing to do".
 				policy := resolveClaudeCacheOptimization(
-					model.GetCustomerClaudeCacheOptimization(cacheCustomerID), claudeRequestGroup(c), cacheSkeleton.Model)
+					claudeCacheOptimizationForRequest(c, cacheCustomerID), claudeRequestGroup(c), cacheSkeleton.Model)
 				if claudeCacheOptimizationConfigured(policy) {
 					cacheSkeleton.Fixed = cacheBreakpointPassThrough
 				}
@@ -193,7 +193,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 		claudeModel = gjson.GetBytes(jsonData, "model").String()
 		cachePolicy := resolveClaudeCacheOptimization(
-			model.GetCustomerClaudeCacheOptimization(cacheCustomerID), claudeGroup, claudeModel)
+			claudeCacheOptimizationForRequest(c, cacheCustomerID), claudeGroup, claudeModel)
 		retainPreviousBreakpoint = cachePolicy.RetainPreviousBreakpoint.Enabled
 
 		// Observe a protocol-valid baseline without changing the existing
@@ -326,6 +326,14 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	if err != nil {
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
+	// Full-link preview: the outbound request has been captured, so stop
+	// before parsing a (non-existent) upstream response. Close the body
+	// storage because the request lifecycle that normally cleans it up never
+	// runs for a preview.
+	if info.DryRunCapture != nil {
+		common.CleanupBodyStorage(c)
+		return nil
+	}
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
@@ -392,6 +400,18 @@ func resolveClaudeCacheOptimization(config *model.CustomerClaudeCacheOptimizatio
 		RetainPreviousBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: config.RetainPreviousBreakpoint.Matches(modelName)},
 		FallbackCacheBreakpoint:  model.CustomerClaudeCacheOptimizationRule{Enabled: config.FallbackCacheBreakpoint.Matches(modelName)},
 	}
+}
+
+// claudeCacheOptimizationForRequest resolves the cache-optimization
+// configuration for a request. The admin full-link preview can override the
+// customer's saved configuration through a context key so unsaved console
+// edits can be exercised; production requests never set it.
+func claudeCacheOptimizationForRequest(c *gin.Context, customerID string) *model.CustomerClaudeCacheOptimization {
+	config := model.GetCustomerClaudeCacheOptimization(customerID)
+	if override, ok := common.GetContextKeyType[*model.CustomerClaudeCacheOptimization](c, constant.ContextKeyClaudeCacheOptimizationPreviewOverride); ok && override != nil {
+		config = override
+	}
+	return config
 }
 
 // claudeCacheOptimizationConfigured reports whether any of the five rules is

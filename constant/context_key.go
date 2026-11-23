@@ -101,4 +101,9 @@ const (
 	ContextKeyTokenAuditParams ContextKey = "token_audit_params"
 	// ContextKeyTokenAuditSucceeded disambiguates token responses that exceed the audit buffer.
 	ContextKeyTokenAuditSucceeded ContextKey = "token_audit_succeeded"
+
+	// ContextKeyClaudeCacheOptimizationPreviewOverride carries an explicit
+	// Claude cache-optimization configuration for the admin full-link preview,
+	// which cannot derive it from the customer cache the way production does.
+	ContextKeyClaudeCacheOptimizationPreviewOverride ContextKey = "claude_cache_optimization_preview_override"
 )

@@ -381,6 +381,9 @@ func buildOpenAIResponsesCacheSkeleton(body []byte) *model.CacheSkeleton {
 // before the upstream call and hands it to the background writer. usage is nil
 // when the attempt failed before a usable response.
 func finishCacheSkeleton(c *gin.Context, info *relaycommon.RelayInfo, row *model.CacheSkeleton, usage *dto.Usage, apiErr *types.NewAPIError) {
+	if info.DryRunCapture != nil {
+		return
+	}
 	row.EndTs = time.Now()
 	row.Status = "ok"
 	if apiErr != nil || usage == nil {

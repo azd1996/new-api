@@ -80,6 +80,17 @@ type ChannelMeta struct {
 	SupportStreamOptions bool // 是否支持流式选项
 }
 
+// UpstreamRequestCapture records the outbound request produced by a relay
+// attempt when RelayInfo.DryRunCapture is set. The request is built exactly as
+// production builds it but is never sent upstream. Sensitive header values are
+// redacted before the capture is exposed to the console.
+type UpstreamRequestCapture struct {
+	Method  string
+	URL     string
+	Headers map[string]string
+	Body    string
+}
+
 type TokenCountMeta struct {
 	//promptTokens int
 	estimatePromptTokens int
@@ -207,6 +218,11 @@ type RelayInfo struct {
 	ImageQuotaBeforeGroup float64
 
 	Request dto.Request
+
+	// DryRunCapture, when non-nil, makes the channel transport capture the
+	// outbound HTTP request instead of sending it. It is used by the admin
+	// console's full-chain preview.
+	DryRunCapture *UpstreamRequestCapture
 
 	// RequestConversionChain records request format conversions in order, e.g.
 	// ["openai", "openai_responses"] or ["openai", "claude"].

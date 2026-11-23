@@ -377,11 +377,58 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err = ApplyHeaderOverride(info, c, req); err != nil {
 		return nil, err
 	}
+	if info.DryRunCapture != nil {
+		return captureUpstreamRequest(req, info, requestBody)
+	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
 	return resp, nil
+}
+
+// captureUpstreamRequest records a fully built outbound request for the admin
+// full-link preview without sending it. The synthetic response lets relay
+// handlers stop after the request is built instead of parsing an upstream
+// reply; handlers check info.DryRunCapture and return before DoResponse.
+func captureUpstreamRequest(req *http.Request, info *common.RelayInfo, body io.Reader) (*http.Response, error) {
+	bodyBytes, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("read request body failed: %w", err)
+	}
+	info.DryRunCapture.Method = req.Method
+	info.DryRunCapture.URL = req.URL.String()
+	info.DryRunCapture.Headers = redactSensitiveHeaders(req.Header)
+	info.DryRunCapture.Body = string(bodyBytes)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader("")),
+	}, nil
+}
+
+// redactSensitiveHeaders masks credentials and session material before the
+// outbound headers are exposed in the admin preview.
+func redactSensitiveHeaders(headers http.Header) map[string]string {
+	captured := make(map[string]string, len(headers))
+	for key, values := range headers {
+		value := strings.Join(values, ", ")
+		lower := strings.ToLower(key)
+		if strings.Contains(lower, "authorization") ||
+			strings.Contains(lower, "api-key") ||
+			strings.Contains(lower, "apikey") ||
+			strings.Contains(lower, "token") ||
+			strings.Contains(lower, "secret") ||
+			strings.Contains(lower, "cookie") {
+			value = "***"
+		}
+		captured[key] = value
+	}
+	return captured
 }
 
 func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
@@ -406,6 +453,9 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	// 这样可以覆盖默认的 Authorization header 设置
 	if err = ApplyHeaderOverride(info, c, req); err != nil {
 		return nil, err
+	}
+	if info.DryRunCapture != nil {
+		return captureUpstreamRequest(req, info, requestBody)
 	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {

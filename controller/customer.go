@@ -4,11 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -237,4 +242,166 @@ func TestCustomerSessionIdentity(c *gin.Context) {
 		SourcesUsed:        sourcesUsed,
 	}
 	common.ApiSuccess(c, gin.H{"results": results, "summary": summary})
+}
+
+const (
+	maxCacheOptimizationTestItems    = 20
+	maxCacheOptimizationTestBodySize = 2 * 1024 * 1024
+
+	cacheOptimizationTestModeCache     = "cache_optimization"
+	cacheOptimizationTestModeFullRelay = "full_relay"
+)
+
+type customerCacheOptimizationTestRequest struct {
+	CustomerID string                                 `json:"customer_id"`
+	Config     *model.CustomerClaudeCacheOptimization `json:"config"`
+	Group      string                                 `json:"group"`
+	Mode       string                                 `json:"mode"`
+	Items      []customerCacheOptimizationTestItem    `json:"items"`
+}
+
+type customerCacheOptimizationTestItem struct {
+	Body    string            `json:"body"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+type customerCacheOptimizationTestResult struct {
+	Index        int               `json:"index"`
+	OK           bool              `json:"ok"`
+	Body         string            `json:"body,omitempty"`
+	Model        string            `json:"model,omitempty"`
+	Error        string            `json:"error,omitempty"`
+	EnabledRules []string          `json:"enabled_rules,omitempty"`
+	ChangedSteps []string          `json:"changed_steps,omitempty"`
+	SkippedSteps []string          `json:"skipped_steps,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	// Full-relay preview fields.
+	ChannelID     int    `json:"channel_id,omitempty"`
+	ChannelName   string `json:"channel_name,omitempty"`
+	ChannelType   int    `json:"channel_type,omitempty"`
+	Group         string `json:"group,omitempty"`
+	OriginModel   string `json:"origin_model,omitempty"`
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	ModelMapped   bool   `json:"model_mapped,omitempty"`
+	PassThrough   bool   `json:"pass_through,omitempty"`
+	URL           string `json:"url,omitempty"`
+	Method        string `json:"method,omitempty"`
+}
+
+// TestCustomerCacheOptimization runs the Claude cache-optimization pipeline
+// against one or more pasted request bodies. mode selects between the
+// cache-optimization-only preview and the full relay preview; neither sends
+// anything upstream. Nothing is persisted or logged.
+func TestCustomerCacheOptimization(c *gin.Context) {
+	var req customerCacheOptimizationTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if len(req.Items) == 0 {
+		common.ApiError(c, errors.New("items 不能为空"))
+		return
+	}
+	if len(req.Items) > maxCacheOptimizationTestItems {
+		common.ApiError(c, fmt.Errorf("items 数量不能超过 %d", maxCacheOptimizationTestItems))
+		return
+	}
+	mode := cacheOptimizationTestModeCache
+	switch req.Mode {
+	case "":
+	case cacheOptimizationTestModeCache, cacheOptimizationTestModeFullRelay:
+		mode = req.Mode
+	default:
+		common.ApiError(c, fmt.Errorf("mode 仅支持 %s 或 %s", cacheOptimizationTestModeCache, cacheOptimizationTestModeFullRelay))
+		return
+	}
+	group := strings.TrimSpace(req.Group)
+	if group == "" {
+		group = "default"
+	}
+	config := req.Config
+	if config == nil && req.CustomerID != "" {
+		config = model.GetCustomerClaudeCacheOptimization(req.CustomerID)
+	}
+
+	results := make([]customerCacheOptimizationTestResult, 0, len(req.Items))
+	for i, item := range req.Items {
+		result := customerCacheOptimizationTestResult{Index: i}
+		if len(item.Body) > maxCacheOptimizationTestBodySize {
+			result.Error = "请求体超过 2MB 限制"
+			results = append(results, result)
+			continue
+		}
+		if !gjson.Valid(item.Body) {
+			result.Error = "请求体不是合法 JSON"
+			results = append(results, result)
+			continue
+		}
+		if mode == cacheOptimizationTestModeFullRelay {
+			results = append(results, runFullRelayCacheOptimizationTest(item, group, config))
+			continue
+		}
+		modelName := gjson.Get(item.Body, "model").String()
+		result.Model = modelName
+		policy := relay.ResolveClaudeCacheOptimizationForPreview(config, group, modelName)
+		preview, err := relay.PreviewClaudeCacheOptimization([]byte(item.Body), policy)
+		if err != nil {
+			result.Error = err.Error()
+			results = append(results, result)
+			continue
+		}
+		result.OK = true
+		result.Body = string(preview.Body)
+		result.EnabledRules = preview.EnabledRules
+		result.ChangedSteps = preview.ChangedSteps
+		result.SkippedSteps = preview.SkippedSteps
+		result.Headers = preview.Headers
+		results = append(results, result)
+	}
+	common.ApiSuccess(c, gin.H{"results": results, "mode": mode})
+}
+
+// runFullRelayCacheOptimizationTest builds a fresh relay context for the
+// pasted body and runs the production Claude relay pipeline in dry-run mode.
+func runFullRelayCacheOptimizationTest(item customerCacheOptimizationTestItem, group string, config *model.CustomerClaudeCacheOptimization) customerCacheOptimizationTestResult {
+	result := customerCacheOptimizationTestResult{}
+	itemCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(item.Body))
+	request.Header.Set("Content-Type", "application/json")
+	for key, value := range item.Headers {
+		request.Header.Set(key, value)
+	}
+	itemCtx.Request = request
+	modelName := gjson.Get(item.Body, "model").String()
+	result.Model = modelName
+	common.SetContextKey(itemCtx, constant.ContextKeyOriginalModel, modelName)
+	common.SetContextKey(itemCtx, constant.ContextKeyUsingGroup, group)
+	common.SetContextKey(itemCtx, constant.ContextKeyUserGroup, group)
+	common.SetContextKey(itemCtx, constant.ContextKeyTokenGroup, group)
+	common.SetContextKey(itemCtx, constant.ContextKeyRequestStartTime, time.Now())
+	common.SetContextKey(itemCtx, common.RequestIdKey, common.NewRequestId())
+	if config != nil {
+		common.SetContextKey(itemCtx, constant.ContextKeyClaudeCacheOptimizationPreviewOverride, config)
+	}
+	preview, apiErr := relay.PreviewClaudeRelay(itemCtx)
+	if apiErr != nil {
+		result.Error = apiErr.Error()
+		return result
+	}
+	result.OK = true
+	result.Body = preview.Body
+	result.ChannelID = preview.ChannelID
+	result.ChannelName = preview.ChannelName
+	result.ChannelType = preview.ChannelType
+	result.Group = preview.Group
+	result.OriginModel = preview.OriginModel
+	result.UpstreamModel = preview.UpstreamModel
+	result.ModelMapped = preview.ModelMapped
+	result.PassThrough = preview.PassThrough
+	result.URL = preview.URL
+	result.Method = preview.Method
+	result.Headers = preview.Headers
+	result.EnabledRules = preview.EnabledRules
+	result.SkippedSteps = preview.SkippedRules
+	return result
 }

@@ -64,6 +64,7 @@ import {
 } from '../lib'
 import type { Customer } from '../types'
 import { CustomerCachePolicy } from './customer-cache-policy'
+import { CustomerCachePolicyTest } from './customer-cache-policy-test'
 import { CustomerSessionIdentity } from './customer-session-identity'
 import { CustomerSessionRoutingPolicy } from './customer-session-routing-policy'
 import { useCustomers } from './customers-provider'
@@ -310,6 +311,9 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
                   )}
                 />
               </SideDrawerSection>
+              <CustomerCachePolicyTest
+                customerId={props.currentRow?.customer_id}
+              />
               <CustomerCachePolicy />
               <CustomerSessionRoutingPolicy />
               <CustomerSessionIdentity

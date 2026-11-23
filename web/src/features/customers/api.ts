@@ -28,6 +28,7 @@ import {
 
 import type {
   ApiResponse,
+  ClaudeCacheOptimization,
   Customer,
   CustomerFormData,
   GetCustomersParams,
@@ -92,6 +93,64 @@ export async function testCustomerSessionIdentity(
       result,
       'Failed to test session identity extraction'
     )
+  }
+  return result.data
+}
+
+// ============================================================================
+// Claude Cache Optimization Dry-Run
+// ============================================================================
+
+export interface CacheOptimizationTestItem {
+  body: string
+}
+
+export interface CacheOptimizationTestResult {
+  index: number
+  ok: boolean
+  body?: string
+  model?: string
+  error?: string
+  enabled_rules?: string[]
+  changed_steps?: string[]
+  skipped_steps?: string[]
+  headers?: Record<string, string>
+  // Full-relay preview fields.
+  channel_id?: number
+  channel_name?: string
+  channel_type?: number
+  group?: string
+  origin_model?: string
+  upstream_model?: string
+  model_mapped?: boolean
+  pass_through?: boolean
+  url?: string
+  method?: string
+}
+
+export interface CacheOptimizationTestResponse {
+  results: CacheOptimizationTestResult[]
+  mode: string
+}
+
+export interface CacheOptimizationTestParams {
+  customer_id?: string
+  config?: ClaudeCacheOptimization
+  group?: string
+  mode?: 'cache_optimization' | 'full_relay'
+  items: CacheOptimizationTestItem[]
+}
+
+export async function testCustomerCacheOptimization(
+  params: CacheOptimizationTestParams
+): Promise<CacheOptimizationTestResponse> {
+  const response = await api.post<ApiResponse<CacheOptimizationTestResponse>>(
+    '/api/customer/cache_optimization/test',
+    params
+  )
+  const result = requireServerSuccess(response.data)
+  if (!result.data) {
+    throw createServerError(result, 'Failed to test cache optimization')
   }
   return result.data
 }

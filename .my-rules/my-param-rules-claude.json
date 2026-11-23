@@ -656,7 +656,7 @@
             "logic": "AND"
         },
         {
-            "description": "删除messages里的system角色",
+            "description": "仅老模型(claude-3、sonnet-4、haiku-4、opus-4-1~4-7等)不支持messages里的system角色，逐个删除；新模型(fable/mythos-5、opus-5、sonnet-5、haiku-5、opus-4-8)已支持mid-conversation system，其cache_control断点必须保留，不删除",
             "mode": "prune_objects",
             "path": "messages",
             "value": {
@@ -664,7 +664,15 @@
                     "role": "system"
                 },
                 "recursive": false
-            }
+            },
+            "conditions": [
+                {
+                    "path": "model",
+                    "mode": "regex",
+                    "value": "^(claude-(fable|mythos)-5|claude-(opus|sonnet|haiku)-5|claude-opus-4-8)",
+                    "invert": true
+                }
+            ]
         },
         {
             "description": "claude-: 删除空的text内容块(type==text且text为空)，避免Bedrock 400 text content blocks must be non-empty；只扫content数组且不递归，避免误入tool_use.input触发类型比较崩溃",

@@ -142,6 +142,52 @@ func TestResolveClaudeCacheOptimization(t *testing.T) {
 	})
 }
 
+// TestPreviewClaudeCacheOptimization covers the dry-run pipeline used by the
+// customer cache-optimization test area: it must mirror the production
+// transformations, report which rules/steps ran, and expose headers the
+// gateway would add.
+func TestPreviewClaudeCacheOptimization(t *testing.T) {
+	t.Run("applies fallback and extended TTL and reports headers", func(t *testing.T) {
+		body := `{"model":"claude-sonnet-4","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`
+		policy := model.CustomerClaudeCacheOptimization{
+			FallbackCacheBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: true},
+			ForceExtendedTTL:        model.CustomerClaudeCacheOptimizationRule{Enabled: true},
+		}
+		got, err := PreviewClaudeCacheOptimization([]byte(body), policy)
+		require.NoError(t, err)
+		cc := gjson.GetBytes(got.Body, "messages.0.content.0.cache_control")
+		assert.True(t, cc.Exists(), "fallback breakpoint should be added")
+		assert.Equal(t, claudeExtendedCacheTTL, cc.Get("ttl").String())
+		assert.Contains(t, got.Headers["anthropic-beta"], claudeExtendedCacheBeta)
+		assert.Contains(t, got.EnabledRules, "fallback_cache_breakpoint")
+		assert.Contains(t, got.EnabledRules, "force_extended_ttl")
+		assert.Contains(t, got.ChangedSteps, "fallback_cache_breakpoint")
+		assert.Contains(t, got.ChangedSteps, "force_extended_ttl")
+	})
+
+	t.Run("strips cache_control from turn-scoped clear_at messages", func(t *testing.T) {
+		body := `{"model":"claude-sonnet-4","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}],"clear_at":"next_user_message"}]}`
+		got, err := PreviewClaudeCacheOptimization([]byte(body), model.CustomerClaudeCacheOptimization{})
+		require.NoError(t, err)
+		assert.False(t, gjson.GetBytes(got.Body, "messages.0.content.0.cache_control").Exists())
+		assert.Contains(t, got.Headers["anthropic-beta"], claudeClearAtBeta)
+		assert.Contains(t, got.ChangedSteps, "clear_at_cleanup")
+	})
+
+	t.Run("skips retain previous breakpoint without persisted state", func(t *testing.T) {
+		body := `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hello"}]}`
+		policy := model.CustomerClaudeCacheOptimization{
+			RetainPreviousBreakpoint: model.CustomerClaudeCacheOptimizationRule{Enabled: true},
+		}
+		got, err := PreviewClaudeCacheOptimization([]byte(body), policy)
+		require.NoError(t, err)
+		assert.Contains(t, got.EnabledRules, "retain_previous_breakpoint")
+		assert.Equal(t, []string{"retain_previous_breakpoint"}, got.SkippedSteps)
+		assert.Empty(t, got.ChangedSteps)
+		assert.JSONEq(t, body, string(got.Body))
+	})
+}
+
 // TestClaudeCacheOptimizationConfigured covers the pass-through-mode
 // diagnostic marker: pass-through skips all five cache-optimization rules
 // silently, so a customer's configured policy must only be flagged as skipped
