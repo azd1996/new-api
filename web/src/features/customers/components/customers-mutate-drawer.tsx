@@ -166,7 +166,7 @@ export function CustomersMutateDrawer(props: CustomersMutateDrawerProps) {
         if (!v) form.reset()
       }}
     >
-      <SheetContent className={sideDrawerContentClassName('sm:max-w-[600px]')}>
+      <SheetContent className={sideDrawerContentClassName('sm:max-w-[1200px]')}>
         <SheetHeader className={sideDrawerHeaderClassName()}>
           <SheetTitle>
             {isUpdate ? t('Update Customer') : t('Add Customer')}

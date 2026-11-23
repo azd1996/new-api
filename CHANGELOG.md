@@ -17,6 +17,8 @@
 ### 变更 Changed
 
 - **Claude 参数规则：新模型保留 mid-conversation system**：`my-param-rules-claude.json` 中「删除 messages 里的 system 角色」规则改为按模型条件执行：仅老模型（claude-3、sonnet-4、haiku-4、opus-4-1~4-7 等）不支持 mid-conversation system 时删除；新模型（fable/mythos-5、opus-5、sonnet-5、haiku-5、opus-4-8）已支持，保留其 `cache_control` 断点不再删除。
+- **客户编辑抽屉加宽**：桌面端宽度由 `sm:max-w-[600px]` 调整为 `sm:max-w-[1200px]`（2 倍），移动端仍为全宽。
+- **缓存优化测试分组选择**：分组由文本输入改为下拉选择（选项来自 `/api/group/`，始终保留 `default`），选项过长时截断并以悬浮 Tooltip / 原生 `title` 展示全文。
 
 ## [2026-11-21]
 

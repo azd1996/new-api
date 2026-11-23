@@ -16,9 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useFormContext, useWatch } from 'react-hook-form'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -29,11 +29,24 @@ import {
 } from '@/components/drawer-layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { getGroups } from '@/features/users/api'
 import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   testCustomerCacheOptimization,
@@ -84,6 +97,16 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
   const [result, setResult] = useState<CacheOptimizationTestResponse | null>(
     null
   )
+
+  const { data: groupsData } = useQuery({
+    queryKey: ['groups'],
+    queryFn: async () => requireServerSuccess(await getGroups()),
+  })
+  const groupOptions = useMemo(() => {
+    // The default group may not exist as a configured ratio yet; always keep
+    // it selectable so the preview's default value stays valid.
+    return [...new Set([...(groupsData?.data ?? []), 'default'])]
+  }, [groupsData])
 
   const testMutation = useMutation({
     mutationFn: testCustomerCacheOptimization,
@@ -163,12 +186,46 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
         </div>
         <div className='space-y-1'>
           <Label htmlFor='cache-optimization-test-group'>{t('Group')}</Label>
-          <Input
-            id='cache-optimization-test-group'
+          <Select
             value={group}
-            onChange={(event) => setGroup(event.target.value)}
-            className='w-40'
-          />
+            onValueChange={(value) => setGroup(value ?? 'default')}
+          >
+            <SelectTrigger
+              id='cache-optimization-test-group'
+              className='w-56'
+              title={group}
+            >
+              <SelectValue className='min-w-0'>
+                <span className='truncate'>{group}</span>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent
+              alignItemWithTrigger={false}
+              className='w-72 max-w-[calc(100vw-2rem)]'
+            >
+              {groupOptions.map((option) => (
+                <Tooltip key={option}>
+                  <TooltipTrigger
+                    render={
+                      <SelectItem
+                        value={option}
+                        className='max-w-full'
+                        title={option}
+                      />
+                    }
+                  >
+                    <span className='block truncate'>{option}</span>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    align='start'
+                    className='max-w-xs break-all whitespace-normal'
+                  >
+                    {option}
+                  </TooltipContent>
+                </Tooltip>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <Button
           type='button'

@@ -31,13 +31,19 @@ import {
 import { customerSchema, type Customer } from '../../types'
 import { CustomerCachePolicyTest } from '../customer-cache-policy-test'
 
-const { testCustomerCacheOptimizationMock, toastErrorMock } = vi.hoisted(() => ({
-  testCustomerCacheOptimizationMock: vi.fn(),
-  toastErrorMock: vi.fn(),
-}))
+const { testCustomerCacheOptimizationMock, toastErrorMock, getGroupsMock } =
+  vi.hoisted(() => ({
+    testCustomerCacheOptimizationMock: vi.fn(),
+    toastErrorMock: vi.fn(),
+    getGroupsMock: vi.fn(),
+  }))
 
 vi.mock('../../api', () => ({
   testCustomerCacheOptimization: testCustomerCacheOptimizationMock,
+}))
+
+vi.mock('@/features/users/api', () => ({
+  getGroups: getGroupsMock,
 }))
 
 vi.mock('sonner', () => ({
@@ -90,6 +96,12 @@ function TestForm(props: {
 beforeEach(() => {
   testCustomerCacheOptimizationMock.mockReset()
   toastErrorMock.mockReset()
+  getGroupsMock.mockReset()
+  getGroupsMock.mockResolvedValue({
+    success: true,
+    message: '',
+    data: ['default', 'vip-group-with-a-very-long-name-for-hovering'],
+  })
 })
 
 afterEach(() => {
@@ -197,4 +209,20 @@ it('runs the full-relay preview and shows routing details', async () => {
   expect(
     screen.getByText('Retain previous breakpoint (requires upstream cache state)')
   ).toBeVisible()
+})
+
+it('offers groups in a dropdown and keeps the full name available on hover', async () => {
+  const user = userEvent.setup()
+  render(<TestForm policy={null} />)
+
+  await user.click(screen.getByLabelText('Group'))
+
+  const longGroupName = 'vip-group-with-a-very-long-name-for-hovering'
+  const option = await screen.findByRole('option', { name: longGroupName })
+  expect(option).toBeVisible()
+  expect(option).toHaveAttribute('title', longGroupName)
+  expect(screen.getByRole('option', { name: 'default' })).toHaveAttribute(
+    'title',
+    'default'
+  )
 })
