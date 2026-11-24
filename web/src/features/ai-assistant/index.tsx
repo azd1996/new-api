@@ -59,6 +59,17 @@ export function AIAssistant() {
   }
 
   if (isError || !data?.enabled || !data.group) {
+    let reason = t(
+      'AI assistant is enabled but its channel group is not configured. Set it in System Settings → Operations → AI Assistant.'
+    )
+    if (isError) {
+      reason = t('Unable to load the AI assistant configuration.')
+    } else if (!data?.enabled) {
+      reason = t(
+        'AI assistant is disabled. Enable it in System Settings → Operations → AI Assistant.'
+      )
+    }
+
     return (
       <div className='flex size-full flex-col items-center justify-center gap-3 p-8 text-center'>
         <Bot className='text-muted-foreground size-10' />
@@ -66,11 +77,7 @@ export function AIAssistant() {
           <p className='text-foreground font-medium'>
             {t('AI assistant is not available')}
           </p>
-          <p className='text-muted-foreground text-sm'>
-            {t(
-              'Ask an administrator to enable the AI assistant and configure its channel group.'
-            )}
-          </p>
+          <p className='text-muted-foreground text-sm'>{reason}</p>
           {error && (
             <p className='text-muted-foreground max-w-xl text-xs break-words'>
               {error.message}

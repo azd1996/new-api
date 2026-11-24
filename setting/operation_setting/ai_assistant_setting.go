@@ -46,7 +46,19 @@ func init() {
 }
 
 func GetAIAssistantSetting() AIAssistantSetting {
-	setting := aiAssistantSetting
+	return normalizeAIAssistantSetting(aiAssistantSetting)
+}
+
+// AIAssistantSettingFromMap applies raw option values (keyed without the
+// ai_assistant_setting. prefix) on top of base and returns a normalized
+// setting. It lets callers read the persisted configuration directly instead
+// of relying on the node-local in-memory copy.
+func AIAssistantSettingFromMap(base AIAssistantSetting, values map[string]string) AIAssistantSetting {
+	_ = config.UpdateConfigFromMap(&base, values)
+	return normalizeAIAssistantSetting(base)
+}
+
+func normalizeAIAssistantSetting(setting AIAssistantSetting) AIAssistantSetting {
 	setting.Group = strings.TrimSpace(setting.Group)
 	setting.DefaultModel = strings.TrimSpace(setting.DefaultModel)
 	if setting.TimeoutSeconds < MinAIAssistantTimeoutSeconds {

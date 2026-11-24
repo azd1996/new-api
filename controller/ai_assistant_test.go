@@ -150,6 +150,41 @@ func TestValidateAIAssistantOption(t *testing.T) {
 	}
 }
 
+func TestAIAssistantSettingFromMap(t *testing.T) {
+	base := operation_setting.AIAssistantSetting{}
+	got := operation_setting.AIAssistantSettingFromMap(base, map[string]string{
+		"enabled":         "true",
+		"group":           " ai-assistant ",
+		"default_model":   " gpt-4o ",
+		"timeout_seconds": "1",
+		"max_tokens":      "999999",
+		"temperature":     "5",
+	})
+
+	assert.True(t, got.Enabled)
+	assert.Equal(t, "ai-assistant", got.Group)
+	assert.Equal(t, "gpt-4o", got.DefaultModel)
+	assert.Equal(t, operation_setting.MinAIAssistantTimeoutSeconds, got.TimeoutSeconds)
+	assert.Equal(t, operation_setting.MaxAIAssistantMaxTokens, got.MaxTokens)
+	assert.Equal(t, float64(operation_setting.MaxAIAssistantTemperature), got.Temperature)
+
+	// Missing keys keep the base values.
+	base = operation_setting.AIAssistantSetting{
+		Enabled:        true,
+		Group:          "existing",
+		DefaultModel:   "existing-model",
+		TimeoutSeconds: 30,
+		MaxTokens:      100,
+		Temperature:    0.5,
+	}
+	got = operation_setting.AIAssistantSettingFromMap(base, map[string]string{
+		"default_model": "new-model",
+	})
+	assert.Equal(t, "existing", got.Group)
+	assert.Equal(t, "new-model", got.DefaultModel)
+	assert.Equal(t, 30, got.TimeoutSeconds)
+}
+
 func TestGetAIAssistantConfig(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

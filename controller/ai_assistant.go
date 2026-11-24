@@ -66,6 +66,26 @@ type AIAssistantConfigResponse struct {
 
 func GetAIAssistantConfig(c *gin.Context) {
 	setting := operation_setting.GetAIAssistantSetting()
+
+	// In a multi-node deployment each node keeps an in-memory copy of the
+	// options and syncs them from the database every SYNC_FREQUENCY seconds.
+	// A setting saved on one node may therefore still be stale on another.
+	// This endpoint is low-traffic, so read the persisted options directly to
+	// make the assistant page reflect saves immediately on every node.
+	if model.DB != nil {
+		if options, err := model.AllOption(); err == nil {
+			values := make(map[string]string, len(options))
+			for _, option := range options {
+				if key, ok := strings.CutPrefix(option.Key, operation_setting.AIAssistantOptionPrefix); ok {
+					values[key] = option.Value
+				}
+			}
+			if len(values) > 0 {
+				setting = operation_setting.AIAssistantSettingFromMap(setting, values)
+			}
+		}
+	}
+
 	common.ApiSuccess(c, AIAssistantConfigResponse{
 		Enabled:      setting.Enabled,
 		Group:        setting.Group,
