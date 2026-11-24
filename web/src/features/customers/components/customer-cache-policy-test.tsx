@@ -74,6 +74,43 @@ const skippedStepLabels: Record<string, string> = {
     'Retain previous breakpoint (requires upstream cache state)',
 }
 
+// Default client headers pre-filled in the request-header editor. They mirror
+// what Claude Code sends; the user may keep, edit or delete each line. Only
+// the full-relay mode sends them as the simulated client headers.
+const DEFAULT_REQUEST_HEADERS_TEXT = [
+  'Accept: text/event-stream',
+  'Anthropic-Beta: context-management-2025-06-27',
+  'Anthropic-Version: 2023-06-01',
+  'Content-Type: application/json',
+].join('\n')
+
+// Parses "Name: value" lines into a headers map. Invalid lines are reported
+// so the caller can block the test instead of silently dropping them.
+function parseHeaderLines(text: string): {
+  headers: Record<string, string>
+  invalidLines: string[]
+} {
+  const headers: Record<string, string> = {}
+  const invalidLines: string[] = []
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const separatorIndex = line.indexOf(':')
+    if (separatorIndex <= 0) {
+      invalidLines.push(line)
+      continue
+    }
+    const name = line.slice(0, separatorIndex).trim()
+    const value = line.slice(separatorIndex + 1).trim()
+    if (!name) {
+      invalidLines.push(line)
+      continue
+    }
+    headers[name] = value
+  }
+  return { headers, invalidLines }
+}
+
 type CacheOptimizationTestMode = NonNullable<
   CacheOptimizationTestParams['mode']
 >
@@ -90,6 +127,9 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
     name: 'claude_cache_optimization',
   })
   const [requestsText, setRequestsText] = useState('')
+  const [headersText, setHeadersText] = useState(
+    DEFAULT_REQUEST_HEADERS_TEXT
+  )
   const [group, setGroup] = useState('default')
   const [mode, setMode] = useState<CacheOptimizationTestMode>(
     'cache_optimization'
@@ -121,13 +161,26 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
       toast.error(t('Paste at least one valid JSON request body'))
       return
     }
+    let headers: Record<string, string> | undefined
+    if (mode === 'full_relay') {
+      const parsed = parseHeaderLines(headersText)
+      if (parsed.invalidLines.length > 0) {
+        toast.error(
+          t('Invalid header lines (expected "Name: value")', {
+            lines: parsed.invalidLines.join(', '),
+          })
+        )
+        return
+      }
+      headers = Object.keys(parsed.headers).length > 0 ? parsed.headers : undefined
+    }
     setResult(null)
     testMutation.mutate({
       customer_id: props.customerId,
       config: policy ?? undefined,
       group,
       mode,
-      items: bodies.map((body) => ({ body })),
+      items: bodies.map((body) => ({ body, headers })),
     })
   }
 
@@ -165,6 +218,27 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
           'Paste minified JSON one per line or pretty-printed objects back to back.'
         )}
       </p>
+      {mode === 'full_relay' && (
+        <div className='space-y-1'>
+          <Label htmlFor='cache-optimization-test-headers'>
+            {t('Simulated client headers')}
+          </Label>
+          <Textarea
+            id='cache-optimization-test-headers'
+            value={headersText}
+            onChange={(event) => setHeadersText(event.target.value)}
+            rows={5}
+            placeholder='Anthropic-Version: 2023-06-01'
+            aria-label={t('Simulated client headers')}
+            className='font-mono text-xs'
+          />
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'One "Name: value" per line. These headers act as the client request headers in the full-relay preview; edit or delete lines freely.'
+            )}
+          </p>
+        </div>
+      )}
       <div className='flex flex-wrap items-end gap-3'>
         <div className='space-y-1'>
           <Label htmlFor='cache-optimization-test-mode'>
@@ -304,7 +378,12 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
                   </div>
                   {item.headers && Object.keys(item.headers).length > 0 && (
                     <div className='text-muted-foreground text-xs'>
-                      {t('Headers to add')}:{' '}
+                      {t(
+                        mode === 'full_relay'
+                          ? 'Outbound headers (redacted)'
+                          : 'Headers to add'
+                      )}
+                      :{' '}
                       {Object.entries(item.headers)
                         .map(([key, value]) => `${key}: ${value}`)
                         .join(', ')}

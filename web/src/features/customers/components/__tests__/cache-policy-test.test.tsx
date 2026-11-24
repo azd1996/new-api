@@ -177,6 +177,10 @@ it('runs the full-relay preview and shows routing details', async () => {
         model_mapped: true,
         url: 'https://api.anthropic.com/v1/messages',
         method: 'POST',
+        headers: {
+          Accept: 'text/event-stream',
+          'X-Api-Key': '***',
+        },
         enabled_rules: ['force_extended_ttl'],
         skipped_steps: ['retain_previous_breakpoint'],
       },
@@ -209,6 +213,68 @@ it('runs the full-relay preview and shows routing details', async () => {
   expect(
     screen.getByText('Retain previous breakpoint (requires upstream cache state)')
   ).toBeVisible()
+  expect(
+    screen.getByText(/Outbound headers \(redacted\):/)
+  ).toBeVisible()
+})
+
+it('pre-fills editable client headers and sends them in the full-relay mode', async () => {
+  testCustomerCacheOptimizationMock.mockResolvedValue({
+    mode: 'full_relay',
+    results: [{ index: 0, ok: true, body: '{}', url: 'https://u', method: 'POST' }],
+  })
+  const user = userEvent.setup()
+  render(<TestForm policy={null} />)
+
+  fireEvent.change(screen.getByLabelText('Request bodies'), {
+    target: { value: '{"model":"claude-sonnet-4","messages":[]}' },
+  })
+  fireEvent.change(screen.getByLabelText('Test mode'), {
+    target: { value: 'full_relay' },
+  })
+
+  const headersEditor = screen.getByLabelText('Simulated client headers')
+  expect(headersEditor).toHaveValue(
+    'Accept: text/event-stream\nAnthropic-Beta: context-management-2025-06-27\nAnthropic-Version: 2023-06-01\nContent-Type: application/json'
+  )
+  // Edit one default header and add a custom one.
+  fireEvent.change(headersEditor, {
+    target: {
+      value:
+        'Anthropic-Version: 2023-06-01\nX-Custom-Trace: abc\nContent-Type: application/json',
+    },
+  })
+  await user.click(screen.getByRole('button', { name: 'Test optimizations' }))
+
+  await waitFor(() =>
+    expect(testCustomerCacheOptimizationMock).toHaveBeenCalledTimes(1)
+  )
+  expect(testCustomerCacheOptimizationMock.mock.calls[0][0].items[0].headers).toEqual({
+    'Anthropic-Version': '2023-06-01',
+    'X-Custom-Trace': 'abc',
+    'Content-Type': 'application/json',
+  })
+})
+
+it('blocks the full-relay test when a header line is malformed', async () => {
+  const user = userEvent.setup()
+  render(<TestForm policy={null} />)
+
+  fireEvent.change(screen.getByLabelText('Request bodies'), {
+    target: { value: '{"model":"claude-sonnet-4","messages":[]}' },
+  })
+  fireEvent.change(screen.getByLabelText('Test mode'), {
+    target: { value: 'full_relay' },
+  })
+  fireEvent.change(screen.getByLabelText('Simulated client headers'), {
+    target: { value: 'no-colon-line' },
+  })
+  await user.click(screen.getByRole('button', { name: 'Test optimizations' }))
+
+  expect(testCustomerCacheOptimizationMock).not.toHaveBeenCalled()
+  expect(toastErrorMock).toHaveBeenCalledWith(
+    expect.stringContaining('Invalid header lines')
+  )
 })
 
 it('offers groups in a dropdown and keeps the full name available on hover', async () => {

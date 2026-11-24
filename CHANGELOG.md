@@ -19,6 +19,7 @@
 - **Claude 参数规则：新模型保留 mid-conversation system**：`my-param-rules-claude.json` 中「删除 messages 里的 system 角色」规则改为按模型条件执行：仅老模型（claude-3、sonnet-4、haiku-4、opus-4-1~4-7 等）不支持 mid-conversation system 时删除；新模型（fable/mythos-5、opus-5、sonnet-5、haiku-5、opus-4-8）已支持，保留其 `cache_control` 断点不再删除。
 - **客户编辑抽屉加宽**：桌面端宽度由 `sm:max-w-[600px]` 调整为 `sm:max-w-[1200px]`（2 倍），移动端仍为全宽。
 - **缓存优化测试分组选择**：分组由文本输入改为下拉选择（选项来自 `/api/group/`，始终保留 `default`），选项过长时截断并以悬浮 Tooltip / 原生 `title` 展示全文。
+- **缓存优化测试请求头标签与模拟客户端请求头**：结果区请求头标签按模式区分——仅缓存优化显示「需要添加的请求头」，全链路显示「出站请求头（已脱敏）」；全链路模式新增可编辑的「模拟客户端请求头」输入框，显式预填 Accept / Anthropic-Beta / Anthropic-Version / Content-Type 四行默认头（可保留、编辑或删除），按 `Name: value` 逐行解析为 `items[].headers` 参与全链路预览，格式非法时提示并阻止测试。
 
 ## [2026-11-21]
 
