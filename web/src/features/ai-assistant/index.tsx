@@ -1,4 +1,3 @@
-import { Bot, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Bot, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -31,7 +31,7 @@ const SYSTEM_PROMPT_STORAGE_KEY = 'ai_assistant_system_prompt'
 
 export function AIAssistant() {
   const { t } = useTranslation()
-  const { data, isLoading, isError } = useAIAssistantConfig()
+  const { data, isLoading, isError, error } = useAIAssistantConfig()
   const userId = useAuthStore((s) => s.auth.user?.id)
   const [systemPrompt, setSystemPrompt] = useState('')
   const [showSystemPrompt, setShowSystemPrompt] = useState(false)
@@ -71,6 +71,11 @@ export function AIAssistant() {
               'Ask an administrator to enable the AI assistant and configure its channel group.'
             )}
           </p>
+          {error && (
+            <p className='text-muted-foreground max-w-xl text-xs break-words'>
+              {error.message}
+            </p>
+          )}
         </div>
       </div>
     )
