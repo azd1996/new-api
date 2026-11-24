@@ -34,7 +34,7 @@ export async function getAIAssistantConfig(): Promise<AIAssistantConfig> {
     success: boolean
     message: string
     data?: AIAssistantConfig
-  }>('/ai-assistant/config')
+  }>('/api/ai-assistant/config')
   const body = requireServerSuccess(res.data)
 
   // A 2xx response without a JSON body (for example an SPA fallback HTML page

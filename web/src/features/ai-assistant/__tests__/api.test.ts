@@ -49,7 +49,7 @@ describe('AI assistant config API', () => {
     })
 
     await expect(getAIAssistantConfig()).resolves.toEqual(validConfig)
-    expect(get).toHaveBeenCalledWith('/ai-assistant/config')
+    expect(get).toHaveBeenCalledWith('/api/ai-assistant/config')
   })
 
   test('rejects instead of resolving undefined when the backend serves HTML', async () => {
