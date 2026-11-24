@@ -70,8 +70,8 @@ export function parseTaskResult() { return {}; }
 	require.NoError(t, err)
 	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(key) })
 
-	taskPluginBody := `{"mode":"single","channel":{"type":61,"name":"plugin-channel","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind\"}"}}`
-	openaiBody := `{"mode":"single","channel":{"type":1,"name":"openai-channel","key":"sk","models":"gpt","group":"default"}}`
+	taskPluginBody := `{"mode":"single","channel":{"type":61,"name":"plugin-channel","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"stat_group_ratio\":1,\"task_plugin_key\":\"channel-bind\"}"}}`
+	openaiBody := `{"mode":"single","channel":{"type":1,"name":"openai-channel","key":"sk","models":"gpt","group":"default","setting":"{\"stat_group_ratio\":1}"}}`
 
 	adminDenied := postAddChannel(t, 2, common.RoleAdminUser, taskPluginBody)
 	assert.Contains(t, adminDenied.Body.String(), "task plugin channels require the task_plugin.bind permission")
@@ -101,7 +101,7 @@ export function parseTaskResult() { return {}; }
 	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(key) })
 
 	baseURL := "https://example.com"
-	setting := `{"task_plugin_key":"channel-bind-update"}`
+	setting := `{"stat_group_ratio":1,"task_plugin_key":"channel-bind-update"}`
 	channel := model.Channel{
 		Type:    constant.ChannelTypeTaskPlugin,
 		Status:  common.ChannelStatusEnabled,
@@ -115,7 +115,7 @@ export function parseTaskResult() { return {}; }
 	require.NoError(t, channel.Insert())
 
 	payload := fmt.Sprintf(
-		`{"id":%d,"type":61,"name":"existing-plugin","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind-update\"}"}`,
+		`{"id":%d,"type":61,"name":"existing-plugin","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"stat_group_ratio\":1,\"task_plugin_key\":\"channel-bind-update\"}"}`,
 		channel.Id,
 	)
 	gin.SetMode(gin.TestMode)
@@ -145,7 +145,7 @@ export function parseTaskResult() { return {}; }
 		t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(key) })
 	}
 	body := func(pluginKey string) string {
-		return fmt.Sprintf(`{"mode":"single","channel":{"type":61,"name":"%s","key":"sk","models":"doc","group":"default","setting":"{\"task_plugin_key\":\"%s\"}"}}`, pluginKey, pluginKey)
+		return fmt.Sprintf(`{"mode":"single","channel":{"type":61,"name":"%s","key":"sk","models":"doc","group":"default","setting":"{\"stat_group_ratio\":1,\"task_plugin_key\":\"%s\"}"}}`, pluginKey, pluginKey)
 	}
 
 	noDefault := postAddChannel(t, 1, common.RoleRootUser, body("bind-no-default"))
@@ -192,8 +192,8 @@ export function parseTaskResult() { return {}; }
 	require.NoError(t, err)
 	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(key) })
 
-	bound := `{"mode":"single","channel":{"type":60,"name":"gateway","key":"sk","models":"gateway-doc","group":"default","base_url":"https://gateway.example","setting":"{\"task_extend_plugin_keys\":[\"gateway-bind\"]}"}}`
-	unbound := `{"mode":"single","channel":{"type":60,"name":"plain-gateway","key":"sk","models":"gpt","group":"default","base_url":"https://gateway.example"}}`
+	bound := `{"mode":"single","channel":{"type":60,"name":"gateway","key":"sk","models":"gateway-doc","group":"default","base_url":"https://gateway.example","setting":"{\"stat_group_ratio\":1,\"task_extend_plugin_keys\":[\"gateway-bind\"]}"}}`
+	unbound := `{"mode":"single","channel":{"type":60,"name":"plain-gateway","key":"sk","models":"gpt","group":"default","base_url":"https://gateway.example","setting":"{\"stat_group_ratio\":1}"}}`
 	adminDenied := postAddChannel(t, 2, common.RoleAdminUser, bound)
 	assert.Contains(t, adminDenied.Body.String(), "task plugin channels require the task_plugin.bind permission")
 	rootAllowed := postAddChannel(t, 1, common.RoleRootUser, bound)
@@ -202,13 +202,14 @@ export function parseTaskResult() { return {}; }
 	assert.Contains(t, adminUnbound.Body.String(), `"success":true`, "a gateway channel without plugin bindings needs no bind permission")
 
 	baseURL := "https://gateway.example"
-	setting := `{"task_extend_plugin_keys":["gateway-bind"]}`
+	setting := `{"stat_group_ratio":1,"task_extend_plugin_keys":["gateway-bind"]}`
 	channel := model.Channel{Type: constant.ChannelTypeNewAPI, Status: common.ChannelStatusEnabled, Name: "existing-gateway", Models: "gateway-doc", Group: "default", Key: "sk", BaseURL: &baseURL, Setting: &setting}
 	require.NoError(t, channel.Insert())
 	update := func(name, setting string) string {
-		return fmt.Sprintf(`{"id":%d,"type":60,"name":%q,"key":"sk","models":"gateway-doc","group":"default","base_url":"https://gateway.example","setting":%q}`, channel.Id, name, setting)
+		setting = `{"stat_group_ratio":1,` + strings.TrimPrefix(setting, `{`)
+		return fmt.Sprintf(`{"id":%d,"type":60,"name":%q,"models":"gateway-doc","group":"default","base_url":"https://gateway.example","setting":%q}`, channel.Id, name, setting)
 	}
-	unchanged := putUpdateChannel(t, 2, common.RoleAdminUser, update("renamed-gateway", setting))
+	unchanged := putUpdateChannel(t, 1, common.RoleRootUser, update("renamed-gateway", setting))
 	assert.Contains(t, unchanged.Body.String(), `"success":true`, "resubmitting the stored bindings does not need the bind permission")
 	assert.NotContains(t, unchanged.Body.String(), "task_plugin.bind")
 	rebound := putUpdateChannel(t, 2, common.RoleAdminUser, update("renamed-gateway", `{"task_extend_plugin_keys":[]}`))

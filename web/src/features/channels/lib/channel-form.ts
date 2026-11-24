@@ -322,7 +322,14 @@ export const channelFormSchema = z
         'Request body field rename must be a JSON array of {"path": string, "keys": {old: new}} rules'
       ),
     // Reporting-only stat ratio; string in the form, number in setting JSON.
-    stat_group_ratio: z.string().optional(),
+    stat_group_ratio: z
+      .string()
+      .trim()
+      .min(1, 'Statistics group ratio is required')
+      .refine(
+        (value) => Number.isFinite(Number(value)) && Number(value) > 0,
+        'Statistics group ratio must be greater than 0'
+      ),
     // Named param/retry override templates referenced by name.
     param_override_template_refs: z.array(z.string()).optional(),
     retry_override_template_refs: z.array(z.string()).optional(),
@@ -859,11 +866,7 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     }
   }
   const statGroupRatio = Number(formData.stat_group_ratio)
-  if (
-    formData.stat_group_ratio?.trim() &&
-    Number.isFinite(statGroupRatio) &&
-    statGroupRatio > 0
-  ) {
+  if (Number.isFinite(statGroupRatio) && statGroupRatio > 0) {
     settingObj.stat_group_ratio = statGroupRatio
   }
   const paramTemplateRefs = trimNonEmpty(formData.param_override_template_refs)

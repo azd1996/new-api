@@ -34,6 +34,7 @@ func newAdvancedCustomModelListChannel(baseURL string, key string, upstreamPath 
 		Key:     key,
 		BaseURL: &baseURL,
 	}
+	channel.SetSetting(dto.ChannelSettings{StatGroupRatio: common.GetPointer(1.0)})
 	channel.SetOtherSettings(dto.ChannelOtherSettings{AdvancedCustom: config})
 	return channel
 }
@@ -263,7 +264,7 @@ func TestFetchModelsAdvancedCustomEditPreviewUsesSavedKeyAndExplicitClears(t *te
 	}
 	savedHeaderOverride := `{"X-Saved":"must-not-be-sent"}`
 	savedChannel.HeaderOverride = &savedHeaderOverride
-	savedChannel.SetSetting(dto.ChannelSettings{Proxy: "http://127.0.0.1:1"})
+	savedChannel.SetSetting(dto.ChannelSettings{Proxy: "http://127.0.0.1:1", StatGroupRatio: common.GetPointer(1.0)})
 	require.NoError(t, db.Create(savedChannel).Error)
 
 	preserved, err := buildAdvancedCustomModelPreviewChannel(fetchModelsRequest{ChannelID: savedChannel.Id})

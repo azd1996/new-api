@@ -72,7 +72,10 @@ func TestValidateChannelProxy(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			setting, err := common.Marshal(dto.ChannelSettings{Proxy: test.proxy})
+			setting, err := common.Marshal(dto.ChannelSettings{
+				Proxy:          test.proxy,
+				StatGroupRatio: common.GetPointer(1.0),
+			})
 			require.NoError(t, err)
 			channel := &model.Channel{
 				Type:    constant.ChannelTypeOpenAI,
@@ -103,18 +106,51 @@ func TestValidateChannelRequiresNewAPIBaseURL(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			setting, err := common.Marshal(dto.ChannelSettings{StatGroupRatio: common.GetPointer(1.0)})
+			require.NoError(t, err)
 			channel := &model.Channel{
 				Type:    constant.ChannelTypeNewAPI,
 				BaseURL: test.baseURL,
+				Setting: common.GetPointer(string(setting)),
 			}
 
-			err := validateChannel(channel, false)
+			err = validateChannel(channel, false)
 
 			if test.wantErr {
 				require.ErrorContains(t, err, "New API channel base URL cannot be empty")
 				return
 			}
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateChannelRequiresStatGroupRatio(t *testing.T) {
+	channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+
+	err := validateChannel(channel, false)
+
+	require.ErrorContains(t, err, "stat_group_ratio is required")
+}
+
+func TestChannelGroupPrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		channel  string
+		expected string
+	}{
+		{name: "dash separated chinese", channel: "阿里云-华东", expected: "阿里云"},
+		{name: "space separated english", channel: "OpenAI east", expected: "OpenAI"},
+		{name: "underscore separated", channel: "OpenAI_east", expected: "OpenAI"},
+		{name: "unseparated chinese takes two runes", channel: "阿里云华东", expected: "阿里"},
+		{name: "short chinese stays whole", channel: "阿里", expected: "阿里"},
+		{name: "unseparated english stays whole", channel: "OpenAI", expected: "OpenAI"},
+		{name: "blank", channel: "  ", expected: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, channelGroupPrefix(test.channel))
 		})
 	}
 }
@@ -169,7 +205,8 @@ func TestMultiprotocolGatewayEndpointTypes(t *testing.T) {
 func TestCopyChannelRejectsInvalidLegacyProxySettings(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	settingBytes, err := common.Marshal(dto.ChannelSettings{
-		Proxy: "socks5://proxy.example/legacy-path",
+		Proxy:          "socks5://proxy.example/legacy-path",
+		StatGroupRatio: common.GetPointer(1.0),
 	})
 	require.NoError(t, err)
 	setting := string(settingBytes)

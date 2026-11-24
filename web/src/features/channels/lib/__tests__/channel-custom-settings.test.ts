@@ -146,6 +146,24 @@ test.each([null, 0, false, [], {}])(
   }
 )
 
+test('stat_group_ratio is required and must be positive', () => {
+  const form = transformChannelToFormDefaults(buildChannel({}))
+
+  for (const ratio of ['', '0', '-1']) {
+    const result = channelFormSchema.safeParse({
+      ...form,
+      stat_group_ratio: ratio,
+    })
+
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path)).toContainEqual([
+        'stat_group_ratio',
+      ])
+    }
+  }
+})
+
 test('a blank or non-positive stat ratio is omitted from the saved setting', () => {
   const form = transformChannelToFormDefaults(buildChannel({}))
   for (const ratio of ['', '0', '-1']) {
