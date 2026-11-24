@@ -61,6 +61,7 @@ import {
   sideDrawerHeaderClassName,
   sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { JsonCodeEditor } from '@/components/json-code-editor'
@@ -69,6 +70,15 @@ import { LearnMore } from '@/components/learn-more'
 import { LoadingState } from '@/components/loading-state'
 import { MultiSelect } from '@/components/multi-select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -132,6 +142,7 @@ import {
   getAllModels,
   getConfiguredModels,
   getChannel,
+  getChannels,
   getChannelDefaultBaseURLs,
   getGroups,
   getPrefillGroups,
@@ -183,6 +194,7 @@ import {
   formatModelsArray,
   mergeModelMappingPairs,
   type ModelMappingPair,
+  parseChannelSettings,
   extractRedirectModels,
   extractMappingSourceModels,
   hasModelConfigChanged,
@@ -264,6 +276,13 @@ type ModelMappingGuardrail = {
   entries: Array<{ source: string; target: string }>
   missingSourceModels: string[]
   exposedTargetModels: string[]
+}
+
+type ExistingGroupChannel = {
+  id: number
+  name: string
+  group: string
+  statGroupRatio?: number
 }
 
 // Helper functions
@@ -458,6 +477,15 @@ export function ChannelMutateDrawer({
   const missingModelsResolveRef = useRef<
     ((action: MissingModelsAction) => void) | null
   >(null)
+  const [existingGroupChannels, setExistingGroupChannels] = useState<
+    ExistingGroupChannel[]
+  >([])
+  const [groupBindingDialogOpen, setGroupBindingDialogOpen] = useState(false)
+  const [groupBindingBlockedOpen, setGroupBindingBlockedOpen] = useState(false)
+  const [groupBindingBlockedRatio, setGroupBindingBlockedRatio] = useState(0)
+  const groupBindingResolveRef = useRef<((confirmed: boolean) => void) | null>(
+    null
+  )
   const channelFormRef = useRef<HTMLFormElement>(null)
   const [modelConfiguration, setModelConfiguration] = useState<{
     pluginKey?: string
@@ -1657,6 +1685,72 @@ export function ChannelMutateDrawer({
 
   const isSubmitting = channelMutation.isPending || form.formState.isSubmitting
 
+  const confirmGroupBinding = useCallback(
+    async (groups: string[], statGroupRatioValue: string): Promise<boolean> => {
+      const existingChannels: ExistingGroupChannel[] = []
+      for (const group of groups) {
+        const response = await getChannels({ group, page_size: 100 })
+        const items = requireServerSuccess(response).data?.items ?? []
+        for (const item of items) {
+          if (
+            item.id === channelId ||
+            item.group.split(',').includes(group) === false
+          ) {
+            continue
+          }
+          const itemStatGroupRatio =
+            parseChannelSettings(item.setting).stat_group_ratio
+          existingChannels.push({
+            id: item.id,
+            name: item.name,
+            group,
+            statGroupRatio: itemStatGroupRatio,
+          })
+        }
+      }
+      if (existingChannels.length === 0) {
+        return true
+      }
+
+      const statGroupRatio = Number(statGroupRatioValue)
+      const mismatchedChannels = existingChannels.filter(
+        (item) =>
+          item.statGroupRatio === undefined ||
+          Math.abs(item.statGroupRatio - statGroupRatio) > 0.000001
+      )
+      if (mismatchedChannels.length > 0) {
+        setExistingGroupChannels(mismatchedChannels)
+        setGroupBindingBlockedRatio(statGroupRatio)
+        setGroupBindingBlockedOpen(true)
+        return false
+      }
+
+      setExistingGroupChannels(existingChannels)
+      setGroupBindingDialogOpen(true)
+      const confirmed = await new Promise<boolean>((resolve) => {
+        groupBindingResolveRef.current?.(false)
+        groupBindingResolveRef.current = resolve
+      })
+      return confirmed
+    },
+    [channelId]
+  )
+
+  const handleGroupBindingAction = useCallback((confirmed: boolean) => {
+    setGroupBindingDialogOpen(false)
+    if (groupBindingResolveRef.current) {
+      groupBindingResolveRef.current(confirmed)
+      groupBindingResolveRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      groupBindingResolveRef.current?.(false)
+      groupBindingResolveRef.current = null
+    }
+  }, [])
+
   // Submit handler
   const onSubmit = useCallback(
     async (data: ChannelFormValues) => {
@@ -1687,6 +1781,12 @@ export function ChannelMutateDrawer({
           return
         }
       }
+
+      const canConfirmGroupBinding = await confirmGroupBinding(
+        data.group,
+        data.stat_group_ratio
+      )
+      if (!canConfirmGroupBinding) return
 
       // Validate status_code_mapping entries
       if (data.status_code_mapping?.trim()) {
@@ -1972,20 +2072,20 @@ export function ChannelMutateDrawer({
       name='stat_group_ratio'
       render={({ field }) => (
         <FormItem>
-          <FormLabel>{t('Statistics Group Ratio')}</FormLabel>
+          <FormLabel required>{t('Statistics Group Ratio')}</FormLabel>
           <FormControl>
             <Input
               {...field}
               value={field.value || ''}
               type='number'
               step='any'
-              min={0}
-              placeholder='1'
+              min='0'
+              placeholder='0.8'
             />
           </FormControl>
           <FormDescription>
             {t(
-              'Reporting-only ratio for the discounted amount in statistics. Does not affect billing. Leave empty to use 1 (discounted equals original).'
+              'Required reporting-only ratio for statistics. It does not affect billing and must match other channels in the same groups.'
             )}
           </FormDescription>
           <FormMessage />
@@ -5587,6 +5687,80 @@ export function ChannelMutateDrawer({
         }}
         handleConfirm={() => handlePassthroughWarningAction(true)}
       />
+
+      <ConfirmDialog
+        open={groupBindingDialogOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleGroupBindingAction(false)
+        }}
+        title={t('Confirm group binding')}
+        desc={t(
+          'The selected groups already contain channels. Confirm whether to add the current channel to these groups.'
+        )}
+        confirmText={t('Continue')}
+        handleConfirm={() => handleGroupBindingAction(true)}
+      >
+        <div className='space-y-2 text-sm'>
+          {existingGroupChannels.map((item) => (
+            <div
+              className='text-muted-foreground flex flex-wrap gap-x-3 gap-y-1'
+              key={`${item.group}-${item.id}`}
+            >
+              <span className='text-foreground font-medium'>{item.name}</span>
+              <span>#{item.id}</span>
+              <span>{item.group}</span>
+              <span>
+                {t('Statistics Group Ratio')}:{' '}
+                {item.statGroupRatio ?? t('Not set')}
+              </span>
+            </div>
+          ))}
+        </div>
+      </ConfirmDialog>
+
+      <AlertDialog
+        open={groupBindingBlockedOpen}
+        onOpenChange={setGroupBindingBlockedOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader className='text-start'>
+            <AlertDialogTitle>
+              {t('Cannot join these groups')}
+            </AlertDialogTitle>
+            <AlertDialogDescription render={<div className='space-y-3' />}>
+              <div>
+                {t(
+                  'Every channel in a group must share the same statistics group ratio. The current ratio is {{ratio}}, which does not match the channels below.',
+                  { ratio: groupBindingBlockedRatio }
+                )}
+              </div>
+              <div className='space-y-1'>
+                {existingGroupChannels.map((item) => (
+                  <div
+                    className='flex flex-wrap gap-x-3 gap-y-1'
+                    key={`blocked-${item.group}-${item.id}`}
+                  >
+                    <span className='text-foreground font-medium'>
+                      {item.name}
+                    </span>
+                    <span>#{item.id}</span>
+                    <span>{item.group}</span>
+                    <span>
+                      {t('Statistics Group Ratio')}:{' '}
+                      {item.statGroupRatio ?? t('Not set')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setGroupBindingBlockedOpen(false)}>
+              {t('OK')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

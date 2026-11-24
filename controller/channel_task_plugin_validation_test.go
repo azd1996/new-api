@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -24,18 +25,18 @@ export function parseTaskResult() { return {}; }
 	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister("channel-validation") })
 	baseURL := "https://example.com"
 
-	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, BaseURL: &baseURL}
+	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, BaseURL: &baseURL, Setting: common.GetPointer(`{"stat_group_ratio":1}`)}
 	require.ErrorContains(t, validateChannel(channel, false), "task plugin key is required")
 
-	missing := `{"task_plugin_key":"missing"}`
+	missing := `{"stat_group_ratio":1,"task_plugin_key":"missing"}`
 	channel.Setting = &missing
 	require.ErrorContains(t, validateChannel(channel, false), "is not registered")
 
-	longKey := `{"task_plugin_key":"` + strings.Repeat("x", 31) + `"}`
+	longKey := `{"stat_group_ratio":1,"task_plugin_key":"` + strings.Repeat("x", 31) + `"}`
 	channel.Setting = &longKey
 	require.ErrorContains(t, validateChannel(channel, false), "must not exceed 30")
 
-	valid := `{"task_plugin_key":"channel-validation"}`
+	valid := `{"stat_group_ratio":1,"task_plugin_key":"channel-validation"}`
 	channel.Setting = &valid
 	channel.BaseURL = nil
 	require.ErrorContains(t, validateChannel(channel, false), "base URL is required")
@@ -52,7 +53,7 @@ export function parseTaskResult() { return {}; }
 	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
 	require.NoError(t, err)
 	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister("channel-default-url") })
-	bound := `{"task_plugin_key":"channel-default-url"}`
+	bound := `{"stat_group_ratio":1,"task_plugin_key":"channel-default-url"}`
 
 	empty := "  "
 	for _, baseURL := range []*string{nil, &empty} {
@@ -87,18 +88,18 @@ export function parseTaskResult() { return {}; }
 	cases := []struct {
 		name, setting, wantErr string
 	}{
-		{"single and extension keys", `{"task_plugin_key":"gateway-ext-a","task_extend_plugin_keys":["gateway-ext-b"]}`, ""},
+		{"single and extension keys", `{"stat_group_ratio":1,"task_plugin_key":"gateway-ext-a","task_extend_plugin_keys":["gateway-ext-b"]}`, ""},
 		{"extension keys only", `{"task_extend_plugin_keys":["gateway-ext-a","gateway-ext-b"]}`, ""},
 		{"unregistered", `{"task_extend_plugin_keys":["gateway-ext-a","missing"]}`, `task plugin "missing" is not registered`},
 		{"vendor-only plugin as extension", `{"task_extend_plugin_keys":["gateway-ext-a","gateway-ext-vendor"]}`, `task plugin "gateway-ext-vendor" does not support a New API upstream`},
-		{"vendor-only plugin as single key", `{"task_plugin_key":"gateway-ext-vendor"}`, `task plugin "gateway-ext-vendor" does not support a New API upstream`},
+		{"vendor-only plugin as single key", `{"stat_group_ratio":1,"task_plugin_key":"gateway-ext-vendor"}`, `task plugin "gateway-ext-vendor" does not support a New API upstream`},
 		{"duplicate", `{"task_extend_plugin_keys":["gateway-ext-a","gateway-ext-a"]}`, "bound more than once"},
-		{"duplicate of single key", `{"task_plugin_key":"gateway-ext-a","task_extend_plugin_keys":["gateway-ext-a"]}`, "bound more than once"},
+		{"duplicate of single key", `{"stat_group_ratio":1,"task_plugin_key":"gateway-ext-a","task_extend_plugin_keys":["gateway-ext-a"]}`, "bound more than once"},
 		{"padded", `{"task_extend_plugin_keys":[" gateway-ext-a"]}`, "is invalid"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			setting := tc.setting
+			setting := `{"stat_group_ratio":1,` + strings.TrimPrefix(tc.setting, `{`)
 			channel := &model.Channel{Type: constant.ChannelTypeNewAPI, BaseURL: &baseURL, Setting: &setting}
 			err := validateChannel(channel, false)
 			if tc.wantErr == "" {
@@ -109,7 +110,7 @@ export function parseTaskResult() { return {}; }
 		})
 	}
 
-	setting := `{"task_extend_plugin_keys":["gateway-ext-a"]}`
+	setting := `{"stat_group_ratio":1,"task_extend_plugin_keys":["gateway-ext-a"]}`
 	channel := &model.Channel{Type: constant.ChannelTypeOpenAI, Setting: &setting}
 	require.ErrorContains(t, validateChannel(channel, false), "only supported on New API channels")
 }

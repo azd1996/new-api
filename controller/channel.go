@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -532,10 +534,107 @@ func GetChannelKey(c *gin.Context) {
 // extended with; it comfortably covers every built-in and installed plugin.
 const maxTaskExtendPluginKeys = 32
 
+func validateChannelStatGroupRatio(channel *model.Channel) error {
+	statGroupRatio := channel.GetSetting().StatGroupRatio
+	if statGroupRatio == nil {
+		return fmt.Errorf("stat_group_ratio is required")
+	}
+	if *statGroupRatio <= 0 || math.IsInf(*statGroupRatio, 0) || math.IsNaN(*statGroupRatio) {
+		return fmt.Errorf("stat_group_ratio must be a positive number")
+	}
+	if model.DB == nil {
+		return nil
+	}
+
+	var channels []*model.Channel
+	if err := model.DB.Model(&model.Channel{}).Omit("key").Find(&channels).Error; err != nil {
+		return fmt.Errorf("failed to validate stat_group_ratio: %w", err)
+	}
+
+	for _, group := range channel.GetGroups() {
+		groupFilterPattern := model.NormalizeChannelGroupFilter(group)
+		if groupFilterPattern == "" || groupFilterPattern == "all" || groupFilterPattern == "null" {
+			continue
+		}
+		for _, existingChannel := range channels {
+			if existingChannel.Id == channel.Id || !slices.Contains(existingChannel.GetGroups(), group) {
+				continue
+			}
+			existingStatGroupRatio := existingChannel.GetSetting().StatGroupRatio
+			if existingStatGroupRatio == nil || math.Abs(*existingStatGroupRatio-*statGroupRatio) > 0.000001 {
+				return fmt.Errorf("stat_group_ratio for group %s must match existing channels", group)
+			}
+		}
+	}
+
+	return nil
+}
+
+// channelGroupPrefix extracts the vendor prefix from a channel name. A name
+// containing a space, dash or underscore uses the segment before the first one;
+// an unseparated Chinese name uses its first two characters, and any other
+// unseparated name stays whole.
+func channelGroupPrefix(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if index := strings.IndexAny(name, " -_"); index >= 0 {
+		return strings.TrimSpace(name[:index])
+	}
+	runes := []rune(name)
+	if len(runes) > 2 && unicode.Is(unicode.Han, runes[0]) {
+		return string(runes[:2])
+	}
+	return name
+}
+
+// validateChannelGroupNaming keeps one real upstream vendor per group for
+// behind-cdnaigw channels. Only a channel carrying that tag is checked, and it
+// is compared against the channels already in each of its groups so historical
+// conflicts between other channels are not retroactively rejected.
+func validateChannelGroupNaming(channel *model.Channel) error {
+	if channel.Tag == nil || *channel.Tag != behindCdnAigwTag {
+		return nil
+	}
+	if model.DB == nil {
+		return nil
+	}
+	prefix := channelGroupPrefix(channel.Name)
+	if prefix == "" {
+		return nil
+	}
+
+	var channels []*model.Channel
+	if err := model.DB.Model(&model.Channel{}).Omit("key").Find(&channels).Error; err != nil {
+		return fmt.Errorf("failed to validate channel name prefix: %w", err)
+	}
+
+	for _, group := range channel.GetGroups() {
+		for _, existingChannel := range channels {
+			if existingChannel.Id == channel.Id || !slices.Contains(existingChannel.GetGroups(), group) {
+				continue
+			}
+			if channelGroupPrefix(existingChannel.Name) != prefix {
+				return fmt.Errorf("channel name prefix %q for group %s must match existing channels", prefix, group)
+			}
+		}
+	}
+
+	return nil
+}
+
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel == nil {
 		return fmt.Errorf("channel cannot be empty")
+	}
+
+	if err := validateChannelStatGroupRatio(channel); err != nil {
+		return err
+	}
+	if err := validateChannelGroupNaming(channel); err != nil {
+		return err
 	}
 
 	// 校验 channel settings
@@ -1142,17 +1241,22 @@ func UpdateChannel(c *gin.Context) {
 
 	baseURLFromPluginDefault := channel.Type == constant.ChannelTypeTaskPlugin &&
 		(channel.BaseURL == nil || strings.TrimSpace(*channel.BaseURL) == "")
+	originChannel, err := model.GetChannelById(channel.Id, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	channelSetting := channel.GetSetting()
+	if channelSetting.StatGroupRatio == nil {
+		channelSetting.StatGroupRatio = originChannel.GetSetting().StatGroupRatio
+		channel.SetSetting(channelSetting)
+	}
 	// 使用统一的校验函数
 	if err := validateChannel(&channel.Channel, false); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	// Preserve existing ChannelInfo to ensure multi-key channels keep correct state even if the client does not send ChannelInfo in the request.
-	originChannel, err := model.GetChannelById(channel.Id, true)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
 	_, settingProvided := requestData["setting"]
@@ -1418,6 +1522,11 @@ func buildAdvancedCustomModelPreviewChannel(req fetchModelsRequest) (*model.Chan
 		channel = &model.Channel{
 			Type: req.Type,
 			Key:  key,
+		}
+		channelSetting := channel.GetSetting()
+		if channelSetting.StatGroupRatio == nil {
+			channelSetting.StatGroupRatio = common.GetPointer(1.0)
+			channel.SetSetting(channelSetting)
 		}
 	}
 
