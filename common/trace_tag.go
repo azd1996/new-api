@@ -167,17 +167,21 @@ func TraceTagFromContext(c *gin.Context) (raw, downstreamRequestID, customerID s
 }
 
 // Customer resolution sources. A trace tag is cryptographically authenticated
-// by the downstream gateway; a token binding is an administrator assertion.
+// by the downstream gateway; a token binding is an administrator assertion; a
+// user binding is the administrator assertion made on the owning user and is
+// used only when the token itself carries no binding.
 const (
 	CustomerSourceTraceTag = "trace_tag"
 	CustomerSourceToken    = "token"
+	CustomerSourceUser     = "user"
 )
 
 // CustomerFromContext resolves the customer id for a request. A non-empty
 // customer decoded from the trace-tag header always wins; otherwise the
-// customer bound to the API token by an administrator is used. The second
-// return value is the source (CustomerSourceTraceTag, CustomerSourceToken, or
-// "" when no customer is identified).
+// customer bound to the API token by an administrator is used; finally the
+// customer bound to the user owning the token is used. The second return
+// value is the source (CustomerSourceTraceTag, CustomerSourceToken,
+// CustomerSourceUser, or "" when no customer is identified).
 func CustomerFromContext(c *gin.Context) (string, string) {
 	if c == nil || c.Request == nil {
 		return "", ""
@@ -187,6 +191,9 @@ func CustomerFromContext(c *gin.Context) (string, string) {
 	}
 	if customerID := strings.TrimSpace(GetContextKeyString(c, constant.ContextKeyTokenCustomerID)); customerID != "" {
 		return customerID, CustomerSourceToken
+	}
+	if customerID := strings.TrimSpace(GetContextKeyString(c, constant.ContextKeyUserCustomerID)); customerID != "" {
+		return customerID, CustomerSourceUser
 	}
 	return "", ""
 }

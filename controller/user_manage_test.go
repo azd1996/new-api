@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -84,6 +85,85 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 func performManageUserRequest(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	return performVerifiedManageUserRequest(t, body, service.AuthIdentity{UserID: 9999}, "")
+}
+
+// performUserUpdateRequest drives UpdateUser as the root operator.
+func performUserUpdateRequest(t *testing.T, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/user/", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("id", 9999)
+	c.Set("role", common.RoleRootUser)
+	c.Set("username", "root-operator")
+	c.Set(common.RequestIdKey, "user-customer-test")
+	UpdateUser(c)
+	return recorder
+}
+
+func TestUpdateUserCustomerBinding(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, authz.Init(db))
+	require.NoError(t, db.AutoMigrate(&model.Customer{}))
+	require.NoError(t, (&model.Customer{CustomerId: "customer-a", Name: "Customer A"}).Insert())
+
+	user := model.User{
+		Username: "customer-bind-user", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1,
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	// Binding to a configured customer persists it.
+	body := fmt.Sprintf(`{"id":%d,"username":"customer-bind-user","group":"default","customer_id":"customer-a"}`, user.Id)
+	recorder := performUserUpdateRequest(t, body)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var updated model.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	assert.Equal(t, "customer-a", updated.CustomerId)
+
+	// An empty customer id clears the binding.
+	body = fmt.Sprintf(`{"id":%d,"username":"customer-bind-user","group":"default","customer_id":""}`, user.Id)
+	recorder = performUserUpdateRequest(t, body)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	assert.Empty(t, updated.CustomerId)
+
+	// Unknown customers are rejected instead of being stored.
+	body = fmt.Sprintf(`{"id":%d,"username":"customer-bind-user","group":"default","customer_id":"missing-customer"}`, user.Id)
+	recorder = performUserUpdateRequest(t, body)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), "does not exist")
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	assert.Empty(t, updated.CustomerId)
+}
+
+func TestUpdateSelfKeepsCustomerBinding(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	user := model.User{
+		Username: "self-cust-user", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", CustomerId: "customer-a", AuthVersion: 1,
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/user/self", strings.NewReader(
+		`{"username":"self-cust-user","display_name":"New Name","customer_id":"hijacked"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("id", user.Id)
+	c.Set("role", common.RoleCommonUser)
+	c.Set("username", user.Username)
+	common.SetContextKey(c, constant.ContextKeyUserCustomerID, "customer-a")
+	UpdateSelf(c)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var updated model.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	assert.Equal(t, "customer-a", updated.CustomerId)
 }
 
 // performVerifiedManageUserRequest drives ManageUser as the root operator from

@@ -81,6 +81,8 @@ import { ROLE } from '@/lib/roles'
 import { AuthOperationError } from '@/lib/secure-verification'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
+import { useIsAdmin } from '@/hooks/use-admin'
+import { getCustomers } from '@/features/customers/api'
 
 import {
   createUser,
@@ -107,6 +109,8 @@ type UsersMutateDrawerProps = {
   currentRow?: User
 }
 
+const UNBOUND_CUSTOMER_VALUE = '__unbound__'
+
 export function UsersMutateDrawer({
   open,
   onOpenChange,
@@ -132,6 +136,17 @@ export function UsersMutateDrawer({
   })
 
   const groups = groupsData?.data || []
+
+  // Customer bindings are admin-only; fetch the options only for admins.
+  const isAdmin = useIsAdmin()
+  const { data: customersData } = useQuery({
+    queryKey: ['user-customers'],
+    queryFn: async () =>
+      requireServerSuccess(await getCustomers({ p: 1, page_size: 1000 })),
+    enabled: open && isAdmin,
+    staleTime: 5 * 60 * 1000,
+  })
+  const customers = customersData?.data?.items || []
 
   // Permission catalog is owned by the backend; fetched once and reused.
   const { data: permissionCatalog = EMPTY_PERMISSION_CATALOG } = useQuery({
@@ -380,6 +395,53 @@ export function UsersMutateDrawer({
                         </Select>
                         <FormDescription>
                           {t("Set the user's role (cannot be Root)")}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                {isAdmin && (
+                  <FormField
+                    control={form.control}
+                    name='customer_id'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Customer')}</FormLabel>
+                        <FormControl>
+                          <Select
+                            value={field.value || UNBOUND_CUSTOMER_VALUE}
+                            onValueChange={(value) =>
+                              field.onChange(
+                                value === UNBOUND_CUSTOMER_VALUE ? '' : value
+                              )
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={t('No customer')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={UNBOUND_CUSTOMER_VALUE}>
+                                {t('No customer')}
+                              </SelectItem>
+                              {customers.map((customer) => (
+                                <SelectItem
+                                  key={customer.customer_id}
+                                  value={customer.customer_id}
+                                >
+                                  {customer.name
+                                    ? `${customer.customer_id} (${customer.name})`
+                                    : customer.customer_id}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Bind this user to a customer so requests without a trace-tag header are still attributed to them.'
+                          )}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

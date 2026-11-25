@@ -75,7 +75,7 @@ func TestCustomerFromContext(t *testing.T) {
 
 	const knownTag = "C7J42H35CV56G2VKWLMPH72GEKF24S72RCDZOG6KAXXIJ5Q5D2K7LNKIH3R7D5KGLDOMTOX3XGH7HBRLCWQMCZKGHY7EXQBCLVWUATI"
 
-	newContext := func(t *testing.T, headerValue, tokenCustomer string) *gin.Context {
+	newContext := func(t *testing.T, headerValue, tokenCustomer, userCustomer string) *gin.Context {
 		t.Helper()
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
@@ -84,35 +84,48 @@ func TestCustomerFromContext(t *testing.T) {
 			ctx.Request.Header.Set(TraceTagHeader, headerValue)
 		}
 		SetContextKey(ctx, constant.ContextKeyTokenCustomerID, tokenCustomer)
+		SetContextKey(ctx, constant.ContextKeyUserCustomerID, userCustomer)
 		return ctx
 	}
 
-	t.Run("no trace tag and no token binding", func(t *testing.T) {
-		customerID, source := CustomerFromContext(newContext(t, "", ""))
+	t.Run("no trace tag and no binding", func(t *testing.T) {
+		customerID, source := CustomerFromContext(newContext(t, "", "", ""))
 		assert.Empty(t, customerID)
 		assert.Empty(t, source)
 	})
 
 	t.Run("token binding is used when no trace tag exists", func(t *testing.T) {
-		customerID, source := CustomerFromContext(newContext(t, "", "customer-a"))
+		customerID, source := CustomerFromContext(newContext(t, "", "customer-a", ""))
 		assert.Equal(t, "customer-a", customerID)
 		assert.Equal(t, CustomerSourceToken, source)
 	})
 
-	t.Run("decoded trace tag wins over a different token binding", func(t *testing.T) {
-		customerID, source := CustomerFromContext(newContext(t, knownTag, "customer-a"))
+	t.Run("user binding is used when no token binding exists", func(t *testing.T) {
+		customerID, source := CustomerFromContext(newContext(t, "", "", "customer-u"))
+		assert.Equal(t, "customer-u", customerID)
+		assert.Equal(t, CustomerSourceUser, source)
+	})
+
+	t.Run("token binding wins over the user binding", func(t *testing.T) {
+		customerID, source := CustomerFromContext(newContext(t, "", "customer-a", "customer-u"))
+		assert.Equal(t, "customer-a", customerID)
+		assert.Equal(t, CustomerSourceToken, source)
+	})
+
+	t.Run("decoded trace tag wins over token and user bindings", func(t *testing.T) {
+		customerID, source := CustomerFromContext(newContext(t, knownTag, "customer-a", "customer-u"))
 		assert.Equal(t, "api-key-004", customerID)
 		assert.Equal(t, CustomerSourceTraceTag, source)
 	})
 
 	t.Run("token binding is used when the trace tag fails authentication", func(t *testing.T) {
-		customerID, source := CustomerFromContext(newContext(t, "TAMPERED", "customer-a"))
+		customerID, source := CustomerFromContext(newContext(t, "TAMPERED", "customer-a", "customer-u"))
 		assert.Equal(t, "customer-a", customerID)
 		assert.Equal(t, CustomerSourceToken, source)
 	})
 
 	t.Run("an empty decoded trace-tag customer falls back to the token binding", func(t *testing.T) {
-		customerID, source := CustomerFromContext(newContext(t, "", "customer-a"))
+		customerID, source := CustomerFromContext(newContext(t, "", "customer-a", "customer-u"))
 		assert.Equal(t, "customer-a", customerID)
 		assert.Equal(t, CustomerSourceToken, source)
 	})

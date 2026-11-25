@@ -676,6 +676,12 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 	updatedUser.Role = originUser.Role
+	customerID := strings.TrimSpace(updatedUser.CustomerId)
+	if customerID != "" && !model.CustomerConfigured(customerID) {
+		common.ApiErrorT(c, "Customer {{id}} does not exist", map[string]any{"id": customerID})
+		return
+	}
+	updatedUser.CustomerId = customerID
 	myRole := c.GetInt("role")
 	if !canManageTargetRole(myRole, originUser.Role) {
 		common.ApiErrorT(c, "No permission to update users of same or higher permission level")
@@ -683,8 +689,9 @@ func UpdateUser(c *gin.Context) {
 	}
 	updatePassword := updatedUser.Password != ""
 	auditParams := map[string]any{
-		"username": originUser.Username,
-		"id":       updatedUser.Id,
+		"username":    originUser.Username,
+		"id":          updatedUser.Id,
+		"customer_id": updatedUser.CustomerId,
 	}
 	// Resetting a password or rewriting the admin permission matrix changes what
 	// the managed account can do or who can sign in to it.
@@ -871,6 +878,9 @@ func UpdateSelf(c *gin.Context) {
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
+		// The customer binding is admin-managed; a self-update must never
+		// overwrite it (the value from the request body is ignored here).
+		CustomerId: common.GetContextKeyString(c, constant.ContextKeyUserCustomerID),
 	}
 	if user.Password != "" {
 		identity, ok := middleware.GetStepUpIdentity(c)
@@ -1016,12 +1026,17 @@ func CreateUser(c *gin.Context) {
 	if user.DisplayName == "" {
 		user.DisplayName = user.Username
 	}
+	user.CustomerId = strings.TrimSpace(user.CustomerId)
+	if user.CustomerId != "" && !model.CustomerConfigured(user.CustomerId) {
+		common.ApiErrorT(c, "Customer {{id}} does not exist", map[string]any{"id": user.CustomerId})
+		return
+	}
 	myRole := c.GetInt("role")
 	if user.Role >= myRole {
 		common.ApiErrorT(c, "Cannot create users with permission level equal to or higher than yourself")
 		return
 	}
-	auditParams := map[string]any{"role": user.Role}
+	auditParams := map[string]any{"role": user.Role, "customer_id": user.CustomerId}
 	// Creating an administrator grants privilege just like promoting one.
 	if user.Role >= common.RoleAdminUser {
 		authorization := requireAdminUserProof(c, service.VerificationScopeAdminUserCreate, service.AdminUserCreateContext{Role: user.Role})
@@ -1036,6 +1051,7 @@ func CreateUser(c *gin.Context) {
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
 		Role:        user.Role, // 保持管理员设置的角色
+		CustomerId:  user.CustomerId,
 	}
 	authzTouched := false
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {

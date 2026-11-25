@@ -7,6 +7,10 @@
 
 ## [2026-11-25]
 
+### 新增 Added
+
+- **用户级客户绑定**：管理员可在用户创建/编辑抽屉将用户绑定到客户（`users.customer_id`，`varchar(64)` 默认空）。绑定校验客户存在性，可显式清空；用户自助更新（`UpdateSelf`）不会改动该管理员托管字段，公开注册也无法注入。客户解析优先级为 `trace-tag > API Key 绑定 > 用户绑定`，因此前置 newapi 中既无 trace-tag 又未单独绑定 Key 的用户，其请求也能按所属客户归因、享受客户级折扣与会话提取配置。用户缓存（Redis 哈希）新增 `CustomerId` 字段并升级 schema 版本（2→3），绑定变更后自动刷新缓存。实现见 `model/user.go`、`model/user_cache.go`、`model/user_auth_cache.go`、`controller/user.go`、`common/trace_tag.go`。
+
 ### 修复 Fixed
 
 - **会话 ID 来源标记错误（客户级会话提取被标为内容兜底）**：Claude 请求在客户端未自带 `metadata.user_id` 时，`other.session_id_source` 一律硬编码为 `content-fallback`，即使会话 ID 实际来自客户级配置的会话提取（`custom:<type>`）或 `x-claude-code-session-id` 请求头。现在来源贯穿整条链路：中间件预计算注入值时把 `ResolveSessionIdentity` 返回的来源写入 context，relay 复用注入值或现场合成时读取/返回真实来源并落日志。新日志的取值包括 `metadata.user_id`、`header`、`custom:<type>`、`legacy:first_message`、`legacy:client_fingerprint`；历史 `content-fallback` 值保留兼容。使用前置 newapi 绑定 API Key→客户后，客户级会话提取结果不再被误标，并可在通用日志按来源筛选（筛选栏新增四个选项，`custom:` 为前缀匹配）。会话缓存汇总的「内容兜底 vs 非内容兜底」口径同步把 `legacy:first_message` 计入内容兜底（`legacy:client_fingerprint` 与 `custom:*` 计入非内容兜底）。实现见 `common/claude_metadata_user_id.go`、`middleware/distributor.go`、`relay/claude_handler.go`、`model/cache_skeleton_analysis.go`。

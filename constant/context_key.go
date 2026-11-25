@@ -70,7 +70,11 @@ const (
 	ContextKeyUserStatus  ContextKey = "user_status"
 	ContextKeyUserEmail   ContextKey = "user_email"
 	ContextKeyUserGroup   ContextKey = "user_group"
-	ContextKeyUsingGroup  ContextKey = "group"
+	// ContextKeyUserCustomerID holds the customer id bound to the user by an
+	// administrator. It is the last-resort fallback when neither a trace-tag
+	// customer nor a token binding is present.
+	ContextKeyUserCustomerID ContextKey = "user_customer_id"
+	ContextKeyUsingGroup     ContextKey = "group"
 	// ContextKeySessionID stores the request's resolved session identifier for
 	// the consume/error log (dual-written to the real session_id column).
 	ContextKeySessionID ContextKey = "session_id"

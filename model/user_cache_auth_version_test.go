@@ -2,12 +2,16 @@ package model
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/alicebob/miniredis/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -220,4 +224,35 @@ func TestUserAuthVersionFenceAndCommittedFloorAreMonotonic(t *testing.T) {
 	committed, err = common.RDB.Get(t.Context(), getUserAuthVersionKey(userID)).Result()
 	require.NoError(t, err)
 	assert.Equal(t, "5", committed)
+}
+
+// TestUserBaseCacheCarriesCustomerBinding verifies the admin-managed customer
+// binding survives the cache round-trip and is exposed on the gin context for
+// customer resolution.
+func TestUserBaseCacheCarriesCustomerBinding(t *testing.T) {
+	truncateTables(t)
+	useUserCacheMiniRedis(t)
+
+	user := User{
+		Username: "customer-binding-cache", Password: "password",
+		Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+		Group: "default", CustomerId: "customer-a", AuthVersion: 1,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+
+	cached, err := GetUserCache(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, "customer-a", cached.CustomerId)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	cached.WriteContext(c)
+	assert.Equal(t, "customer-a", common.GetContextKeyString(c, constant.ContextKeyUserCustomerID))
+
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("customer_id", "customer-b").Error)
+	require.NoError(t, PublishUserAuthCache(user.Id))
+	cached, err = GetUserCache(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, "customer-b", cached.CustomerId)
 }

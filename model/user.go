@@ -98,6 +98,7 @@ type User struct {
 	UsedQuota            int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount         int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
 	Group                string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
+	CustomerId           string                     `json:"customer_id,omitempty" gorm:"type:varchar(64);default:'';column:customer_id"`
 	AffCode              string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount             int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
 	AffQuota             int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
@@ -118,6 +119,7 @@ func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
 		Id:          user.Id,
 		Group:       user.Group,
+		CustomerId:  user.CustomerId,
 		Quota:       user.Quota,
 		Status:      user.Status,
 		Role:        user.Role,
@@ -881,6 +883,7 @@ func (user *User) EditWithTx(tx *gorm.DB, updatePassword bool) error {
 		"username":     newUser.Username,
 		"display_name": newUser.DisplayName,
 		"group":        newUser.Group,
+		"customer_id":  newUser.CustomerId,
 		"remark":       newUser.Remark,
 	}
 	if updatePassword {
