@@ -144,6 +144,12 @@ it('runs the dry run with the in-form policy and renders the processed body', as
   expect(
     screen.getByText(/anthropic-beta: extended-cache-ttl-2025-04-11/)
   ).toBeVisible()
+  // The Changes tab is the default view: the structural diff shows the newly
+  // added message subtree (original messages was empty), and the Result tab
+  // still shows the full body.
+  expect(screen.getByRole('tab', { name: 'Changes', selected: true })).toBeVisible()
+  expect(screen.getByText('messages[0]')).toBeVisible()
+  await user.click(screen.getByRole('tab', { name: 'Result' }))
   expect(screen.getByText(/"ttl": "1h"/)).toBeVisible()
 })
 
@@ -291,4 +297,96 @@ it('offers groups in a dropdown and keeps the full name available on hover', asy
     'title',
     'default'
   )
+})
+
+it('shows the no-changes state and disables the changes tab when no step changed the body', async () => {
+  testCustomerCacheOptimizationMock.mockResolvedValue({
+    results: [
+      {
+        index: 0,
+        ok: true,
+        model: 'claude-sonnet-4',
+        body: '{"model":"claude-sonnet-4","messages":[]}',
+        changed_steps: [],
+      },
+    ],
+  })
+  const user = userEvent.setup()
+  render(<TestForm policy={null} />)
+
+  fireEvent.change(screen.getByLabelText('Request bodies'), {
+    target: { value: '{"model":"claude-sonnet-4","messages":[]}' },
+  })
+  await user.click(screen.getByRole('button', { name: 'Test optimizations' }))
+
+  await waitFor(() =>
+    expect(testCustomerCacheOptimizationMock).toHaveBeenCalledTimes(1)
+  )
+  expect(screen.getAllByText('No changes').length).toBeGreaterThan(0)
+  expect(
+    screen.getByRole('tab', { name: 'Changes' }).getAttribute('aria-disabled')
+  ).toBe('true')
+})
+
+it('expands the full line diff and marks added lines', async () => {
+  testCustomerCacheOptimizationMock.mockResolvedValue({
+    results: [
+      {
+        index: 0,
+        ok: true,
+        model: 'claude-sonnet-4',
+        body: '{"model":"claude-sonnet-4","messages":[],"extra":true}',
+        enabled_rules: ['force_extended_ttl'],
+        changed_steps: ['force_extended_ttl'],
+      },
+    ],
+  })
+  const user = userEvent.setup()
+  render(<TestForm policy={null} />)
+
+  fireEvent.change(screen.getByLabelText('Request bodies'), {
+    target: { value: '{"model":"claude-sonnet-4","messages":[]}' },
+  })
+  await user.click(screen.getByRole('button', { name: 'Test optimizations' }))
+
+  await waitFor(() => expect(screen.getByText('extra')).toBeVisible())
+  await user.click(screen.getByText('Full diff'))
+  expect(screen.getByText('+ "extra": true')).toBeVisible()
+})
+
+it('skips full rendering for oversized result bodies and offers copy instead', async () => {
+  const hugeFiller = 'x'.repeat(1100 * 1024)
+  testCustomerCacheOptimizationMock.mockResolvedValue({
+    results: [
+      {
+        index: 0,
+        ok: true,
+        model: 'claude-sonnet-4',
+        body: `{"model":"claude-sonnet-4","filler":"${hugeFiller}"}`,
+        changed_steps: ['force_extended_ttl'],
+      },
+    ],
+  })
+  const user = userEvent.setup()
+  render(<TestForm policy={null} />)
+
+  fireEvent.change(screen.getByLabelText('Request bodies'), {
+    target: { value: '{"model":"claude-sonnet-4","filler":"small"}' },
+  })
+  await user.click(screen.getByRole('button', { name: 'Test optimizations' }))
+
+  await waitFor(() =>
+    expect(testCustomerCacheOptimizationMock).toHaveBeenCalledTimes(1)
+  )
+  expect(
+    screen.getByText(
+      /Body exceeds 1MB: only changed steps are listed here/
+    )
+  ).toBeVisible()
+  await user.click(screen.getByRole('tab', { name: 'Result' }))
+  expect(
+    screen.getByText(
+      /Body exceeds 1MB: the full result is not rendered/
+    )
+  ).toBeVisible()
 })

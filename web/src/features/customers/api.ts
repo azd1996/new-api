@@ -128,6 +128,8 @@ export interface CacheOptimizationTestResult {
   method?: string
 }
 
+export type CacheOptimizationTestMode = 'cache_optimization' | 'full_relay'
+
 export interface CacheOptimizationTestResponse {
   results: CacheOptimizationTestResult[]
   mode: string
@@ -137,7 +139,7 @@ export interface CacheOptimizationTestParams {
   customer_id?: string
   config?: ClaudeCacheOptimization
   group?: string
-  mode?: 'cache_optimization' | 'full_relay'
+  mode?: CacheOptimizationTestMode
   items: CacheOptimizationTestItem[]
 }
 

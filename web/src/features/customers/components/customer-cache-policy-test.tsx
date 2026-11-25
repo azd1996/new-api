@@ -38,6 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Tooltip,
@@ -50,10 +51,14 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   testCustomerCacheOptimization,
+  type CacheOptimizationTestMode,
   type CacheOptimizationTestParams,
   type CacheOptimizationTestResponse,
+  type CacheOptimizationTestResult,
 } from '../api'
 import type { CustomerFormValues } from '../lib/customer-form'
+import { diffJsonTrees, formatJsonDiffValue, type JsonDiffChange } from '../lib/json-diff'
+import { diffLines, type DiffLine } from '../lib/line-diff'
 import { splitJsonBodies } from '../lib/session-identity'
 
 const ruleLabels: Record<string, string> = {
@@ -115,6 +120,174 @@ type CacheOptimizationTestMode = NonNullable<
   CacheOptimizationTestParams['mode']
 >
 
+// Bodies above this size skip the full body / full line diff rendering and
+// offer copy/download instead, to keep the drawer responsive.
+const LARGE_BODY_BYTES = 1024 * 1024
+
+function formatBody(body: string) {
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2)
+  } catch {
+    return body
+  }
+}
+
+function isLargeBody(body: string) {
+  return body.length > LARGE_BODY_BYTES
+}
+
+type ResultViewProps = {
+  item: CacheOptimizationTestResult
+  originalBody: string
+}
+
+function JsonChangeRow(props: { change: JsonDiffChange }) {
+  const { t } = useTranslation()
+  const change = props.change
+  let typeLabel = t('changed')
+  let badgeVariant: 'destructive' | 'outline' | 'secondary' = 'outline'
+  let detail: string
+  if (change.type === 'added') {
+    typeLabel = t('added')
+    badgeVariant = 'secondary'
+    detail = `→ ${formatJsonDiffValue(change.after)}`
+  } else if (change.type === 'removed') {
+    typeLabel = t('removed')
+    badgeVariant = 'destructive'
+    detail = `(${formatJsonDiffValue(change.before)})`
+  } else {
+    detail = `: ${formatJsonDiffValue(change.before)} → ${formatJsonDiffValue(change.after)}`
+  }
+  return (
+    <div className='text-xs'>
+      <Badge variant={badgeVariant} className='mr-1.5'>
+        {typeLabel}
+      </Badge>
+      <span className='font-mono break-all'>{change.path}</span>
+      <span className='text-muted-foreground'> {detail}</span>
+    </div>
+  )
+}
+
+function LineDiffView(props: { lines: DiffLine[] }) {
+  // Diff lines can legitimately repeat (same type and text), so keys are
+  // built from content plus an occurrence counter instead of the array index.
+  const keyCounts = new Map<string, number>()
+  return (
+    <pre className='bg-muted/40 max-h-72 overflow-auto rounded-md p-3 font-mono text-xs break-all whitespace-pre-wrap'>
+      {props.lines.map((line) => {
+        let prefix = '  '
+        let className = ''
+        if (line.type === 'added') {
+          prefix = '+ '
+          className = 'bg-success/15 text-success'
+        } else if (line.type === 'removed') {
+          prefix = '- '
+          className = 'bg-destructive/15 text-destructive'
+        }
+        const baseKey = `${line.type}-${line.text}`
+        const occurrence = keyCounts.get(baseKey) ?? 0
+        keyCounts.set(baseKey, occurrence + 1)
+        return (
+          <div
+            key={occurrence === 0 ? baseKey : `${baseKey}-${occurrence}`}
+            className={className}
+          >
+            {prefix}
+            {line.text}
+          </div>
+        )
+      })}
+    </pre>
+  )
+}
+
+function ResultView(props: ResultViewProps) {
+  const { t } = useTranslation()
+  const item = props.item
+  const [view, setView] = useState<'changes' | 'result'>('changes')
+  const hasChanges = (item.changed_steps?.length ?? 0) > 0
+  const large = isLargeBody(item.body ?? '')
+  const changes = useMemo(
+    () => (large ? [] : diffJsonTrees(props.originalBody, item.body ?? '')),
+    [large, props.originalBody, item.body]
+  )
+  const lineDiff = useMemo(
+    () => (large || (changes && changes.length > 50) ? [] : diffLines(formatBody(props.originalBody), formatBody(item.body ?? ''))),
+    [large, changes, props.originalBody, item.body]
+  )
+  const prettyBody = useMemo(() => formatBody(item.body ?? ''), [item.body])
+
+  let body: React.ReactNode
+  if (view === 'changes' && !hasChanges) {
+    body = <p className='text-muted-foreground text-xs'>{t('No changes')}</p>
+  } else if (view === 'changes' && large) {
+    body = (
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'Body exceeds 1MB: only changed steps are listed here. Use copy to inspect the full result.'
+        )}
+      </p>
+    )
+  } else if (view === 'changes') {
+    body = (
+      <div className='space-y-2'>
+        {changes && changes.length > 0 ? (
+          <div className='space-y-1'>
+            {changes.map((change) => (
+              <JsonChangeRow
+                key={`${change.type}-${change.path}`}
+                change={change}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className='text-muted-foreground text-xs'>
+            {t('The step ran, but the body is identical to the input.')}
+          </p>
+        )}
+        {lineDiff.length > 0 && (
+          <details>
+            <summary className='text-muted-foreground cursor-pointer text-xs'>
+              {t('Full diff')}
+            </summary>
+            <div className='mt-2'>
+              <LineDiffView lines={lineDiff} />
+            </div>
+          </details>
+        )}
+      </div>
+    )
+  } else if (large) {
+    body = (
+      <p className='text-muted-foreground text-xs'>
+        {t('Body exceeds 1MB: the full result is not rendered. Use copy to inspect it.')}
+      </p>
+    )
+  } else {
+    body = (
+      <pre className='bg-muted/40 max-h-72 overflow-auto rounded-md p-3 font-mono text-xs break-all whitespace-pre-wrap'>
+        {prettyBody}
+      </pre>
+    )
+  }
+
+  return (
+    <Tabs value={view} onValueChange={(value) => setView(value as 'changes' | 'result')}>
+      <div className='flex items-center justify-between gap-2'>
+        <TabsList>
+          <TabsTrigger value='changes' disabled={!hasChanges}>
+            {t('Changes')}
+          </TabsTrigger>
+          <TabsTrigger value='result'>{t('Result')}</TabsTrigger>
+        </TabsList>
+        <CopyButton value={prettyBody} tooltip={t('Copy result')} />
+      </div>
+      {body}
+    </Tabs>
+  )
+}
+
 type CustomerCachePolicyTestProps = {
   customerId?: string
 }
@@ -137,6 +310,7 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
   const [result, setResult] = useState<CacheOptimizationTestResponse | null>(
     null
   )
+  const [originalBodies, setOriginalBodies] = useState<string[]>([])
 
   const { data: groupsData } = useQuery({
     queryKey: ['groups'],
@@ -175,6 +349,7 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
       headers = Object.keys(parsed.headers).length > 0 ? parsed.headers : undefined
     }
     setResult(null)
+    setOriginalBodies(bodies)
     testMutation.mutate({
       customer_id: props.customerId,
       config: policy ?? undefined,
@@ -182,14 +357,6 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
       mode,
       items: bodies.map((body) => ({ body, headers })),
     })
-  }
-
-  const formatBody = (body: string) => {
-    try {
-      return JSON.stringify(JSON.parse(body), null, 2)
-    } catch {
-      return body
-    }
   }
 
   return (
@@ -389,17 +556,10 @@ export function CustomerCachePolicyTest(props: CustomerCachePolicyTestProps) {
                         .join(', ')}
                     </div>
                   )}
-                  <div className='relative'>
-                    <pre className='bg-muted/40 max-h-72 overflow-auto rounded-md p-3 font-mono text-xs break-all whitespace-pre-wrap'>
-                      {formatBody(item.body ?? '')}
-                    </pre>
-                    <div className='absolute top-2 right-2'>
-                      <CopyButton
-                        value={formatBody(item.body ?? '')}
-                        tooltip={t('Copy result')}
-                      />
-                    </div>
-                  </div>
+                  <ResultView
+                    item={item}
+                    originalBody={originalBodies[item.index] ?? ''}
+                  />
                 </>
               )}
             </div>
