@@ -84,12 +84,13 @@ Claude 4.7 及以后的 tokenizer 对同样的文本多出约 30% 的 token，�
 
 ## 图片
 
-`ImageTokens(model, Image)` 返回一张图片占用的 prompt token。`Image.Width` 和 `Image.Height` 是像素尺寸，为 0 时按 1024×1024 计算。`ImageNeedsSize` 判断某个模型和 detail 设置下是否需要尺寸；返回 false 时可以不读取图片。
+`ImageTokens(model, Image)` 返回一张图片占用的 prompt token。`Image.Width` 和 `Image.Height` 是像素尺寸，为 0 时按 1024×1024 计算。`MaxImageTokens(model, detail)` 返回任意尺寸图片在该模型上的最大 token 数，用于读不出尺寸时保守预估。`ImageNeedsSize` 判断某个模型和 detail 设置下是否需要尺寸；返回 false 时可以不读取图片。
 
 | 模型 | 计算方式 |
 |---|---|
 | gpt-5.2 及以后、gpt-6 | 32px patch × 1.2，按模型和 detail 缩放；不传 detail 时 gpt-5.5 及以后按 `original` 计算 |
 | gpt-5、gpt-5.1、gpt-4o、gpt-4.1、o1、o3 | 512px tile，加 base tokens |
+| 其他未识别的 OpenAI 模型 | 按最贵规则：32px patch × 1.2，不缩放、忽略 detail |
 | Claude 4.7 之前 | ⌈宽/28⌉ × ⌈高/28⌉，最长边 1568，最多 1568 个 patch，另加 4 |
 | Claude 4.7 及以后 | 同上，最长边 2576，最多 4784 个 patch，另加 3 |
 | Gemini 3 | 与尺寸无关，按 media resolution：280 / 560 / 1120 / 2240，默认 1120 |

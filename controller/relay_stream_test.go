@@ -16,6 +16,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -240,6 +241,7 @@ func TestRelayKeepAliveHonorsStreamSettings(t *testing.T) {
 	previousEnabled := settings.PingIntervalEnabled
 	previousCount, previousMedia, previousNonStreamMedia := constant.CountToken, constant.GetMediaToken, constant.GetMediaTokenNotStream
 	constant.CountToken, constant.GetMediaToken, constant.GetMediaTokenNotStream = true, true, true
+	require.NoError(t, i18n.Init())
 	t.Cleanup(func() {
 		settings.PingIntervalEnabled = previousEnabled
 		constant.CountToken, constant.GetMediaToken, constant.GetMediaTokenNotStream = previousCount, previousMedia, previousNonStreamMedia
@@ -262,7 +264,10 @@ func TestRelayKeepAliveHonorsStreamSettings(t *testing.T) {
 			c.Request.Header.Set("Content-Type", "application/json")
 			common.SetContextKey(c, constant.ContextKeyOriginalModel, "claude-sonnet-4-20250514")
 			Relay(c, types.RelayFormatClaude)
-			require.Equal(t, http.StatusInternalServerError, recorder.Code)
+			// An undecodable image is left for the upstream to reject; the request
+			// fails fast here because the model has no price configured.
+			require.NotContains(t, recorder.Body.String(), "error counting image token")
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
 			require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
 			require.NotContains(t, recorder.Body.String(), ": PING")
 			var response map[string]any
