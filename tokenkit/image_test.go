@@ -92,6 +92,9 @@ func TestImageTokensMatchUpstreamUsage(t *testing.T) {
 		{"gemini-3.7-flash", 1000, 1000, "media_resolution_medium", 560},
 		{"gemini-3.7-flash", 3840, 2160, "MEDIA_RESOLUTION_ULTRA_HIGH", 2240},
 		{"gemini-3.7-flash", 1000, 1000, "low", 1120},
+		// OpenAI names no rule recognizes reserve the costliest rule, whatever the detail.
+		{"o4", 1000, 1000, "low", 1229},
+		{"gpt-oss-120b", 2048, 2048, "high", 4916},
 		// Unknown sizes assume 1024x1024.
 		{"gpt-5.6-sol", 0, 0, "", 1229},
 		{"claude-opus-4-7", 0, 0, "", 37*37 + 3},
@@ -100,6 +103,34 @@ func TestImageTokensMatchUpstreamUsage(t *testing.T) {
 	} {
 		got := ImageTokens(tc.model, Image{Width: tc.w, Height: tc.h, Detail: tc.detail})
 		assert.Equal(t, tc.want, got, "%s %dx%d detail=%q", tc.model, tc.w, tc.h, tc.detail)
+		assert.GreaterOrEqual(t, MaxImageTokens(tc.model, tc.detail), got, "max bound %s %dx%d detail=%q", tc.model, tc.w, tc.h, tc.detail)
+	}
+}
+
+// An unreadable image reserves the most any size can cost, so pre-consume
+// never falls below upstream billing.
+func TestMaxImageTokensBoundsEverySize(t *testing.T) {
+	for _, tc := range []struct {
+		model, detail string
+		want          int
+	}{
+		{"gpt-5.6-sol", "", 36001},
+		{"gpt-5.6-sol", "high", 4916},
+		{"gpt-4o", "", 85 + 170*8},
+		{"gpt-4o", "low", 85},
+		{"claude-sonnet-4-6", "", 1568 + 4},
+		{"claude-opus-5-5", "", 4784 + 3},
+		{"gemini-2.5-pro", "", 13 * 258},
+		{"gemini-3.7-flash", "MEDIA_RESOLUTION_ULTRA_HIGH", 2240},
+		{"deepseek-v4", "", 520},
+		{"o4", "low", 36001},
+	} {
+		maxTokens := MaxImageTokens(tc.model, tc.detail)
+		assert.Equal(t, tc.want, maxTokens, "%s detail=%q", tc.model, tc.detail)
+		for _, size := range [][2]int{{1 << 30, 1 << 30}, {65535, 768}, {768, 65535}, {2048, 769}, {3000, 2000}, {0, 0}} {
+			got := ImageTokens(tc.model, Image{Width: size[0], Height: size[1], Detail: tc.detail})
+			assert.GreaterOrEqual(t, maxTokens, got, "%s %dx%d detail=%q", tc.model, size[0], size[1], tc.detail)
+		}
 	}
 }
 
