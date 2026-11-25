@@ -59,6 +59,27 @@ func ImageTokens(model string, img Image) int {
 	}
 }
 
+// MaxImageTokens returns the most prompt tokens one image of any size can cost
+// on model with detail. Use it when the size cannot be read, so the estimate
+// never falls below what the upstream may bill.
+func MaxImageTokens(model, detail string) int {
+	switch ModelFamily(model) {
+	case FamilyOpenAI:
+		return openAIImageRuleFor(model, detail).maxTokens()
+	case FamilyClaude:
+		return 1568 + 4
+	case FamilyClaude47:
+		return 4784 + 3
+	case FamilyGemini:
+		if geminiUsesMediaResolution(model) {
+			return geminiMediaResolutionTokens(detail)
+		}
+		return 13 * 258
+	default:
+		return unknownFamilyImageTokens
+	}
+}
+
 // ImageNeedsSize reports whether ImageTokens depends on the image dimensions
 // for model and detail. When it returns false, callers can skip reading the
 // image.
@@ -156,9 +177,13 @@ func openAIImageRuleFor(model, detail string) openAIImageRule {
 		return openAIImageRule{multiplier: 1.72, budget: 1536}
 	case !isGPT && (strings.Contains(model, "o1") || strings.Contains(model, "o3")):
 		return openAIImageRule{baseTokens: 75, tileTokens: 150, lowDetail: detail == "low"}
-	default:
+	case (isGPT && major <= 4) || strings.Contains(model, "4o"):
 		// gpt-4o, gpt-4.1, gpt-4.5, and older vision models.
 		return openAIImageRule{baseTokens: 85, tileTokens: 170, lowDetail: detail == "low"}
+	default:
+		// Models no rule recognizes reserve the most expensive known rule:
+		// original detail at 1.2 per patch, whatever detail was requested.
+		return openAIImageRule{multiplier: 1.2}
 	}
 }
 
@@ -189,6 +214,26 @@ func (r openAIImageRule) tokens(w, h int) int {
 		patches = ceilDiv(w, 32) * ceilDiv(h, 32)
 	}
 	patches = min(patches, maxImagePatches)
+	return int(math.Ceil(float64(patches) * float64(r.multiplier)))
+}
+
+// maxTokens bounds tokens over every image size. Tile rules fit within 2048
+// and shrink the shortest side to 768, so at most 4x2 tiles remain. Patch
+// rules never exceed the budget, the maxSide square, or maxImagePatches.
+func (r openAIImageRule) maxTokens() int {
+	if r.tileTokens > 0 {
+		if r.lowDetail {
+			return r.baseTokens
+		}
+		return r.baseTokens + r.tileTokens*8
+	}
+	patches := maxImagePatches
+	if r.budget > 0 {
+		patches = min(patches, r.budget)
+	}
+	if r.maxSide > 0 {
+		patches = min(patches, ceilDiv(r.maxSide, 32)*ceilDiv(r.maxSide, 32))
+	}
 	return int(math.Ceil(float64(patches) * float64(r.multiplier)))
 }
 

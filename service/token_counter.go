@@ -33,12 +33,12 @@ func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, strea
 		return tokenkit.ImageTokens(model, img), nil
 	}
 
+	// An image we cannot decode is still forwarded: the upstream decides whether
+	// it is valid. Until then, reserve the most the image could cost.
 	config, format, err := GetImageConfig(c, fileMeta.Source)
 	if err != nil {
-		return 0, err
-	}
-	if (config.Width == 0 || config.Height == 0) && format == "" {
-		return 0, fmt.Errorf("fail to decode image config: %s", fileMeta.GetIdentifier())
+		logger.LogWarn(c, "image size unknown, using maximum estimate: identifier=%s, err=%v", fileMeta.GetIdentifier(), err)
+		return tokenkit.MaxImageTokens(model, img.Detail), nil
 	}
 	img.Width, img.Height = config.Width, config.Height
 	logger.LogDebug(c, "image token input: format=%s, width=%d, height=%d", format, img.Width, img.Height)
