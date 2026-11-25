@@ -1056,16 +1056,18 @@ export function ChannelMutateDrawer({
 
   // Transform models to multi-select options. Redirected models carry their
   // upstream target as a hint so the picker shows which names are aliases.
-  const modelOptions = useMemo(() => {
+  const { modelOptions, modelPickerOptions } = useMemo(() => {
     const targetBySource = new Map(
       modelMappingGuardrail.entries.map((entry) => [entry.source, entry.target])
     )
-    const allModels = new Set([
-      ...allModelsList,
+    const pickerModels = new Set([
+      ...(configuredModelsData?.data?.items.map((model) => model.model_name) ??
+        []),
       ...currentModelsArray,
       ...pluginExtensions.flatMap((plugin) => plugin.models),
     ])
-    return [...allModels].map((model) => {
+    const allModels = new Set([...allModelsList, ...pickerModels])
+    const options = [...allModels].map((model) => {
       const target = targetBySource.get(model)
       return {
         value: model,
@@ -1075,8 +1077,15 @@ export function ChannelMutateDrawer({
           : undefined,
       }
     })
+    return {
+      modelOptions: options,
+      modelPickerOptions: options.filter((option) =>
+        pickerModels.has(option.value)
+      ),
+    }
   }, [
     allModelsList,
+    configuredModelsData,
     currentModelsArray,
     pluginExtensions,
     modelMappingGuardrail.entries,
@@ -1889,6 +1898,7 @@ export function ChannelMutateDrawer({
       form,
       confirmMissingModelMappings,
       confirmStatusCodeRisk,
+      confirmGroupBinding,
       channelMutation,
       t,
     ]
@@ -3701,11 +3711,7 @@ export function ChannelMutateDrawer({
                   </div>
                   <FormControl>
                     <MultiSelect
-                      options={modelOptions.filter((option) =>
-                        configuredModelsData?.data?.items?.some(
-                          (model) => model.model_name === option.value
-                        )
-                      )}
+                      options={modelPickerOptions}
                       selected={currentModelsArray}
                       onChange={handleModelsChange}
                       placeholder={t('Select models or add custom ones')}

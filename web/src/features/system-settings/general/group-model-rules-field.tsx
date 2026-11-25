@@ -93,7 +93,7 @@ export function GroupModelRulesField(props: GroupModelRulesFieldProps) {
             // eslint-disable-next-line react/no-array-index-key
             <div key={index} className='flex items-start gap-2'>
               <Input
-                className='w-40 shrink-0'
+                className='w-120 max-w-[60%] min-w-0 shrink-0'
                 placeholder={t('Group')}
                 value={row.group}
                 onChange={(event) =>

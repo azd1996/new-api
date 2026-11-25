@@ -270,6 +270,7 @@ describe('API keys mutate drawer Auto group integration', () => {
     await renderCreateDrawer()
 
     const customerTrigger = getControlByLabel('Customer') as HTMLButtonElement
+    expect(customerTrigger).toHaveClass('w-64', 'max-w-full')
     const user = userEvent.setup()
     await user.click(customerTrigger)
     const option = await screen.findByRole('option', {

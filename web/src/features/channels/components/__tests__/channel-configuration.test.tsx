@@ -1865,6 +1865,36 @@ test('model configuration replaces the selected-count badge at the right of the 
   ).toHaveLength(1)
 })
 
+test('the model dropdown shows channel selections and models registered only in model management', async () => {
+  editingChannel.models = 'custom-model,channel-only-model'
+  const originalGet = vi.mocked(api.get).getMockImplementation()
+  if (!originalGet) throw new Error('Missing API fixture')
+  vi.mocked(api.get).mockImplementation(async (...args) => {
+    if (args[0] === '/api/models/') {
+      return {
+        data: {
+          success: true,
+          data: { items: [{ model_name: 'registered-model' }], total: 1 },
+        },
+      }
+    }
+    return originalGet(...args)
+  })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(
+    screen.getByRole('combobox', { name: 'Select models or add custom ones' })
+  )
+
+  expect(
+    await screen.findByRole('option', { name: 'channel-only-model' })
+  ).toHaveAttribute('aria-selected', 'true')
+  expect(
+    await screen.findByRole('option', { name: 'registered-model' })
+  ).toBeVisible()
+})
+
 test('model configuration uses only the current form models and persists changes only when the channel is saved', async () => {
   editingChannel.models = 'gpt-one,manual-model,alias'
   const post = vi.spyOn(api, 'post')

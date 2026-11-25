@@ -547,7 +547,7 @@ export function ApiKeysMutateDrawer({
                   control={form.control}
                   name='customer_id'
                   render={({ field }) => (
-                    <FormItem>
+                    <FormItem className='min-w-0'>
                       <FormLabel>{t('Customer')}</FormLabel>
                       <FormControl>
                         <Select
@@ -558,8 +558,11 @@ export function ApiKeysMutateDrawer({
                             )
                           }
                         >
-                          <SelectTrigger>
-                            <SelectValue placeholder={t('No customer')} />
+                          <SelectTrigger className='w-64 max-w-full min-w-0'>
+                            <SelectValue
+                              className='min-w-0'
+                              placeholder={t('No customer')}
+                            />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value={UNBOUND_CUSTOMER_VALUE}>

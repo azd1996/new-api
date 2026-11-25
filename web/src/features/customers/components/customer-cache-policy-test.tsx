@@ -51,7 +51,6 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   testCustomerCacheOptimization,
-  type CacheOptimizationTestMode,
   type CacheOptimizationTestParams,
   type CacheOptimizationTestResponse,
   type CacheOptimizationTestResult,
