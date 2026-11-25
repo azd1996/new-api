@@ -678,6 +678,11 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		Other:            other,
 	})
 	relayInfo.PerformanceOutputTokens = int64(summary.CompletionTokens)
+	// Model-drift sample (success settlement only; failures are not counted).
+	// Labelled by the client-requested model to match the drift comparison, which
+	// is OriginModelName vs upstream/returned. No-op when metrics are disabled.
+	prommetrics.RecordDrift(relayInfo.OriginModelName, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId),
+		relayInfo.ResponseModel.Mismatch())
 	// Prometheus relay settlement sample (success). No-op when metrics disabled.
 	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
 		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota,
