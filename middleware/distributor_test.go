@@ -38,8 +38,10 @@ func TestPrepareClaudeMetadataKeepsOriginalBody(t *testing.T) {
 			prepared := common.GetContextKeyString(ctx, constant.ContextKeyClaudeMetadataUserID)
 			if metadata == "" {
 				assert.Contains(t, prepared, `"device_id":"123456"`)
+				assert.Equal(t, "legacy:first_message", common.GetContextKeyString(ctx, constant.ContextKeyClaudeMetadataUserIDSource))
 			} else {
 				assert.Empty(t, prepared, "client metadata is never synthesized")
+				assert.Empty(t, common.GetContextKeyString(ctx, constant.ContextKeyClaudeMetadataUserIDSource))
 			}
 			data, err := storage.Bytes()
 			require.NoError(t, err)

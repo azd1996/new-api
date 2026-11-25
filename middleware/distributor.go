@@ -173,7 +173,7 @@ func prepareClaudeMetadataUserIDForRouting(c *gin.Context, modelName string) err
 		return err
 	}
 	customerID, _ := common.CustomerFromContext(c)
-	out, synthesized, err := common.PrepareClaudeMetadataUserIDWithConfig(
+	out, synthesized, source, err := common.PrepareClaudeMetadataUserIDWithResolution(
 		raw,
 		common.GetContextKeyString(c, constant.ContextKeyTokenKey),
 		c.GetHeader("x-claude-code-session-id"),
@@ -191,6 +191,7 @@ func prepareClaudeMetadataUserIDForRouting(c *gin.Context, modelName string) err
 	// Preserve the original body for affinity, retries and pass-through. Relay
 	// applies this candidate only when the actual group/outbound model allows it.
 	common.SetContextKey(c, constant.ContextKeyClaudeMetadataUserID, gjson.GetBytes(out, "metadata.user_id").String())
+	common.SetContextKey(c, constant.ContextKeyClaudeMetadataUserIDSource, source)
 	return nil
 }
 

@@ -253,6 +253,37 @@ func TestSessionIdentityPrepareEmbedsCustomSession(t *testing.T) {
 	assert.Equal(t, clientBody, string(out))
 }
 
+// TestSessionIdentityPrepareReportsSource verifies the prepare helper surfaces
+// the identity source that produced the embedded session id, so relay can
+// persist provenance instead of labelling every synthesized session as a
+// content fallback.
+func TestSessionIdentityPrepareReportsSource(t *testing.T) {
+	cfg := systemIdentityConfig()
+	body := sessionIdentityTestBody("claude-opus-4-6", systemIdentityFixture("v54qx6"), "hi")
+	_, synthesized, source, err := PrepareClaudeMetadataUserIDWithResolution([]byte(body), "secret-key-XYZ789", "", "ip", "ua", nil, cfg)
+	require.NoError(t, err)
+	require.True(t, synthesized)
+	assert.Equal(t, "custom:regex(system.0.text)", source)
+
+	legacy := `{"model":"claude-x","messages":[{"role":"user","content":"hi"}]}`
+	_, synthesized, source, err = PrepareClaudeMetadataUserIDWithResolution([]byte(legacy), "secret-key-XYZ789", "", "ip", "ua", nil, nil)
+	require.NoError(t, err)
+	require.True(t, synthesized)
+	assert.Equal(t, "legacy:first_message", source)
+
+	_, synthesized, source, err = PrepareClaudeMetadataUserIDWithResolution([]byte(legacy), "secret-key-XYZ789", " sess ", "ip", "ua", nil, nil)
+	require.NoError(t, err)
+	require.True(t, synthesized)
+	assert.Equal(t, "header", source)
+
+	// A client-supplied user_id short-circuits synthesis and has no source.
+	clientBody := `{"model":"claude-x","metadata":{"user_id":"{\"session_id\":\"keep\"}"}}`
+	_, synthesized, source, err = PrepareClaudeMetadataUserIDWithResolution([]byte(clientBody), "secret-key-XYZ789", "", "ip", "ua", nil, cfg)
+	require.NoError(t, err)
+	assert.False(t, synthesized)
+	assert.Empty(t, source)
+}
+
 func TestSessionIdentityConfigClone(t *testing.T) {
 	cfg := &SessionIdentityConfig{
 		Enabled:       true,

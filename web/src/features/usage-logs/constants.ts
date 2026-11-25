@@ -83,10 +83,18 @@ export const LOG_TYPE_REQUEST_KEY_RENAME_VALUE = 'request_key_rename' as const
 /**
  * Where the relay derived a request's session id from (other.session_id_source).
  * Must match every value relay/session_id.go, relay/compatible_handler.go,
- * relay/responses_handler.go and relay/claude_handler.go can write.
+ * relay/responses_handler.go and relay/claude_handler.go can write. `custom:`
+ * is a prefix match that covers every customer session-extraction type.
  */
 export const SESSION_ID_SOURCE_OPTIONS = [
   { value: 'metadata.user_id', label: 'Claude metadata.user_id' },
+  { value: 'header', label: 'Claude session header' },
+  { value: 'custom:', label: 'Customer session extraction' },
+  { value: 'legacy:first_message', label: 'First message fallback' },
+  {
+    value: 'legacy:client_fingerprint',
+    label: 'Client fingerprint fallback',
+  },
   { value: 'content-fallback', label: 'Claude content fallback' },
   { value: 'prompt_cache_key', label: 'prompt_cache_key' },
   {

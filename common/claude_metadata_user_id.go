@@ -28,28 +28,37 @@ func PrepareClaudeMetadataUserID(jsonData []byte, apiKey, headerSessionID, clien
 // session identity extraction configuration before falling back to the legacy
 // heuristics. A nil config preserves the legacy behavior.
 func PrepareClaudeMetadataUserIDWithConfig(jsonData []byte, apiKey, headerSessionID, clientIP, userAgent string, headers http.Header, cfg *SessionIdentityConfig) ([]byte, bool, error) {
+	out, synthesized, _, err := PrepareClaudeMetadataUserIDWithResolution(jsonData, apiKey, headerSessionID, clientIP, userAgent, headers, cfg)
+	return out, synthesized, err
+}
+
+// PrepareClaudeMetadataUserIDWithResolution also reports which identity source
+// tier produced the session id (for example "header", "custom:regex(path)",
+// "legacy:first_message" or "legacy:client_fingerprint"), so callers can
+// persist the provenance next to the synthesized value.
+func PrepareClaudeMetadataUserIDWithResolution(jsonData []byte, apiKey, headerSessionID, clientIP, userAgent string, headers http.Header, cfg *SessionIdentityConfig) ([]byte, bool, string, error) {
 	if existing := gjson.GetBytes(jsonData, "metadata.user_id"); existing.Exists() && strings.TrimSpace(existing.String()) != "" {
-		return jsonData, false, nil
+		return jsonData, false, "", nil
 	}
 	if len(apiKey) < ClaudeDerivedDeviceIDLen {
-		return jsonData, false, nil
+		return jsonData, false, "", nil
 	}
 	resolution := ResolveSessionIdentity(jsonData, headerSessionID, clientIP, userAgent, apiKey, headers, cfg)
 	if resolution.SessionID == "" {
-		return jsonData, false, nil
+		return jsonData, false, "", nil
 	}
 	encoded, err := Marshal(claudeMetadataUserID{
 		DeviceID:  apiKey[len(apiKey)-ClaudeDerivedDeviceIDLen:],
 		SessionID: resolution.SessionID,
 	})
 	if err != nil {
-		return jsonData, false, err
+		return jsonData, false, "", err
 	}
 	out, err := sjson.SetBytes(jsonData, "metadata.user_id", string(encoded))
 	if err != nil {
-		return jsonData, false, err
+		return jsonData, false, "", err
 	}
-	return out, true, nil
+	return out, true, resolution.Source, nil
 }
 
 // ClaudeSessionHash reduces a trimmed session seed to 16 hex characters.

@@ -237,7 +237,7 @@ func getSessionSourceStats(userId int, filter LogFilter) (SessionSourceStats, er
 		Where("logs.type IN ?", []int{LogTypeConsume, LogTypeError}).
 		Where("logs.session_id NOT IN ?", []string{"", logSessionNotFound}).
 		Select(`
-			if(JSONExtractString(logs.other, 'session_id_source') = 'content-fallback',
+			if(JSONExtractString(logs.other, 'session_id_source') IN ('content-fallback', 'legacy:first_message'),
 				'content_fallback', 'non_content_fallback') AS category,
 			uniqExactIf(logs.session_id,
 				logs.session_id != '' AND logs.session_id != 'notfound') AS session_count,

@@ -38,18 +38,19 @@ func TestClaudeHelperRecordsFinalSession(t *testing.T) {
 	for _, tc := range []struct {
 		name, metadata, rewrite, wantSession, wantSource string
 		param                                            bool
-		prepared, disableModel                           string
+		prepared, preparedSource, disableModel           string
 		channelPassThrough, globalPassThrough            bool
 	}{
 		{name: "client", metadata: `,"metadata":{"user_id":"{\"session_id\":\"client\"}"}`, wantSession: "client", wantSource: "metadata.user_id"},
-		{name: "injected", wantSource: "content-fallback"},
-		{name: "retry only", rewrite: `{"session_id":"retry"}`, wantSession: "retry", wantSource: "content-fallback"},
+		{name: "injected", wantSource: "legacy:first_message"},
+		{name: "retry only", rewrite: `{"session_id":"retry"}`, wantSession: "retry", wantSource: "legacy:first_message"},
 		{name: "param overrides client", metadata: `,"metadata":{"user_id":"{\"session_id\":\"client\"}"}`, rewrite: `{"session_id":"param"}`, param: true, wantSession: "param", wantSource: "metadata.user_id"},
 		{name: "retry removes session", rewrite: `{}`, wantSession: sessionIDNotFound},
 		{name: "prepared reused after model mapping", prepared: `{"session_id":"prepared"}`, wantSession: "prepared", wantSource: "content-fallback"},
+		{name: "prepared source is preserved", prepared: `{"session_id":"prepared"}`, preparedSource: "custom:regex(system.0.text)", wantSession: "prepared", wantSource: "custom:regex(system.0.text)"},
 		{name: "prepared does not replace client", metadata: `,"metadata":{"user_id":"{\"session_id\":\"client\"}"}`, prepared: `{"session_id":"prepared"}`, wantSession: "client", wantSource: "metadata.user_id"},
 		{name: "disabled for actual auto group and outbound model", prepared: `{"session_id":"prepared"}`, disableModel: "claude-outbound", wantSession: sessionIDNotFound},
-		{name: "origin model disable does not block outbound", prepared: `{"session_id":"prepared"}`, disableModel: "claude-sonnet-4", wantSession: "prepared", wantSource: "content-fallback"},
+		{name: "origin model disable does not block outbound", prepared: `{"session_id":"prepared"}`, preparedSource: "header", disableModel: "claude-sonnet-4", wantSession: "prepared", wantSource: "header"},
 		{name: "channel pass through", prepared: `{"session_id":"prepared"}`, channelPassThrough: true},
 		{name: "global pass through", prepared: `{"session_id":"prepared"}`, globalPassThrough: true},
 	} {
@@ -71,6 +72,7 @@ func TestClaudeHelperRecordsFinalSession(t *testing.T) {
 			common.SetContextKey(c, constant.ContextKeyChannelKey, "upstream-test")
 			common.SetContextKey(c, constant.ContextKeyTokenKey, testAPIKey)
 			common.SetContextKey(c, constant.ContextKeyClaudeMetadataUserID, tc.prepared)
+			common.SetContextKey(c, constant.ContextKeyClaudeMetadataUserIDSource, tc.preparedSource)
 			common.SetContextKey(c, constant.ContextKeyUsingGroup, "auto")
 			common.SetContextKey(c, constant.ContextKeyAutoGroup, "actual-group")
 			common.SetContextKey(c, constant.ContextKeyChannelModelMapping, `{"claude-sonnet-4":"claude-outbound"}`)
@@ -159,7 +161,7 @@ func TestFillClaudeMetadataUserID(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := fillClaudeMetadataUserID([]byte(tc.body), tc.apiKey, "", testClientIP, testUserAgent, nil, nil)
+			out, _, err := fillClaudeMetadataUserID([]byte(tc.body), tc.apiKey, "", testClientIP, testUserAgent, nil, nil)
 			require.NoError(t, err)
 
 			userID := gjson.GetBytes(out, "metadata.user_id")
@@ -187,7 +189,7 @@ func TestFillClaudeMetadataUserID(t *testing.T) {
 // generated metadata.user_id blob.
 func innerSessionID(t *testing.T, body, header string) string {
 	t.Helper()
-	out, err := fillClaudeMetadataUserID([]byte(body), testAPIKey, header, testClientIP, testUserAgent, nil, nil)
+	out, _, err := fillClaudeMetadataUserID([]byte(body), testAPIKey, header, testClientIP, testUserAgent, nil, nil)
 	require.NoError(t, err)
 	return gjson.Parse(gjson.GetBytes(out, "metadata.user_id").String()).Get("session_id").String()
 }

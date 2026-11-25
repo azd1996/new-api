@@ -163,12 +163,14 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		// metadata_injection_disable_setting. Synthesizes a Claude Code-style
 		// metadata.user_id (device_id = API key suffix + embedded derived
 		// session_id) when the client omitted user_id; clients that already set
-		// user_id (e.g. Claude Code) are left untouched.
+		// user_id (e.g. real Claude Code) are left untouched.
+		metadataSource := ""
 		if !operation_setting.MatchGroupModel(operation_setting.GetMetadataInjectionDisableSetting().Rules, claudeGroup, claudeModel) {
 			if prepared := common.GetContextKeyString(c, constant.ContextKeyClaudeMetadataUserID); !clientHadClaudeUserID && prepared != "" {
 				jsonData, err = sjson.SetBytes(jsonData, "metadata.user_id", prepared)
+				metadataSource = common.GetContextKeyString(c, constant.ContextKeyClaudeMetadataUserIDSource)
 			} else {
-				jsonData, err = fillClaudeMetadataUserID(
+				jsonData, metadataSource, err = fillClaudeMetadataUserID(
 					jsonData,
 					common.GetContextKeyString(c, constant.ContextKeyTokenKey),
 					c.GetHeader("x-claude-code-session-id"),
@@ -287,6 +289,9 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			claudeSource = "metadata.user_id"
 			if !clientHadClaudeUserID {
 				claudeSource = "content-fallback"
+				if metadataSource != "" {
+					claudeSource = metadataSource
+				}
 			}
 		}
 		recordRequestSessionID(c, claudeSID, claudeSource)
@@ -442,9 +447,10 @@ type claudeMetadataUserID struct {
 // schema only allows user_id and upstream rejects extra metadata keys. The body
 // is returned unchanged when a non-empty user_id is already present (e.g. real
 // Claude Code, which carries its own session) or when no key suffix is available.
-func fillClaudeMetadataUserID(jsonData []byte, apiKey, headerSessionID, clientIP, userAgent string, headers http.Header, sessionIdentity *common.SessionIdentityConfig) ([]byte, error) {
-	out, _, err := common.PrepareClaudeMetadataUserIDWithConfig(jsonData, apiKey, headerSessionID, clientIP, userAgent, headers, sessionIdentity)
-	return out, err
+// The second return value labels which identity source produced the session.
+func fillClaudeMetadataUserID(jsonData []byte, apiKey, headerSessionID, clientIP, userAgent string, headers http.Header, sessionIdentity *common.SessionIdentityConfig) ([]byte, string, error) {
+	out, _, source, err := common.PrepareClaudeMetadataUserIDWithResolution(jsonData, apiKey, headerSessionID, clientIP, userAgent, headers, sessionIdentity)
+	return out, source, err
 }
 
 // claudeSessionHash reduces a session seed to a 16-char xxhash64 hex string.

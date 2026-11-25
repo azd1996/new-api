@@ -5,6 +5,12 @@
 
 > 说明：本文件在前端构建时被打包进「系统设置 → 运维 → 维护」页。修改后需重新执行 `bun run build` 才会在页面生效。
 
+## [2026-11-25]
+
+### 修复 Fixed
+
+- **会话 ID 来源标记错误（客户级会话提取被标为内容兜底）**：Claude 请求在客户端未自带 `metadata.user_id` 时，`other.session_id_source` 一律硬编码为 `content-fallback`，即使会话 ID 实际来自客户级配置的会话提取（`custom:<type>`）或 `x-claude-code-session-id` 请求头。现在来源贯穿整条链路：中间件预计算注入值时把 `ResolveSessionIdentity` 返回的来源写入 context，relay 复用注入值或现场合成时读取/返回真实来源并落日志。新日志的取值包括 `metadata.user_id`、`header`、`custom:<type>`、`legacy:first_message`、`legacy:client_fingerprint`；历史 `content-fallback` 值保留兼容。使用前置 newapi 绑定 API Key→客户后，客户级会话提取结果不再被误标，并可在通用日志按来源筛选（筛选栏新增四个选项，`custom:` 为前缀匹配）。会话缓存汇总的「内容兜底 vs 非内容兜底」口径同步把 `legacy:first_message` 计入内容兜底（`legacy:client_fingerprint` 与 `custom:*` 计入非内容兜底）。实现见 `common/claude_metadata_user_id.go`、`middleware/distributor.go`、`relay/claude_handler.go`、`model/cache_skeleton_analysis.go`。
+
 ## [2026-11-24]
 
 ### 新增 Added
