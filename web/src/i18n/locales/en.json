@@ -8152,6 +8152,9 @@
     "No session ID resolved": "No session ID resolved",
     "No source matched and fallback is disabled": "No source matched and fallback is disabled",
     "Request model does not match the configured model prefixes": "Request model does not match the configured model prefixes",
-    "Session ID could not be resolved": "Session ID could not be resolved"
+    "Session ID could not be resolved": "Session ID could not be resolved",
+    "Override value validation": "Override value validation",
+    "Source validation regex (empty disables validation)": "Source validation regex (empty disables validation)",
+    "Omit system prefix for custom sources": "Omit system prefix for custom sources"
   }
 }

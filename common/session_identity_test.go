@@ -192,10 +192,43 @@ func TestExtractSessionIdentitySources(t *testing.T) {
 		long := strings.Repeat("a", MaxSessionIdentityValueLength+1)
 		body := fmt.Sprintf(`{"a":%q}`, long)
 		value, _ := ExtractSessionIdentity(&SessionIdentityConfig{
-			Sources: []SessionIdentitySource{{Type: SessionIdentitySourceGjson, Path: "a"}},
+			Sources: []SessionIdentitySource{{Type: SessionIdentitySourceRegex, Path: "a", Pattern: `.+`}},
 		}, []byte(body), nil)
 		assert.Empty(t, value)
 	})
+}
+
+func TestSessionIdentityLongGJSONFallback(t *testing.T) {
+	noValidation := ""
+	cfg := systemIdentityConfig()
+	cfg.Sources = append(cfg.Sources, SessionIdentitySource{
+		Type: SessionIdentitySourceGjson, Path: "system.0.text", ValueRegex: &noValidation,
+	})
+	text := "[bad marker-fixed-0] " + strings.Repeat("story memory\n", 30)
+	body := []byte(sessionIdentityTestBody("claude-x", []string{text}, "latest turn"))
+	got := ResolveSessionIdentity(body, "", "ip", "ua", "key", nil, cfg)
+	assert.Equal(t, "custom:gjson(system.0.text)", got.Source)
+	assert.Empty(t, got.RawValue)
+	assert.Equal(t, ClaudeSessionHash("claude-x\x1f\x1f"+strings.TrimSpace(text)), got.SessionID)
+	assert.Equal(t, got.SessionID, ClaudeSessionHash(DeriveClaudeSessionSeedWithConfig(body, "", "ip", "ua", "key", nil, cfg)))
+}
+
+func TestSessionIdentityCustomSourceCanIgnoreSystemPrefix(t *testing.T) {
+	shortIDRegex := `^valid-id$`
+	cfg := systemIdentityConfig()
+	cfg.Sources[1].ValueRegex = &shortIDRegex
+	cfg.ValueRegex = `^different-id$`
+	first := []byte(sessionIdentityTestBody("claude-x", []string{"[valid-id-fixed-0] memory A"}, "first"))
+	second := []byte(sessionIdentityTestBody("claude-x", []string{"[valid-id-fixed-0] memory B"}, "second"))
+	legacy := ResolveSessionIdentity(first, "", "", "", "", nil, cfg)
+	require.Equal(t, "custom:regex(system.0.text)", legacy.Source)
+	assert.Equal(t, ClaudeSessionHash("claude-x\x1f[valid-id-fixed-0] memory A\x1f"+
+		NormalizeSessionIdentityValue("valid-id", cfg.Transform)), legacy.SessionID)
+
+	cfg.OmitSystemPrefix = true
+	got := ResolveSessionIdentity(first, "", "", "", "", nil, cfg)
+	assert.Equal(t, got.SessionID, ResolveSessionIdentity(second, "", "", "", "", nil, cfg).SessionID)
+	assert.NotEqual(t, legacy.SessionID, got.SessionID)
 }
 
 func TestSessionIdentityOnEmptyPolicies(t *testing.T) {

@@ -52,6 +52,7 @@ export function getCustomerFormSchema(t: TFunction) {
     path: z.string(),
     json_string_field: z.string(),
     pattern: z.string(),
+    value_regex: z.string().optional(),
     capture_group: z.number().int().min(0),
   })
   const sessionIdentity = z.object({
@@ -60,6 +61,7 @@ export function getCustomerFormSchema(t: TFunction) {
     sources: z.array(sessionIdentitySource),
     transform: z.string(),
     value_regex: z.string(),
+    omit_system_prefix: z.boolean().optional(),
     on_empty: z.string(),
     disable_first_message_fallback: z.boolean(),
     ttl_seconds: z.number().int().min(0),

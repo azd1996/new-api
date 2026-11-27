@@ -67,6 +67,7 @@ const sessionIdentitySourceSchema = z.object({
     .string()
     .nullish()
     .transform((value) => value ?? ''),
+  value_regex: z.string().optional(),
   capture_group: z
     .number()
     .int()
@@ -93,6 +94,7 @@ export const sessionIdentitySchema = z.object({
     .string()
     .nullish()
     .transform((value) => value ?? ''),
+  omit_system_prefix: z.boolean().optional(),
   on_empty: z
     .string()
     .nullish()

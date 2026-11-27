@@ -8152,6 +8152,9 @@
     "No session ID resolved": "未解析到会话 ID",
     "No source matched and fallback is disabled": "没有来源匹配，且已禁用兜底",
     "Request model does not match the configured model prefixes": "请求模型与配置的模型前缀不匹配",
-    "Session ID could not be resolved": "无法解析会话 ID"
+    "Session ID could not be resolved": "无法解析会话 ID",
+    "Override value validation": "覆盖值校验规则",
+    "Source validation regex (empty disables validation)": "来源值校验正则（留空则不校验）",
+    "Omit system prefix for custom sources": "自定义来源命中时忽略系统提示词前缀"
   }
 }

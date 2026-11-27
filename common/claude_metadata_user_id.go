@@ -81,9 +81,12 @@ func DeriveClaudeSessionSeed(jsonData []byte, headerSessionID, clientIP, userAge
 // DeriveClaudeSessionSeedWithConfig consults a customer's session identity
 // extraction configuration before the legacy heuristics.
 func DeriveClaudeSessionSeedWithConfig(jsonData []byte, headerSessionID, clientIP, userAgent, apiKeyID string, headers http.Header, cfg *SessionIdentityConfig) string {
-	conversation, _, _ := claudeConversationSeed(jsonData, headerSessionID, clientIP, userAgent, apiKeyID, headers, cfg)
+	conversation, _, _, omitSystemPrefix := claudeConversationSeed(jsonData, headerSessionID, clientIP, userAgent, apiKeyID, headers, cfg)
 	model := gjson.GetBytes(jsonData, "model").String()
-	systemPrefix := claudeStableSystemPrefix(jsonData)
+	systemPrefix := ""
+	if !omitSystemPrefix {
+		systemPrefix = claudeStableSystemPrefix(jsonData)
+	}
 	if model == "" && systemPrefix == "" && conversation == "" {
 		return ""
 	}
@@ -98,9 +101,12 @@ func ResolveSessionIdentity(jsonData []byte, headerSessionID, clientIP, userAgen
 	if existing := gjson.GetBytes(jsonData, "metadata.user_id"); existing.Exists() && strings.TrimSpace(existing.String()) != "" {
 		return SessionIdentityResolution{Source: "client", RawValue: truncateSessionIdentityValue(existing.String())}
 	}
-	conversation, source, raw := claudeConversationSeed(jsonData, headerSessionID, clientIP, userAgent, apiKeyID, headers, cfg)
+	conversation, source, raw, omitSystemPrefix := claudeConversationSeed(jsonData, headerSessionID, clientIP, userAgent, apiKeyID, headers, cfg)
 	model := gjson.GetBytes(jsonData, "model").String()
-	systemPrefix := claudeStableSystemPrefix(jsonData)
+	systemPrefix := ""
+	if !omitSystemPrefix {
+		systemPrefix = claudeStableSystemPrefix(jsonData)
+	}
 	if conversation == "" && cfg != nil && cfg.Matches(model) && cfg.OnEmpty == SessionIdentityOnEmptyNone {
 		// on_empty=none must not synthesize an identity from the model and
 		// system prefix alone.
@@ -122,35 +128,40 @@ func ResolveSessionIdentity(jsonData []byte, headerSessionID, clientIP, userAgen
 // then the first message (unless disabled), then a request-wide fallback. The
 // returned raw value is only populated for custom/header sources; legacy
 // sources would otherwise leak prompt text into logs.
-func claudeConversationSeed(jsonData []byte, headerSessionID, clientIP, userAgent, apiKeyID string, headers http.Header, cfg *SessionIdentityConfig) (string, string, string) {
+func claudeConversationSeed(jsonData []byte, headerSessionID, clientIP, userAgent, apiKeyID string, headers http.Header, cfg *SessionIdentityConfig) (value, source, preview string, omitSystemPrefix bool) {
 	if s := strings.TrimSpace(headerSessionID); s != "" {
-		return s, "header", truncateSessionIdentityValue(s)
+		return s, "header", truncateSessionIdentityValue(s), false
 	}
 	model := gjson.GetBytes(jsonData, "model").String()
 	if cfg != nil && cfg.Matches(model) {
 		raw, source := ExtractSessionIdentity(cfg, jsonData, headers)
 		if raw != "" {
-			return NormalizeSessionIdentityValue(raw, cfg.Transform), "custom:" + source, truncateSessionIdentityValue(raw)
+			if len(raw) > MaxSessionIdentityValueLength {
+				// Only GJSON accepts long values. Hash the text once as part
+				// of the final seed, without a prompt preview or system prefix.
+				return raw, "custom:" + source, "", true
+			}
+			return NormalizeSessionIdentityValue(raw, cfg.Transform), "custom:" + source, truncateSessionIdentityValue(raw), cfg.OmitSystemPrefix
 		}
 		switch cfg.OnEmpty {
 		case SessionIdentityOnEmptyNone:
-			return "", "", ""
+			return "", "", "", false
 		case SessionIdentityOnEmptyStable:
 			// Skip the rotating first-message heuristic; use the fingerprint.
 		default:
 			if !cfg.DisableFirstMessageFallback {
 				if s := claudeFirstMessageSeed(jsonData); strings.TrimSpace(s) != "" {
-					return apiKeyID + "\x1f" + s, "legacy:first_message", ""
+					return apiKeyID + "\x1f" + s, "legacy:first_message", "", false
 				}
 			}
 		}
 	} else if s := claudeFirstMessageSeed(jsonData); strings.TrimSpace(s) != "" {
-		return apiKeyID + "\x1f" + s, "legacy:first_message", ""
+		return apiKeyID + "\x1f" + s, "legacy:first_message", "", false
 	}
 	if fingerprint := clientIP + userAgent + apiKeyID; fingerprint != "" {
-		return fingerprint, "legacy:client_fingerprint", ""
+		return fingerprint, "legacy:client_fingerprint", "", false
 	}
-	return "", "", ""
+	return "", "", "", false
 }
 
 // claudeStableSystemPrefix includes system blocks through the first ephemeral

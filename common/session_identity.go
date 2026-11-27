@@ -51,6 +51,9 @@ const (
 // cannot push a whole prompt into session/affinity cache keys.
 const MaxSessionIdentityValueLength = 256
 
+// Long GJSON values are eligible for the final session hash only.
+const maxSessionIdentityGJSONBytes = 1 << 20
+
 // SessionIdentitySource describes one place a session id can be extracted from.
 type SessionIdentitySource struct {
 	Type string `json:"type"`
@@ -67,6 +70,8 @@ type SessionIdentitySource struct {
 	Pattern string `json:"pattern,omitempty"`
 	// CaptureGroup selects which capture group to use (0 = whole match).
 	CaptureGroup int `json:"capture_group,omitempty"`
+	// Nil inherits the customer regex. An explicit empty string disables validation.
+	ValueRegex *string `json:"value_regex,omitempty"`
 }
 
 // SessionIdentityConfig is the per-customer extraction configuration.
@@ -76,7 +81,9 @@ type SessionIdentityConfig struct {
 	Sources       []SessionIdentitySource `json:"sources"`
 	Transform     string                  `json:"transform"`
 	ValueRegex    string                  `json:"value_regex"`
-	OnEmpty       string                  `json:"on_empty"`
+	// OmitSystemPrefix applies only when a custom source wins.
+	OmitSystemPrefix bool   `json:"omit_system_prefix,omitempty"`
+	OnEmpty          string `json:"on_empty"`
 	// DisableFirstMessageFallback skips the legacy messages[0] heuristic for
 	// clients that send only the latest turn.
 	DisableFirstMessageFallback bool `json:"disable_first_message_fallback"`
@@ -112,6 +119,7 @@ func (c *SessionIdentityConfig) Clone() *SessionIdentityConfig {
 		Enabled:                     c.Enabled,
 		Transform:                   c.Transform,
 		ValueRegex:                  c.ValueRegex,
+		OmitSystemPrefix:            c.OmitSystemPrefix,
 		OnEmpty:                     c.OnEmpty,
 		DisableFirstMessageFallback: c.DisableFirstMessageFallback,
 		TTLSeconds:                  c.TTLSeconds,
@@ -133,6 +141,12 @@ func (c *SessionIdentityConfig) Clone() *SessionIdentityConfig {
 	}
 	if len(c.Sources) > 0 {
 		out.Sources = append([]SessionIdentitySource(nil), c.Sources...)
+		for i, source := range out.Sources {
+			if source.ValueRegex != nil {
+				pattern := *source.ValueRegex
+				out.Sources[i].ValueRegex = &pattern
+			}
+		}
 	}
 	return out
 }
@@ -248,11 +262,19 @@ func ExtractSessionIdentity(cfg *SessionIdentityConfig, body []byte, headers htt
 			}
 			value = strings.TrimSpace(match[source.CaptureGroup])
 		}
-		if value == "" || len(value) > MaxSessionIdentityValueLength {
+		maxBytes := MaxSessionIdentityValueLength
+		if source.Type == SessionIdentitySourceGjson {
+			maxBytes = maxSessionIdentityGJSONBytes
+		}
+		if value == "" || len(value) > maxBytes {
 			continue
 		}
-		if cfg.ValueRegex != "" {
-			re, ok := compileSessionIdentityRegex(cfg.ValueRegex)
+		pattern := cfg.ValueRegex
+		if source.ValueRegex != nil {
+			pattern = *source.ValueRegex
+		}
+		if pattern != "" {
+			re, ok := compileSessionIdentityRegex(pattern)
 			if !ok || re == nil || !re.MatchString(value) {
 				continue
 			}

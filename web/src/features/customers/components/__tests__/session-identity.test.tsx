@@ -143,6 +143,36 @@ it('customizes and saves an enabled regex source with default policies', async (
   })
 })
 
+it('saves an explicit empty validation override and the system prefix preference', async () => {
+  const user = userEvent.setup()
+  const onSave = vi.fn()
+  render(<SessionIdentityForm onSave={onSave} />)
+
+  await user.click(
+    screen.getByRole('button', { name: 'Customize session identity' })
+  )
+  await user.click(screen.getByRole('switch', { name: 'Enable extraction' }))
+  await user.click(screen.getByRole('button', { name: 'Add source' }))
+  await user.selectOptions(screen.getByLabelText('Source type'), 'gjson')
+  await user.click(
+    screen.getByRole('switch', { name: 'Override value validation' })
+  )
+  await user.click(
+    screen.getByRole('switch', {
+      name: 'Omit system prefix for custom sources',
+    })
+  )
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+  expect(onSave.mock.calls[0][0]).toMatchObject({
+    session_identity: {
+      omit_system_prefix: true,
+      sources: [{ type: 'gjson', value_regex: '' }],
+    },
+  })
+})
+
 it('runs the dry run on pasted request bodies and reports stability', async () => {
   testSessionIdentityMock.mockResolvedValue({
     results: [

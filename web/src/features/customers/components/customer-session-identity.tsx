@@ -300,6 +300,42 @@ export function CustomerSessionIdentity(props: CustomerSessionIdentityProps) {
                         </div>
                       </div>
                     )}
+                    <div className='space-y-2'>
+                      <div className='flex items-center gap-2'>
+                        <Switch
+                          id={`source-${index}-override-validation`}
+                          checked={source.value_regex !== undefined}
+                          onCheckedChange={(checked) =>
+                            updateSource(index, {
+                              value_regex: checked
+                                ? policy.value_regex
+                                : undefined,
+                            })
+                          }
+                        />
+                        <Label htmlFor={`source-${index}-override-validation`}>
+                          {t('Override value validation')}
+                        </Label>
+                      </div>
+                      {source.value_regex !== undefined && (
+                        <div className='space-y-1'>
+                          <Label htmlFor={`source-${index}-value-regex`}>
+                            {t(
+                              'Source validation regex (empty disables validation)'
+                            )}
+                          </Label>
+                          <Input
+                            id={`source-${index}-value-regex`}
+                            value={source.value_regex}
+                            onChange={(event) =>
+                              updateSource(index, {
+                                value_regex: event.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -383,6 +419,19 @@ export function CustomerSessionIdentity(props: CustomerSessionIdentityProps) {
                     }
                   />
                 </div>
+              </div>
+
+              <div className='flex items-center justify-between gap-3 rounded-md border p-3'>
+                <Label htmlFor='session-identity-omit-system-prefix'>
+                  {t('Omit system prefix for custom sources')}
+                </Label>
+                <Switch
+                  id='session-identity-omit-system-prefix'
+                  checked={policy.omit_system_prefix ?? false}
+                  onCheckedChange={(checked) =>
+                    setPolicy({ ...policy, omit_system_prefix: checked })
+                  }
+                />
               </div>
 
               <div className='flex items-center justify-between gap-3 rounded-md border p-3'>
