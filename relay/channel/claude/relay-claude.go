@@ -132,6 +132,7 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeResponse.Type == "message_start" && claudeResponse.Message != nil {
 		info.ObserveResponseModel(claudeResponse.Message.Model)
 	}
+	info.ObserveClaudeStreamUsage(&claudeResponse)
 	if claudeResponse.Message != nil {
 		warnClaudeStringMessage(c, gjson.Get(data, "message"))
 	}

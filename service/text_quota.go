@@ -683,6 +683,14 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	// is OriginModelName vs upstream/returned. No-op when metrics are disabled.
 	prommetrics.RecordDrift(relayInfo.OriginModelName, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId),
 		relayInfo.ResponseModel.Mismatch())
+	// Claude stream usage check sample: only streams that delivered both
+	// message_start and message_delta are counted. Reporting only; the charge
+	// above is unchanged. No-op when metrics are disabled.
+	if relayInfo.StreamUsageCheck.Checked() {
+		tampered, unreported := relayInfo.StreamUsageCheck.Anomalies()
+		prommetrics.RecordUsageCheck(relayInfo.OriginModelName, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId),
+			len(tampered) > 0, len(unreported) > 0)
+	}
 	// Prometheus relay settlement sample (success). No-op when metrics disabled.
 	prommetrics.RecordRelay(logModel, relayInfo.UsingGroup, strconv.Itoa(relayInfo.ChannelId), "success",
 		summary.PromptTokens, summary.CompletionTokens, float64(summary.UseTimeSeconds), summary.Quota,

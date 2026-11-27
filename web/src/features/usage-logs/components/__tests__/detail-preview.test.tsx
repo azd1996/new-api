@@ -370,6 +370,38 @@ test('quota saturation remains first and only billing adds to the counter', () =
 })
 
 test.each([true, false])(
+  'a changed input usage report is flagged and detailed only for admin=%s',
+  async (isAdmin) => {
+    const preview = renderPreview(
+      {
+        model_price: 0.25,
+        admin_info: {
+          usage_check: {
+            start: { input_tokens: 8, cache_read_input_tokens: 50 },
+            delta: { input_tokens: 9 },
+            tampered: ['input_tokens'],
+            unreported: ['cache_read_input_tokens'],
+          },
+        },
+      },
+      isAdmin
+    )
+    if (!isAdmin) {
+      expect(preview.textContent).toBe('Per-call · $0.25')
+      fireEvent.click(preview)
+      const dialog = within(await screen.findByRole('dialog'))
+      expect(dialog.queryByText('input_tokens: 8 → 9')).not.toBeInTheDocument()
+      return
+    }
+    expect(preview.textContent).toBe('Input usage changed+2')
+    fireEvent.click(preview)
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByText('input_tokens: 8 → 9')).toBeVisible()
+    expect(dialog.getByText('cache_read_input_tokens: 50 → 0')).toBeVisible()
+  }
+)
+
+test.each([true, false])(
   'plugin information in the opened dialog respects admin=%s',
   async (isAdmin) => {
     const preview = renderPreview(

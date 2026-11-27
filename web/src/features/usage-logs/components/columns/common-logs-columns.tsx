@@ -129,6 +129,15 @@ function buildDetailSegments(
   if (isAdmin && other?.admin_info?.quota_saturation) {
     adminSegments.push({ text: t('Quota clamped'), danger: true })
   }
+  // Same treatment for a Claude stream whose message_delta input usage does
+  // not match message_start: admin-only, first, in danger styling.
+  const usageCheck = isAdmin ? other?.admin_info?.usage_check : undefined
+  if (usageCheck?.tampered?.length) {
+    adminSegments.push({ text: t('Input usage changed'), danger: true })
+  }
+  if (usageCheck?.unreported?.length) {
+    adminSegments.push({ text: t('Input usage not reported'), danger: true })
+  }
   const retryOverride = other?.admin_info?.retry_override
   if (isAdmin && log.type === 5 && retryOverride) {
     segments.push({ text: t('Retry override matched'), danger: true })
