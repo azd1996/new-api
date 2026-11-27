@@ -32,6 +32,14 @@ var (
 	customerStatQuota *prometheus.CounterVec
 	profitQuota       *prometheus.GaugeVec
 
+	// Model-drift counters over settled (successful) relay requests. requests is
+	// the denominator (every settled request), mismatch the numerator (upstream
+	// returned a model matching neither the requested nor upstream model). The
+	// rate is derived in the metrics backend as mismatch/requests. Labelled by the
+	// client-requested model, group and channel; failures are not counted.
+	driftRequests *prometheus.CounterVec
+	driftMismatch *prometheus.CounterVec
+
 	// errorHighCardLabels gates the high-cardinality error labels (model and
 	// customer). When false their values are blanked so a large model/customer
 	// space cannot explode the error metric's series count.
@@ -138,10 +146,18 @@ func Init() {
 			Name: "newapi_profit_quota",
 			Help: "Reporting-only cumulative profit in quota units (customer-discounted minus channel-discounted) over customer-bearing requests; may decrease and resets on restart.",
 		}, []string{"model", "group", "channel"})
+		driftRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "newapi_drift_requests_total",
+			Help: "Total settled relay requests scanned for model drift (denominator), by client-requested model, group and channel.",
+		}, []string{"model", "group", "channel"})
+		driftMismatch = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "newapi_drift_mismatch_total",
+			Help: "Settled relay requests whose upstream returned model matched neither the requested nor upstream model (numerator), by client-requested model, group and channel.",
+		}, []string{"model", "group", "channel"})
 		registry.MustRegister(httpRequests, httpDuration, relayRequests,
 			promptTokens, completionTokens, relayDuration, relayTtft, relayTtftUpstreamDelta, relayDurationUpstreamDelta,
 			proxyTtft, proxyTokenSpeed, proxyConnect, quotaUsed, quotaPerUnit, errorsTotal,
-			channelStatQuota, customerStatQuota, profitQuota)
+			channelStatQuota, customerStatQuota, profitQuota, driftRequests, driftMismatch)
 	})
 }
 
@@ -281,6 +297,22 @@ func RecordStatAmounts(model, group, channel string, hasCustomer bool, channelSt
 			customerStatQuota.WithLabelValues(model, group, channel).Add(float64(customerStat))
 		}
 		profitQuota.WithLabelValues(model, group, channel).Add(float64(customerStat - channelStat))
+	}
+}
+
+// RecordDrift records one settled relay request for the model-drift counters.
+// model is the client-requested model, group the group used and channel the
+// upstream channel id. requests is always incremented; mismatch is additionally
+// incremented when the upstream returned model matched neither the requested nor
+// upstream model. Failed requests are not recorded (call this only on the success
+// settlement path). No-op when metrics are disabled.
+func RecordDrift(model, group, channel string, mismatch bool) {
+	if registry == nil {
+		return
+	}
+	driftRequests.WithLabelValues(model, group, channel).Inc()
+	if mismatch {
+		driftMismatch.WithLabelValues(model, group, channel).Inc()
 	}
 }
 

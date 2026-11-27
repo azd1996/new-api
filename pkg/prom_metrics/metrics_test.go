@@ -56,3 +56,34 @@ func TestRecordRelayUpstreamDelta(t *testing.T) {
 	assert.Equal(t, uint64(1), duration.GetSampleCount())
 	assert.InDelta(t, 3.4-2.6, duration.GetSampleSum(), 1e-9)
 }
+
+func TestRecordDrift(t *testing.T) {
+	Init()
+
+	// Two settled requests on the same model/group/channel, one of them a mismatch.
+	RecordDrift("claude-3-7-sonnet", "default", "7", false)
+	RecordDrift("claude-3-7-sonnet", "default", "7", true)
+
+	counter := func(name string) float64 {
+		families, err := registry.Gather()
+		require.Nil(t, err)
+		for _, mf := range families {
+			if mf.GetName() != name {
+				continue
+			}
+			require.Len(t, mf.Metric, 1)
+			labels := map[string]string{}
+			for _, lp := range mf.Metric[0].GetLabel() {
+				labels[lp.GetName()] = lp.GetValue()
+			}
+			assert.Equal(t, "claude-3-7-sonnet", labels["model"])
+			assert.Equal(t, "default", labels["group"])
+			assert.Equal(t, "7", labels["channel"])
+			return mf.Metric[0].GetCounter().GetValue()
+		}
+		return 0
+	}
+
+	assert.Equal(t, float64(2), counter("newapi_drift_requests_total"))
+	assert.Equal(t, float64(1), counter("newapi_drift_mismatch_total"))
+}
