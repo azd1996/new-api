@@ -105,6 +105,7 @@ import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
 import { CacheSkeletonDialog } from './cache-skeleton-dialog'
 import { DetailRow, DetailSection } from './log-detail-layout'
+import { UsageCheckDetails } from './usage-check-details'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
 // to its i18n label key for display in the audit details.
@@ -1139,6 +1140,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
               mono
             />
           </DetailSection>
+        )}
+        {props.isAdmin && other?.admin_info?.usage_check && (
+          <UsageCheckDetails check={other.admin_info.usage_check} />
         )}
 
         {/* Reject reason (admin only) */}

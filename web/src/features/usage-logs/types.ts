@@ -144,6 +144,17 @@ export interface ToolSurchargeItem {
   price: number
 }
 
+export type UsageCheckField =
+  | 'input_tokens'
+  | 'cache_creation_input_tokens'
+  | 'cache_read_input_tokens'
+  | 'ephemeral_5m_input_tokens'
+  | 'ephemeral_1h_input_tokens'
+
+// Input side of one usage report in a Claude stream. A field the report left
+// out is absent here and counts as 0.
+export type UsageCheckReport = Partial<Record<UsageCheckField, number>>
+
 export interface LogOtherData {
   admin_info?: {
     request_policy?: PolicyEvent[]
@@ -173,6 +184,16 @@ export interface LogOtherData {
       kind: 'overflow' | 'underflow' | 'nan'
       original: number
       clamped: number
+    }
+    // Claude stream usage check marker: set when message_delta reported input
+    // usage that differs from message_start (tampered) or left out input usage
+    // that message_start reported (unreported). Diagnostic only; billing is
+    // unchanged. Admin-only (nested under admin_info).
+    usage_check?: {
+      start: UsageCheckReport
+      delta: UsageCheckReport
+      tampered?: UsageCheckField[] | null
+      unreported?: UsageCheckField[] | null
     }
     // Reject / intercept reason (admin only)
     reject_reason?: string

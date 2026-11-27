@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/tokenkit"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -529,4 +530,83 @@ func TestClaudeResponsePassesInputTransformationsThrough(t *testing.T) {
 		transformations + `,"usage":{"input_tokens":5,"output_tokens":1}}}`
 	require.Nil(t, HandleStreamResponseData(c, info, &ClaudeResponseInfo{Usage: &dto.Usage{}}, event))
 	assert.Contains(t, w.Body.String(), "data: "+event+"\n")
+}
+
+// Input usage is final at message_start, so message_delta must repeat it
+// exactly. A difference is only reported: the stream is still relayed and the
+// client still receives the upstream message_delta.
+func TestClaudeStreamUsageCheckFlagsChangedInputUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, startUsage, delta    string // no delta: the stream broke before message_delta
+		wantTampered, wantUnreport []string
+	}{
+		{name: "identical reports", startUsage: `{"input_tokens":8,"cache_creation_input_tokens":100,"cache_read_input_tokens":50,"output_tokens":1}`,
+			delta: `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":8,"cache_creation_input_tokens":100,"cache_read_input_tokens":50,"output_tokens":13}}`},
+		{name: "one token more", startUsage: `{"input_tokens":8,"output_tokens":1}`,
+			delta:        `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":9,"output_tokens":13}}`,
+			wantTampered: []string{"input_tokens"}},
+		{name: "fewer tokens", startUsage: `{"input_tokens":1000,"output_tokens":1}`,
+			delta:        `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":500,"output_tokens":13}}`,
+			wantTampered: []string{"input_tokens"}},
+		{name: "cache fields changed", startUsage: `{"input_tokens":8,"cache_creation_input_tokens":100,"cache_read_input_tokens":5000,"output_tokens":1}`,
+			delta:        `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":8,"cache_creation_input_tokens":5000,"cache_read_input_tokens":100,"output_tokens":13}}`,
+			wantTampered: []string{"cache_creation_input_tokens", "cache_read_input_tokens"}},
+		{name: "start reports nothing", startUsage: `{"input_tokens":0,"output_tokens":0}`,
+			delta:        `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":50,"output_tokens":13}}`,
+			wantTampered: []string{"input_tokens"}},
+		{name: "delta leaves out input usage", startUsage: `{"input_tokens":100,"cache_read_input_tokens":50,"output_tokens":1}`,
+			delta:        `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":13}}`,
+			wantUnreport: []string{"input_tokens", "cache_read_input_tokens"}},
+		{name: "delta zeroes input usage", startUsage: `{"input_tokens":100,"output_tokens":1}`,
+			delta:        `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":13}}`,
+			wantUnreport: []string{"input_tokens"}},
+		{name: "delta without usage", startUsage: `{"input_tokens":100,"output_tokens":1}`,
+			delta:        `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
+			wantUnreport: []string{"input_tokens"}},
+		{name: "breakdown absent from delta is not compared", startUsage: `{"input_tokens":8,"cache_creation_input_tokens":200,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":200},"output_tokens":1}`,
+			delta: `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":8,"cache_creation_input_tokens":200,"output_tokens":13}}`},
+		{name: "breakdown in delta is compared", startUsage: `{"input_tokens":8,"cache_creation_input_tokens":200,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":200},"output_tokens":1}`,
+			delta:        `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":8,"cache_creation_input_tokens":200,"cache_creation":{"ephemeral_5m_input_tokens":200,"ephemeral_1h_input_tokens":0},"output_tokens":13}}`,
+			wantTampered: []string{"ephemeral_5m_input_tokens"}, wantUnreport: []string{"ephemeral_1h_input_tokens"}},
+		{name: "stream broken before message_delta", startUsage: `{"input_tokens":100,"output_tokens":1}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude-opus-4-8"}}
+			info.ChannelSetting.PassThroughBodyEnabled = true
+			state := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+			start := fmt.Sprintf(`{"type":"message_start","message":{"id":"msg_1","model":"claude-opus-4-8","usage":%s}}`, tc.startUsage)
+			require.Nil(t, HandleStreamResponseData(c, info, state, start))
+			if tc.delta != "" {
+				require.Nil(t, HandleStreamResponseData(c, info, state, tc.delta), "a usage difference must not fail the stream")
+				assert.Contains(t, w.Body.String(), "data: "+tc.delta+"\n", "the client must receive the upstream message_delta unchanged")
+			}
+
+			assert.Equal(t, tc.delta != "", info.StreamUsageCheck.Checked())
+			tampered, unreported := info.StreamUsageCheck.Anomalies()
+			assert.Equal(t, tc.wantTampered, tampered)
+			assert.Equal(t, tc.wantUnreport, unreported)
+
+			var stored struct {
+				AdminInfo struct {
+					UsageCheck *struct {
+						Tampered   []string `json:"tampered"`
+						Unreported []string `json:"unreported"`
+					} `json:"usage_check"`
+				} `json:"admin_info"`
+			}
+			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
+			require.NoError(t, common.UnmarshalJsonStr(other.JSONString(), &stored))
+			if tc.wantTampered == nil && tc.wantUnreport == nil {
+				assert.Nil(t, stored.AdminInfo.UsageCheck, "a clean stream must not be marked")
+				return
+			}
+			require.NotNil(t, stored.AdminInfo.UsageCheck)
+			assert.Equal(t, tc.wantTampered, stored.AdminInfo.UsageCheck.Tampered)
+			assert.Equal(t, tc.wantUnreport, stored.AdminInfo.UsageCheck.Unreported)
+		})
+	}
 }
