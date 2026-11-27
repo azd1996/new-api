@@ -231,27 +231,35 @@ func LLMChat(ctx context.Context, userID int, req LLMChatRequest) (result *LLMCh
 	defer cancel()
 
 	recorder := httptest.NewRecorder()
-	inner, _ := gin.CreateTestContext(recorder)
 	request := httptest.NewRequest(http.MethodPost, "/pg/chat/completions", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request = request.WithContext(ctx)
-	inner.Request = request
 
 	userCache, err := model.GetUserCache(userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load user %d: %w", userID, err)
 	}
-	userCache.WriteContext(inner)
-	common.SetContextKey(inner, constant.ContextKeyUsingGroup, setting.Group)
-
 	tempToken := &model.Token{
 		UserId: userID,
 		Name:   "ai-assistant",
 		Group:  setting.Group,
 	}
-	if err := middleware.SetupContextForToken(inner, tempToken); err != nil {
-		return nil, fmt.Errorf("failed to set up AI assistant context: %w", err)
-	}
+	// Run a real Gin handler chain so Distribute's c.Next() invokes Relay
+	// with the selected channel and original model already initialized.
+	engine := gin.New()
+	engine.POST("/pg/chat/completions", func(inner *gin.Context) {
+		defer common.CleanupBodyStorage(inner)
+		userCache.WriteContext(inner)
+		common.SetContextKey(inner, constant.ContextKeyUsingGroup, setting.Group)
+		if setupErr := middleware.SetupContextForToken(inner, tempToken); setupErr != nil {
+			err = fmt.Errorf("failed to set up AI assistant context: %w", setupErr)
+			inner.Abort()
+			return
+		}
+		inner.Next()
+	}, middleware.Distribute(), func(inner *gin.Context) {
+		Relay(inner, types.RelayFormatOpenAI)
+	})
 
 	func() {
 		defer func() {
@@ -259,7 +267,7 @@ func LLMChat(ctx context.Context, userID int, req LLMChatRequest) (result *LLMCh
 				err = fmt.Errorf("AI assistant relay panic: %v", recovered)
 			}
 		}()
-		Relay(inner, types.RelayFormatOpenAI)
+		engine.ServeHTTP(recorder, request)
 	}()
 	if err != nil {
 		return nil, err

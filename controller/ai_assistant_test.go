@@ -2,12 +2,19 @@ package controller
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,6 +26,104 @@ func TestLLMChatDisabled(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not enabled")
+}
+
+func TestLLMChatDistribute(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	db := modelManagementDB(t, "sqlite", "")
+	cfg := config.GlobalConfig.Get("ai_assistant_setting").(*operation_setting.AIAssistantSetting)
+	previousCfg := *cfg
+	previousGroupRatio := ratio_setting.GroupRatio2JSONString()
+	previousBatch, previousLogs := common.BatchUpdateEnabled, common.LogConsumeEnabled
+	previousErrors, previousCount := constant.ErrorLogEnabled, constant.CountToken
+	previousSelfUse, previousUnset := operation_setting.SelfUseModeEnabled, operation_setting.AllowUnsetModelRatio
+	t.Cleanup(func() {
+		*cfg = previousCfg
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousGroupRatio))
+		common.BatchUpdateEnabled, common.LogConsumeEnabled = previousBatch, previousLogs
+		constant.ErrorLogEnabled, constant.CountToken = previousErrors, previousCount
+		operation_setting.SelfUseModeEnabled, operation_setting.AllowUnsetModelRatio = previousSelfUse, previousUnset
+	})
+	*cfg = operation_setting.AIAssistantSetting{
+		Enabled: true, Group: "ai-assistant", DefaultModel: "assistant-priced-test",
+		TimeoutSeconds: 5, MaxTokens: 16, Temperature: 0.5,
+	}
+	common.BatchUpdateEnabled, common.LogConsumeEnabled = false, false
+	constant.ErrorLogEnabled, constant.CountToken = false, false
+	operation_setting.SelfUseModeEnabled, operation_setting.AllowUnsetModelRatio = false, false
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"ai-assistant":1}`))
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"assistant-priced-test":1}`))
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(`{"assistant-priced-test":1}`))
+	user := model.User{
+		Username: "assistant-test", Status: common.UserStatusEnabled, Role: common.RoleAdminUser,
+		Group: "default", Quota: 1000000, Setting: `{"billing_preference":"wallet_only"}`,
+	}
+	require.NoError(t, db.Create(&user).Error)
+	type attempt struct {
+		path string
+		body map[string]any
+	}
+	attempts := make(chan attempt, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if !assert.NoError(t, common.DecodeJson(r.Body, &body)) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		attempts <- attempt{path: r.URL.Path, body: body}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"assistant-success","object":"chat.completion","model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
+	}))
+	t.Cleanup(upstream.Close)
+	channel := model.Channel{
+		Name: "assistant-mock", Type: constant.ChannelTypeOpenAI, Key: "test-only",
+		Status: common.ChannelStatusEnabled, Models: "assistant-priced-test,assistant-unpriced-test",
+		Group: "ai-assistant", BaseURL: common.GetPointer(upstream.URL), AutoBan: common.GetPointer(0),
+		ModelMapping: common.GetPointer(`{"assistant-priced-test":"upstream-model"}`),
+	}
+	require.NoError(t, db.Create(&channel).Error)
+	require.NoError(t, channel.AddAbilities(db))
+
+	t.Run("routes the default model through the assistant group", func(t *testing.T) {
+		result, err := LLMChat(context.Background(), user.Id, LLMChatRequest{
+			Messages: []LLMChatMessage{{Role: "user", Content: "hello"}},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.Equal(t, "ok", result.Content)
+		assert.Equal(t, "stop", result.FinishReason)
+		assert.Equal(t, 3, result.PromptTokens)
+		assert.Equal(t, 2, result.CompletionTokens)
+		assert.Equal(t, 5, result.TotalTokens)
+		require.Len(t, attempts, 1)
+		sent := <-attempts
+		assert.Equal(t, "/v1/chat/completions", sent.path)
+		assert.Equal(t, "upstream-model", sent.body["model"])
+		assert.Equal(t, false, sent.body["stream"])
+		var updated model.User
+		require.NoError(t, db.First(&updated, user.Id).Error)
+		assert.Equal(t, user.Quota-5, updated.Quota, "internal calls retain wallet billing")
+	})
+	t.Run("rejects an unpriced model before calling upstream", func(t *testing.T) {
+		result, err := LLMChat(context.Background(), user.Id, LLMChatRequest{
+			Model: "assistant-unpriced-test", Messages: []LLMChatMessage{{Role: "user", Content: "hello"}},
+		})
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "Model assistant-unpriced-test price not configured")
+		assert.Empty(t, attempts)
+	})
+	t.Run("returns distribution errors without invoking Relay", func(t *testing.T) {
+		result, err := LLMChat(context.Background(), user.Id, LLMChatRequest{
+			Model: "assistant-missing-test", Messages: []LLMChatMessage{{Role: "user", Content: "hello"}},
+		})
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "AI assistant request failed")
+		assert.NotContains(t, err.Error(), "price not configured")
+		assert.NotContains(t, err.Error(), "panic")
+		assert.Empty(t, attempts)
+	})
 }
 
 func TestNormalizeLLMChatRequest(t *testing.T) {
