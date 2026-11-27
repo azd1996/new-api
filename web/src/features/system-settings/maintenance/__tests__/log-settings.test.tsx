@@ -113,9 +113,25 @@ test('the page shows the four log modules in order, each with its own controls',
   ).toBeVisible()
 })
 
-test('confirming a history cleanup starts the task and shows its progress in that module', async () => {
+test('history cleanup is disabled and clicking it cannot start a task', async () => {
   const user = userEvent.setup()
-  vi.spyOn(api, 'post').mockResolvedValue({
+  const post = vi.spyOn(api, 'post')
+  await renderSettings()
+  const cleanup = screen.getByRole('group', { name: 'Clean history logs' })
+  const button = within(cleanup).getByRole('button', { name: 'Clean logs' })
+
+  expect(button).toBeDisabled()
+  await user.click(button)
+  fireEvent.click(button)
+
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  expect(post).not.toHaveBeenCalled()
+})
+
+test('an existing history cleanup still shows its progress without allowing another task', async () => {
+  const user = userEvent.setup()
+  const post = vi.spyOn(api, 'post')
+  vi.mocked(api.get).mockResolvedValue({
     data: {
       success: true,
       data: {
@@ -128,26 +144,14 @@ test('confirming a history cleanup starts the task and shows its progress in tha
   await renderSettings()
   const cleanup = screen.getByRole('group', { name: 'Clean history logs' })
 
-  await user.click(within(cleanup).getByRole('button', { name: 'Clean logs' }))
-  await user.click(
-    within(await screen.findByRole('alertdialog')).getByRole('button', {
-      name: 'Delete logs',
-    })
-  )
-
-  await waitFor(() =>
-    expect(api.post).toHaveBeenCalledWith(
-      '/api/system-task/log-cleanup',
-      null,
-      { params: { target_timestamp: expect.any(Number) } }
-    )
-  )
   expect(
     await within(cleanup).findByText('10 of 40 log entries processed.')
   ).toBeVisible()
   expect(
     within(cleanup).getByRole('button', { name: 'Cleaning...' })
   ).toBeDisabled()
+  await user.click(within(cleanup).getByRole('button', { name: 'Cleaning...' }))
+  expect(post).not.toHaveBeenCalled()
 })
 
 test('saving sends only the log export settings that changed', async () => {
