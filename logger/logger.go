@@ -117,9 +117,10 @@ func LogDebug(ctx context.Context, msg string, args ...any) {
 
 // DebugActive reports whether verbose debug logging should fire for ctx. The
 // global DebugEnabled switch forces it on for all traffic; otherwise logging is
-// scoped to the api-key (token name) + client-requested model rules configured
-// in debug_scope_setting. Callers without a request context (nil or non-gin
-// contexts, e.g. background tasks) only honor the global switch.
+// scoped to the actual routing group + client-requested model rules configured
+// in debug_scope_setting. Auto routing uses the current attempt's concrete
+// group, so cross-group retries are evaluated independently. Contexts without
+// routing metadata (e.g. background tasks) only honor the global switch.
 func DebugActive(ctx context.Context) bool {
 	if common.DebugEnabled {
 		return true
@@ -127,9 +128,15 @@ func DebugActive(ctx context.Context) bool {
 	if ctx == nil {
 		return false
 	}
-	tokenName, _ := ctx.Value("token_name").(string)
+	group, _ := ctx.Value(string(constant.ContextKeyUsingGroup)).(string)
+	if group == "auto" {
+		group, _ = ctx.Value(string(constant.ContextKeyAutoGroup)).(string)
+		if group == "auto" {
+			return false
+		}
+	}
 	model, _ := ctx.Value(string(constant.ContextKeyOriginalModel)).(string)
-	return operation_setting.DebugScopeMatches(tokenName, model)
+	return operation_setting.DebugScopeMatches(group, model)
 }
 
 func logHelper(ctx context.Context, level string, msg string) {

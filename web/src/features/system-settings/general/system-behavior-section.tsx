@@ -211,7 +211,9 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
     const stableBaseSerialized = JSON.stringify(stableBaseRules)
     if (
       stableBaseSerialized !==
-      JSON.stringify(props.defaultValues['stable_base_breakpoint_setting.rules'])
+      JSON.stringify(
+        props.defaultValues['stable_base_breakpoint_setting.rules']
+      )
     ) {
       updates.push({
         key: 'stable_base_breakpoint_setting.rules',
@@ -219,9 +221,7 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
       })
     }
 
-    const fallbackBreakpointSerialized = JSON.stringify(
-      fallbackBreakpointRules
-    )
+    const fallbackBreakpointSerialized = JSON.stringify(fallbackBreakpointRules)
     if (
       fallbackBreakpointSerialized !==
       JSON.stringify(
@@ -260,9 +260,7 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
       })
     }
 
-    const volatileTailPatternsSerialized = JSON.stringify(
-      volatileTailPatterns
-    )
+    const volatileTailPatternsSerialized = JSON.stringify(volatileTailPatterns)
     if (
       volatileTailPatternsSerialized !==
       JSON.stringify(
@@ -446,9 +444,9 @@ export function SystemBehaviorSection(props: SystemBehaviorSectionProps) {
             <Separator />
 
             <DebugScopeRulesField
-              label={t('Scoped Debug Logging (API Key + Model)')}
+              label={t('Scoped Debug Logging (Group + Model)')}
               description={t(
-                'Log full request/response bodies only for the listed API key (token name) + model pairs, even when global Debug Mode is off. Both fields are required per rule; add multiple rows to cover more scopes. Leave empty to disable scoped debug logging.'
+                'Log full request/response bodies for all API keys in the matching routing group + client model pairs, even when global Debug Mode is off. Auto routing matches the concrete group on each attempt. Both fields are required and support exact matching or a trailing * for prefixes. Leave empty to disable scoped debug logging. Logs may contain sensitive data.'
               )}
               value={debugScopeRules}
               onChange={setDebugScopeRules}

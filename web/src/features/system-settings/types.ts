@@ -439,7 +439,7 @@ export type ClientDisconnectRule = {
 }
 
 export type DebugScopeRule = {
-  token_name: string
+  group: string
   model: string
 }
 

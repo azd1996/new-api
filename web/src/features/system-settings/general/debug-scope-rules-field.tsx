@@ -20,6 +20,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,8 +29,8 @@ import type { DebugScopeRule } from '../types'
 
 function toRules(rows: DebugScopeRule[]): DebugScopeRule[] {
   return rows.map((row) => ({
-    token_name: row.token_name.trim(),
-    model: row.model.trim(),
+    group: (row.group ?? '').trim(),
+    model: (row.model ?? '').trim(),
   }))
 }
 
@@ -43,6 +44,9 @@ type DebugScopeRulesFieldProps = {
 export function DebugScopeRulesField(props: DebugScopeRulesFieldProps) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<DebugScopeRule[]>(() => [...props.value])
+  const hasLegacyRules = props.value.some(
+    (rule) => 'token_name' in rule && !rule.group
+  )
   // Tracks the serialized rules we last emitted so an external value change
   // (save/reset) resyncs the rows, while echoes of our own onChange do not.
   const lastEmittedRef = useRef(JSON.stringify(props.value))
@@ -71,6 +75,15 @@ export function DebugScopeRulesField(props: DebugScopeRulesFieldProps) {
         <Label className='text-sm font-medium'>{props.label}</Label>
         <p className='text-muted-foreground text-xs'>{props.description}</p>
       </div>
+      {hasLegacyRules && (
+        <Alert>
+          <AlertDescription>
+            {t(
+              'Legacy API key debug rules are disabled. Enter a routing group for each rule and save to enable group-scoped logging.'
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
       {rows.length === 0 ? (
         <p className='text-muted-foreground text-xs'>{t('No rules yet')}</p>
       ) : (
@@ -82,16 +95,18 @@ export function DebugScopeRulesField(props: DebugScopeRulesFieldProps) {
             <div key={index} className='flex items-start gap-2'>
               <Input
                 className='min-w-0 flex-1'
-                placeholder={t('API Key name (token name)')}
-                value={row.token_name}
+                placeholder={t('Group name or prefix (e.g. team-*)')}
+                aria-label={t('Group name or prefix (e.g. team-*)')}
+                value={row.group ?? ''}
                 onChange={(event) =>
-                  updateRow(index, { token_name: event.target.value })
+                  updateRow(index, { group: event.target.value })
                 }
               />
               <Input
                 className='min-w-0 flex-1'
                 placeholder={t('Model name or prefix (e.g. gpt-4o*)')}
-                value={row.model}
+                aria-label={t('Model name or prefix (e.g. gpt-4o*)')}
+                value={row.model ?? ''}
                 onChange={(event) =>
                   updateRow(index, { model: event.target.value })
                 }
@@ -114,7 +129,7 @@ export function DebugScopeRulesField(props: DebugScopeRulesFieldProps) {
         type='button'
         variant='outline'
         size='sm'
-        onClick={() => commit([...rows, { token_name: '', model: '' }])}
+        onClick={() => commit([...rows, { group: '', model: '' }])}
       >
         <Plus className='mr-1 h-3 w-3' />
         {t('Add Rule')}
