@@ -55,6 +55,7 @@ export interface SessionIdentityTestResult {
   session_id: string
   raw_value?: string
   source: string
+  reason?: string
   error?: string
 }
 

@@ -150,6 +150,8 @@ type SessionIdentityResolution struct {
 	// to a short preview. It is empty for legacy tiers to avoid leaking the
 	// prompt.
 	RawValue string `json:"raw_value,omitempty"`
+	// Reason explains why no session id was produced during a dry run.
+	Reason string `json:"reason,omitempty"`
 }
 
 var sessionIdentityRegexCache sync.Map // map[string]*regexp.Regexp

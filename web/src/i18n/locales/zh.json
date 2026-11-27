@@ -7097,7 +7097,6 @@
     "Time-sliced cache (Claude)": "分时缓存（Claude）",
     "Time:": "时间：",
     "Timeline": "时间线",
-    "Timeout (seconds)": "超时时间（秒）",
     "times": "次",
     "Timezone": "时区",
     "Timing": "耗时",
@@ -8117,7 +8116,6 @@
     "Invalid header lines (expected \"Name: value\")": "存在不合法的请求头行（应为「名称: 值」）：{{lines}}",
     "Copy result": "复制结果",
     "Changes": "变更",
-    "Result": "结果",
     "added": "新增",
     "removed": "删除",
     "changed": "修改",
@@ -8148,6 +8146,12 @@
     "Link": "跳转链接",
     "Mention user IDs": "@ 用户 ID",
     "Add balance alert rule": "添加余额提醒规则",
-    "Enter a threshold above zero": "请输入大于 0 的阈值"
+    "Enter a threshold above zero": "请输入大于 0 的阈值",
+    "Configured session identity sources returned no value": "配置的会话身份来源没有提取到值",
+    "No session identity or fallback context was provided": "没有提供会话身份或可用的兜底上下文",
+    "No session ID resolved": "未解析到会话 ID",
+    "No source matched and fallback is disabled": "没有来源匹配，且已禁用兜底",
+    "Request model does not match the configured model prefixes": "请求模型与配置的模型前缀不匹配",
+    "Session ID could not be resolved": "无法解析会话 ID"
   }
 }

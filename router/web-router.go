@@ -36,7 +36,10 @@ func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.Han
 		middleware.Cache(),
 		middleware.ServeFrontendFiles(frontendFS),
 		func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
+			if strings.HasPrefix(c.Request.RequestURI, "/v1") ||
+				strings.HasPrefix(c.Request.RequestURI, "/api") ||
+				strings.HasPrefix(c.Request.RequestURI, "/assets") ||
+				strings.HasPrefix(c.Request.RequestURI, "/static") {
 				controller.RelayNotFound(c)
 				return
 			}

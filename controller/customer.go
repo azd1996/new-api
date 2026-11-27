@@ -216,6 +216,16 @@ func TestCustomerSessionIdentity(c *gin.Context) {
 		result.RawValue = resolution.RawValue
 		result.Source = resolution.Source
 		result.OK = resolution.Source != "" && resolution.Source != "none"
+		if !result.OK {
+			result.Error = resolution.Reason
+			if result.Error == "" {
+				if modelName := gjson.Get(item.Body, "model").String(); config != nil && !config.Matches(modelName) {
+					result.Error = "model_not_matched"
+				} else {
+					result.Error = "custom_source_empty"
+				}
+			}
+		}
 		if result.OK {
 			sourcesUsed[resolution.Source]++
 			if resolution.SessionID != "" && !slices.Contains(sessionIDs, resolution.SessionID) {

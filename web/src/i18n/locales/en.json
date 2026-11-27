@@ -7097,7 +7097,6 @@
     "Time-sliced cache (Claude)": "Time-sliced cache (Claude)",
     "Time:": "Time:",
     "Timeline": "Timeline",
-    "Timeout (seconds)": "Timeout (seconds)",
     "times": "times",
     "Timezone": "Timezone",
     "Timing": "Timing",
@@ -8117,7 +8116,6 @@
     "Invalid header lines (expected \"Name: value\")": "Invalid header lines (expected \"Name: value\"): {{lines}}",
     "Copy result": "Copy result",
     "Changes": "Changes",
-    "Result": "Result",
     "added": "added",
     "removed": "removed",
     "changed": "changed",
@@ -8148,6 +8146,12 @@
     "Link": "Link",
     "Mention user IDs": "Mention user IDs",
     "Add balance alert rule": "Add balance alert rule",
-    "Enter a threshold above zero": "Enter a threshold above zero"
+    "Enter a threshold above zero": "Enter a threshold above zero",
+    "Configured session identity sources returned no value": "Configured session identity sources returned no value",
+    "No session identity or fallback context was provided": "No session identity or fallback context was provided",
+    "No session ID resolved": "No session ID resolved",
+    "No source matched and fallback is disabled": "No source matched and fallback is disabled",
+    "Request model does not match the configured model prefixes": "Request model does not match the configured model prefixes",
+    "Session ID could not be resolved": "Session ID could not be resolved"
   }
 }

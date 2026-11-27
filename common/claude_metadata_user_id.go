@@ -104,10 +104,10 @@ func ResolveSessionIdentity(jsonData []byte, headerSessionID, clientIP, userAgen
 	if conversation == "" && cfg != nil && cfg.Matches(model) && cfg.OnEmpty == SessionIdentityOnEmptyNone {
 		// on_empty=none must not synthesize an identity from the model and
 		// system prefix alone.
-		return SessionIdentityResolution{Source: "none"}
+		return SessionIdentityResolution{Source: "none", Reason: "on_empty_none"}
 	}
 	if model == "" && systemPrefix == "" && conversation == "" {
-		return SessionIdentityResolution{Source: "none"}
+		return SessionIdentityResolution{Source: "none", Reason: "no_fallback_context"}
 	}
 	seed := strings.Join([]string{model, systemPrefix, conversation}, "\x1f")
 	return SessionIdentityResolution{

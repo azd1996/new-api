@@ -60,6 +60,32 @@ export function CustomerSessionIdentityTest(
   })
 
   const canTest = props.config !== null || !!props.customerId
+  const getResultError = (error?: string) => {
+    switch (error) {
+      case 'model_not_matched':
+        return t('Request model does not match the configured model prefixes')
+      case 'on_empty_none':
+        return t('No source matched and fallback is disabled')
+      case 'no_fallback_context':
+        return t('No session identity or fallback context was provided')
+      case 'custom_source_empty':
+        return t('Configured session identity sources returned no value')
+      default:
+        return t('Session ID could not be resolved')
+    }
+  }
+  const isSingleUnresolvedRequest =
+    result?.summary.count === 1 && result.summary.ok_count === 0
+  let resultBadgeLabel = t('Unstable ({{count}} session IDs)', {
+    count: result?.summary.distinct_session_ids ?? 0,
+  })
+  let resultBadgeVariant: 'default' | 'warning' = 'warning'
+  if (isSingleUnresolvedRequest) {
+    resultBadgeLabel = t('No session ID resolved')
+  } else if (result?.summary.stable) {
+    resultBadgeLabel = t('Stable')
+    resultBadgeVariant = 'default'
+  }
 
   const handleTest = () => {
     const bodies = splitJsonBodies(requestsText)
@@ -73,14 +99,24 @@ export function CustomerSessionIdentityTest(
       // traffic, not the dry run.
       testMutation.mutate({
         config: { ...props.config, enabled: true },
-        items: bodies.map((body) => ({ body })),
+        items: bodies.map((body) => ({
+          body,
+          api_key: 'test-session-identity-api-key',
+          client_ip: '127.0.0.1',
+          user_agent: 'session-identity-test',
+        })),
         expect_same: expectSame,
       })
       return
     }
     testMutation.mutate({
       customer_id: props.customerId,
-      items: bodies.map((body) => ({ body })),
+      items: bodies.map((body) => ({
+        body,
+        api_key: 'test-session-identity-api-key',
+        client_ip: '127.0.0.1',
+        user_agent: 'session-identity-test',
+      })),
       expect_same: expectSame,
     })
   }
@@ -140,13 +176,7 @@ export function CustomerSessionIdentityTest(
           {result && (
             <div className='space-y-2'>
               <div className='flex flex-wrap items-center gap-2'>
-                <Badge variant={result.summary.stable ? 'default' : 'warning'}>
-                  {result.summary.stable
-                    ? t('Stable')
-                    : t('Unstable ({{count}} session IDs)', {
-                        count: result.summary.distinct_session_ids,
-                      })}
-                </Badge>
+                <Badge variant={resultBadgeVariant}>{resultBadgeLabel}</Badge>
                 <span className='text-muted-foreground text-xs'>
                   {t('{{resolved}} of {{total}} requests resolved', {
                     resolved: result.summary.ok_count,
@@ -175,10 +205,15 @@ export function CustomerSessionIdentityTest(
                       >
                         {item.ok
                           ? item.session_id || t('(client-managed)')
-                          : item.error}
+                          : getResultError(item.error)}
+                        {item.raw_value && (
+                          <span className='text-muted-foreground ml-2 font-sans'>
+                            ({item.raw_value})
+                          </span>
+                        )}
                       </span>
                       <span className='text-muted-foreground truncate'>
-                        {item.source}
+                        {item.source || '—'}
                       </span>
                     </div>
                   ))}
