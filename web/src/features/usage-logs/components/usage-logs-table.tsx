@@ -61,9 +61,11 @@ const logTypeRowTint: Record<number, string> = {
   [LOG_TYPE_ENUM.REFUND]: 'bg-blue-50/30 dark:bg-blue-950/15',
 }
 
-// Warning tint for logs where a quota conversion saturated (admin-only marker).
-// Takes precedence over the per-type tint since it flags a billing anomaly.
-const quotaSaturationRowTint = 'bg-amber-50/60 dark:bg-amber-950/25'
+// Warning tint for logs carrying an admin-only anomaly marker: a quota
+// conversion that saturated, or a Claude stream whose input usage changed
+// between message_start and message_delta. Takes precedence over the per-type
+// tint since it flags a billing anomaly.
+const adminAnomalyRowTint = 'bg-amber-50/60 dark:bg-amber-950/25'
 
 function getColumnVisibilityStorageKey(
   logCategory: LogCategory,
@@ -292,8 +294,11 @@ export function UsageLogsTable({
           const other = parseLogOther(
             ((row.original as Record<string, unknown>).other as string) ?? ''
           )
-          if (other?.admin_info?.quota_saturation) {
-            tintClass = quotaSaturationRowTint
+          if (
+            other?.admin_info?.quota_saturation ||
+            other?.admin_info?.usage_check
+          ) {
+            tintClass = adminAnomalyRowTint
           }
         }
 

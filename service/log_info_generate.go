@@ -156,6 +156,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 
 	AppendRelayLogAdminInfo(ctx, relayInfo, other)
 	AppendResponseModelLogInfo(relayInfo, other)
+	appendStreamUsageCheck(relayInfo, other)
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
 	appendFinalRequestFormat(relayInfo, other)
@@ -177,6 +178,26 @@ func AppendResponseModelLogInfo(relayInfo *relaycommon.RelayInfo, other *model.L
 		return
 	}
 	other.SetPublic("response_model", *observation)
+}
+
+// appendStreamUsageCheck marks a consume log whose Claude stream reported
+// different input usage in message_start and message_delta. The marker sits
+// under admin_info, so only administrators see it, and it never changes
+// billing: it records the two reports and the fields that disagree.
+func appendStreamUsageCheck(relayInfo *relaycommon.RelayInfo, other *model.LogOther) {
+	if relayInfo == nil || other == nil {
+		return
+	}
+	tampered, unreported := relayInfo.StreamUsageCheck.Anomalies()
+	if len(tampered) == 0 && len(unreported) == 0 {
+		return
+	}
+	other.SetAdmin("usage_check", map[string]any{
+		"start":      relayInfo.StreamUsageCheck.Start,
+		"delta":      relayInfo.StreamUsageCheck.Delta,
+		"tampered":   tampered,
+		"unreported": unreported,
+	})
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other *model.LogOther) {

@@ -87,3 +87,38 @@ func TestRecordDrift(t *testing.T) {
 	assert.Equal(t, float64(2), counter("newapi_drift_requests_total"))
 	assert.Equal(t, float64(1), counter("newapi_drift_mismatch_total"))
 }
+
+func TestRecordUsageCheck(t *testing.T) {
+	Init()
+
+	// Four compared streams on one model/group/channel: clean, tampered,
+	// unreported, and one that is both.
+	RecordUsageCheck("claude-opus-4-8", "default", "9", false, false)
+	RecordUsageCheck("claude-opus-4-8", "default", "9", true, false)
+	RecordUsageCheck("claude-opus-4-8", "default", "9", false, true)
+	RecordUsageCheck("claude-opus-4-8", "default", "9", true, true)
+
+	counter := func(name string) float64 {
+		families, err := registry.Gather()
+		require.Nil(t, err)
+		for _, mf := range families {
+			if mf.GetName() != name {
+				continue
+			}
+			require.Len(t, mf.Metric, 1)
+			labels := map[string]string{}
+			for _, lp := range mf.Metric[0].GetLabel() {
+				labels[lp.GetName()] = lp.GetValue()
+			}
+			assert.Equal(t, "claude-opus-4-8", labels["model"])
+			assert.Equal(t, "default", labels["group"])
+			assert.Equal(t, "9", labels["channel"])
+			return mf.Metric[0].GetCounter().GetValue()
+		}
+		return 0
+	}
+
+	assert.Equal(t, float64(4), counter("newapi_usage_check_total"))
+	assert.Equal(t, float64(2), counter("newapi_usage_tampered_total"))
+	assert.Equal(t, float64(2), counter("newapi_usage_unreported_total"))
+}

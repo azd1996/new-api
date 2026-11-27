@@ -40,6 +40,17 @@ var (
 	driftRequests *prometheus.CounterVec
 	driftMismatch *prometheus.CounterVec
 
+	// Claude stream usage check counters over settled relay requests. requests
+	// is the denominator (streams that delivered both message_start and
+	// message_delta). tampered counts streams whose message_delta input usage
+	// differs from message_start; unreported counts streams whose message_delta
+	// left out or zeroed input usage that message_start reported. One request
+	// can count in both. Labelled by the client-requested model, group and
+	// channel.
+	usageCheckRequests   *prometheus.CounterVec
+	usageCheckTampered   *prometheus.CounterVec
+	usageCheckUnreported *prometheus.CounterVec
+
 	// errorHighCardLabels gates the high-cardinality error labels (model and
 	// customer). When false their values are blanked so a large model/customer
 	// space cannot explode the error metric's series count.
@@ -154,10 +165,23 @@ func Init() {
 			Name: "newapi_drift_mismatch_total",
 			Help: "Settled relay requests whose upstream returned model matched neither the requested nor upstream model (numerator), by client-requested model, group and channel.",
 		}, []string{"model", "group", "channel"})
+		usageCheckRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "newapi_usage_check_total",
+			Help: "Settled Claude stream requests whose message_start and message_delta input usage were compared (denominator), by client-requested model, group and channel.",
+		}, []string{"model", "group", "channel"})
+		usageCheckTampered = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "newapi_usage_tampered_total",
+			Help: "Settled Claude stream requests whose message_delta reported input usage different from message_start, by client-requested model, group and channel.",
+		}, []string{"model", "group", "channel"})
+		usageCheckUnreported = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "newapi_usage_unreported_total",
+			Help: "Settled Claude stream requests whose message_delta left out or zeroed input usage that message_start reported, by client-requested model, group and channel.",
+		}, []string{"model", "group", "channel"})
 		registry.MustRegister(httpRequests, httpDuration, relayRequests,
 			promptTokens, completionTokens, relayDuration, relayTtft, relayTtftUpstreamDelta, relayDurationUpstreamDelta,
 			proxyTtft, proxyTokenSpeed, proxyConnect, quotaUsed, quotaPerUnit, errorsTotal,
-			channelStatQuota, customerStatQuota, profitQuota, driftRequests, driftMismatch)
+			channelStatQuota, customerStatQuota, profitQuota, driftRequests, driftMismatch,
+			usageCheckRequests, usageCheckTampered, usageCheckUnreported)
 	})
 }
 
@@ -313,6 +337,24 @@ func RecordDrift(model, group, channel string, mismatch bool) {
 	driftRequests.WithLabelValues(model, group, channel).Inc()
 	if mismatch {
 		driftMismatch.WithLabelValues(model, group, channel).Inc()
+	}
+}
+
+// RecordUsageCheck records one settled Claude stream whose message_start and
+// message_delta input usage were compared. requests is always incremented;
+// tampered and unreported are incremented when the comparison found that kind
+// of difference. Call it only for streams that delivered both events. No-op
+// when metrics are disabled.
+func RecordUsageCheck(model, group, channel string, tampered, unreported bool) {
+	if registry == nil {
+		return
+	}
+	usageCheckRequests.WithLabelValues(model, group, channel).Inc()
+	if tampered {
+		usageCheckTampered.WithLabelValues(model, group, channel).Inc()
+	}
+	if unreported {
+		usageCheckUnreported.WithLabelValues(model, group, channel).Inc()
 	}
 }
 
